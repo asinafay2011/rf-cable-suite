@@ -794,20 +794,39 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
     setMessages(newMessages);
     setPendingImage(null);
     setLoading(true);
+    const freshUser = { role: "user", content: userContent };
+    const callApi = async (messagesPayload) => {
+      const res = await fetch("/api/claude", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, system: SYSTEM_PROMPT, messages: messagesPayload, tools: TOOLS }),
+      });
+      if (!res.ok) {
+        let detail = "";
+        try { const body = await res.json(); detail = body?.error?.message || body?.error || JSON.stringify(body); }
+        catch { try { detail = await res.text(); } catch {} }
+        const err = new Error(`API error ${res.status}: ${detail}`.trim());
+        err.status = res.status;
+        err.payload = messagesPayload;
+        throw err;
+      }
+      return res.json();
+    };
     try {
       let api = sanitizeHistory(newMessages);
+      let recoveredFromBadHistory = false;
       for (let i = 0; i < 10; i++) {
-        const res = await fetch("/api/claude", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, system: SYSTEM_PROMPT, messages: api, tools: TOOLS }),
-        });
-        if (!res.ok) {
-          let detail = "";
-          try { const body = await res.json(); detail = body?.error?.message || body?.error || JSON.stringify(body); }
-          catch { try { detail = await res.text(); } catch {} }
-          throw new Error(`API error ${res.status}: ${detail}`.trim());
+        let data;
+        try {
+          data = await callApi(api);
+        } catch (e) {
+          if (e.status === 400 && !recoveredFromBadHistory && i === 0) {
+            console.warn("[chat] 400 on first turn — retrying with cleared history:", e.message, e.payload);
+            recoveredFromBadHistory = true;
+            api = [freshUser];
+            setMessages([freshUser]);
+            data = await callApi(api);
+          } else { throw e; }
         }
-        const data = await res.json();
         api.push({ role: "assistant", content: data.content });
         setMessages(prev => [...prev.filter(m => m.role !== "assistant_pending"), { role: "assistant", content: data.content }]);
         if (data.stop_reason !== "tool_use") break;
@@ -815,7 +834,10 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
         api.push({ role: "user", content: results });
         setMessages(prev => [...prev, { role: "user", content: results }]);
       }
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      console.error("[chat] request failed:", e.message, e.payload);
+      setError(e.message);
+    }
     finally { setLoading(false); }
   };
 
