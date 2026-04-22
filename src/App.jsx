@@ -798,7 +798,7 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
     const callApi = async (messagesPayload) => {
       const res = await fetch("/api/claude", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-sonnet-4-7", max_tokens: 8000, system: SYSTEM_PROMPT, messages: messagesPayload, tools: TOOLS }),
+        body: JSON.stringify({ model: "claude-opus-4-7", max_tokens: 8000, system: SYSTEM_PROMPT, messages: messagesPayload, tools: TOOLS }),
       });
       if (!res.ok) {
         let detail = "";
