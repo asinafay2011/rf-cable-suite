@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, createContext, useContext } from "react";
+import * as THREE from "three";
 
 // ═══════════════════════════════════════════════════════════════
 // RF CABLE ENGINEERING SUITE · v2
@@ -1000,6 +1001,23 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity];
   const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity];
 
+  const [buildStep, setBuildStep] = useState(4);
+  const [selectedLayer, setSelectedLayer] = useState(null);
+  const [hoveredLayer, setHoveredLayer] = useState(null);
+
+  useEffect(() => {
+    if (expanded) { setBuildStep(0); setSelectedLayer(null); }
+  }, [expanded]);
+
+  useEffect(() => {
+    if (expanded && buildStep < 4) {
+      const t = setTimeout(() => setBuildStep(s => s + 1), 750);
+      return () => clearTimeout(t);
+    }
+  }, [buildStep, expanded]);
+
+  const replay = (e) => { e.stopPropagation(); setBuildStep(0); setSelectedLayer(null); };
+
   return (
     <div className="hover-card" style={{ ...S.cableCard, ...(expanded ? S.cableCardExpanded : {}) }}>
       <div onClick={onToggle} style={S.cableHead}>
@@ -1031,8 +1049,18 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
             <button onClick={onAsk} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>Ask Agent about this</button>
           </div>
           <div style={{ padding: "14px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 }}>
-            <div style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#a8a29e", marginBottom: 6, textTransform: "uppercase" }}>Cross-Section · Scaled to OD</div>
-            <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} cons={c.cons} />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: "#a8a29e", textTransform: "uppercase" }}>Cross-Section · Click layer to inspect</div>
+              <button onClick={replay} style={{ background: "rgba(217,119,6,0.15)", color: "#fbbf24", border: "1px solid #d97706", padding: "3px 10px", fontSize: 9, letterSpacing: 1, cursor: "pointer", borderRadius: 3, textTransform: "uppercase", fontWeight: 600 }}>↻ Replay build</button>
+            </div>
+            <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap", justifyContent: "center" }}>
+              <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} cons={c.cons} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} onLayerClick={setSelectedLayer} onLayerHover={setHoveredLayer} />
+              {selectedLayer && <LayerDetailPanel layer={selectedLayer} c={c} onClose={() => setSelectedLayer(null)} units={units} />}
+            </div>
+          </div>
+          <div style={{ padding: "6px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 }}>
+            <div style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#a8a29e", marginBottom: 6, textTransform: "uppercase" }}>3D Model · Stepped cutaway</div>
+            <Cable3D d={c.d} D={c.D} shield={c.shield} jacket={c.OD} />
           </div>
           <div style={S.detailsGrid}>
             <div>
@@ -1092,6 +1120,116 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
 // ═══════════════════════════════════════════════════════════════
 // SHARED COMPONENTS
 // ═══════════════════════════════════════════════════════════════
+const LAYER_INFO = {
+  conductor: {
+    function: "Carries the RF signal. Ohmic loss depends on conductivity and skin depth — at high freq, current flows only in the outer ~skin-depth of the wire.",
+    failure: "Oxidation (bare Cu in humid air), fatigue cracking at flex points, Sn-whisker growth under mechanical stress, galvanic corrosion at connectors.",
+    keyProp: "Conductivity (σ, S/m). Cu ≈ 5.96e7, Ag ≈ 6.30e7, Al ≈ 3.50e7.",
+  },
+  dielectric: {
+    function: "Separates conductor from shield. Its permittivity (εr) sets the characteristic impedance and velocity factor (VP = 1/√εr); loss tangent adds attenuation.",
+    failure: "Cold flow under long-term compression, UV degradation (if exposed), moisture ingress via foam open cells, heat-induced dimensional drift.",
+    keyProp: "Relative permittivity εr. Solid PE 2.30, Foam PE 1.45, PTFE 2.10, Air 1.00.",
+  },
+  shield: {
+    function: "Blocks external EMI from leaking in, and confines RF energy inside the cable. Coverage % (braid) and foil presence determine shielding effectiveness (dB).",
+    failure: "Braid fatigue at bend points, foil tears from repeated flex, corrosion of bare Cu braid, shield/jacket adhesion loss exposes shield.",
+    keyProp: "Coverage %. Single braid 85-97%, Double braid 99%, Foil+Braid >99% + low-f bond.",
+  },
+  jacket: {
+    function: "Protects inner layers from moisture, UV, abrasion, chemicals. Sets temperature range, flame rating, and outdoor lifespan.",
+    failure: "UV cracking (non-stabilized PE), chemical attack (PVC + hydrocarbons), cold-temperature brittleness, rodent damage (outdoor runs).",
+    keyProp: "Material + wall thickness. PVC: cheap, flexible, indoor. PE: UV, outdoor. FEP: high-temp. LSZH: indoor fire-safe.",
+  },
+};
+
+function LayerDetailPanel({ layer, c, onClose, units }) {
+  if (!layer) return null;
+  const info = LAYER_INFO[layer];
+  const dims = {
+    conductor: { label: "Inner conductor d", mm: c.d },
+    dielectric: { label: "Dielectric OD", mm: c.D },
+    shield: { label: "Shield OD", mm: c.shield },
+    jacket: { label: "Jacket OD", mm: c.OD },
+  }[layer];
+  const matColor = { conductor: "#fbbf24", dielectric: "#fde68a", shield: "#9ca3af", jacket: "#a8a29e" }[layer];
+  return (
+    <div style={{ flex: 1, minWidth: 240, padding: 14, background: "rgba(15,10,5,0.55)", border: `1px solid ${matColor}33`, borderRadius: 4, fontSize: 10.5, lineHeight: 1.55 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingBottom: 8, borderBottom: `1px solid ${matColor}22` }}>
+        <div style={{ color: matColor, fontSize: 10, letterSpacing: 2, fontWeight: 700, textTransform: "uppercase" }}>{layer}</div>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "#a8a29e", cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1 }}>✕</button>
+      </div>
+      <div style={{ color: "#e7e5e4", fontWeight: 600, marginBottom: 4 }}>{c.cons[layer]}</div>
+      <div style={{ color: "#d6cfc4", marginBottom: 10 }}>{dims.label}: {fmtLen(dims.mm, units)}</div>
+      <div style={{ color: "#a8a29e", fontSize: 9.5, letterSpacing: 1.5, marginTop: 8, marginBottom: 3, textTransform: "uppercase" }}>Function</div>
+      <div style={{ color: "#d6cfc4", marginBottom: 8 }}>{info.function}</div>
+      <div style={{ color: "#a8a29e", fontSize: 9.5, letterSpacing: 1.5, marginBottom: 3, textTransform: "uppercase" }}>Key property</div>
+      <div style={{ color: "#d6cfc4", marginBottom: 8 }}>{info.keyProp}</div>
+      <div style={{ color: "#a8a29e", fontSize: 9.5, letterSpacing: 1.5, marginBottom: 3, textTransform: "uppercase" }}>Failure modes</div>
+      <div style={{ color: "#d6cfc4" }}>{info.failure}</div>
+    </div>
+  );
+}
+
+function Cable3D({ d, D, shield, jacket }) {
+  const mountRef = useRef(null);
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return;
+    const w = 280, h = 240;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(32, w / h, 0.1, 100);
+    camera.position.set(8, 3.5, 12);
+    camera.lookAt(0, 0.5, 0);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(w, h);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    mount.appendChild(renderer.domElement);
+
+    const group = new THREE.Group();
+    scene.add(group);
+    group.rotation.z = Math.PI / 2;
+
+    const scale = 4 / (jacket / 2);
+    const baseL = 8;
+    const step = 0.7;
+    const disposables = [];
+
+    const addLayer = (radius, lenExtra, color, opacity = 1, metalness = 0.2, roughness = 0.55) => {
+      const len = baseL + lenExtra;
+      const g = new THREE.CylinderGeometry(radius * scale, radius * scale, len, 64, 1, false);
+      const m = new THREE.MeshStandardMaterial({ color, roughness, metalness, transparent: opacity < 1, opacity, side: THREE.FrontSide });
+      const mesh = new THREE.Mesh(g, m);
+      mesh.position.y = lenExtra / 2;
+      group.add(mesh);
+      disposables.push(g, m);
+      return mesh;
+    };
+
+    addLayer(jacket / 2, 0,        0x1a1410, 1, 0.05, 0.85);
+    addLayer(shield / 2, step,     0xa8a8a8, 1, 0.85, 0.35);
+    addLayer(D / 2,      step * 2, 0xfde68a, 0.4, 0, 0.4);
+    addLayer(d / 2,      step * 3, 0xd97706, 1, 0.92, 0.3);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+    const key = new THREE.DirectionalLight(0xffd89a, 1.3); key.position.set(6, 8, 8); scene.add(key);
+    const fill = new THREE.DirectionalLight(0x88aaff, 0.5); fill.position.set(-6, -4, 4); scene.add(fill);
+    const rim = new THREE.DirectionalLight(0xff8844, 0.4); rim.position.set(-3, 2, -6); scene.add(rim);
+
+    let raf = 0;
+    const animate = () => { group.rotation.x += 0.007; renderer.render(scene, camera); raf = requestAnimationFrame(animate); };
+    animate();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      disposables.forEach(d => d.dispose && d.dispose());
+      renderer.dispose();
+      if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
+    };
+  }, [d, D, shield, jacket]);
+  return <div ref={mountRef} style={{ width: 280, height: 240, margin: "0 auto" }} />;
+}
+
 function shortMat(s) {
   if (!s) return null;
   const before = s.split(",")[0].trim();
@@ -1118,8 +1256,26 @@ function getStrands(n, totalR) {
   return { strandR: r, positions };
 }
 
-function CrossSection({ d, D, shield, jacket, units, cons }) {
+function CrossSection({ d, D, shield, jacket, units, cons, buildStep = 4, selectedLayer, hoveredLayer, onLayerClick, onLayerHover }) {
   const size = 300, cx = size / 2, cy = size / 2, maxR = size * 0.26;
+  const interactive = !!onLayerClick;
+  const layerStyle = (key, step) => {
+    const visible = buildStep >= step;
+    const isHov = hoveredLayer === key;
+    const isSel = selectedLayer === key;
+    const dim = selectedLayer && selectedLayer !== key;
+    return {
+      opacity: visible ? (dim ? 0.35 : 1) : 0,
+      transition: "opacity 0.55s ease",
+      cursor: interactive ? "pointer" : "default",
+      filter: isHov || isSel ? "brightness(1.2) drop-shadow(0 0 4px currentColor)" : "none",
+    };
+  };
+  const handlers = (key) => interactive ? {
+    onClick: () => onLayerClick(key === selectedLayer ? null : key),
+    onMouseEnter: () => onLayerHover && onLayerHover(key),
+    onMouseLeave: () => onLayerHover && onLayerHover(null),
+  } : {};
   const scale = maxR / (jacket / 2);
   const r_in = (d / 2) * scale, r_dx = (D / 2) * scale, r_sh = (shield / 2) * scale, r_jk = (jacket / 2) * scale;
 
@@ -1172,12 +1328,12 @@ function CrossSection({ d, D, shield, jacket, units, cons }) {
         </pattern>
         <radialGradient id="jk-grad" cx="50%" cy="50%"><stop offset="70%" stopColor="#0a0705" /><stop offset="100%" stopColor="#1f1611" /></radialGradient>
       </defs>
-      <circle cx={cx} cy={cy} r={r_jk} fill="url(#jk-grad)" stroke="#2a1f15" strokeWidth="1" />
-      <circle cx={cx} cy={cy} r={r_sh} fill="url(#braid-p)" stroke="#6b7280" strokeWidth="0.4" />
-      <circle cx={cx} cy={cy} r={r_dx} fill="rgba(255,250,235,0.14)" stroke="rgba(217,119,6,0.4)" strokeWidth="0.5" />
+      <circle cx={cx} cy={cy} r={r_jk} fill="url(#jk-grad)" stroke={hoveredLayer === "jacket" || selectedLayer === "jacket" ? "#a8a29e" : "#2a1f15"} strokeWidth={hoveredLayer === "jacket" || selectedLayer === "jacket" ? 2 : 1} style={{ color: "#a8a29e", ...layerStyle("jacket", 4) }} {...handlers("jacket")} />
+      <circle cx={cx} cy={cy} r={r_sh} fill="url(#braid-p)" stroke={hoveredLayer === "shield" || selectedLayer === "shield" ? "#d1d5db" : "#6b7280"} strokeWidth={hoveredLayer === "shield" || selectedLayer === "shield" ? 1.5 : 0.4} style={{ color: "#9ca3af", ...layerStyle("shield", 3) }} {...handlers("shield")} />
+      <circle cx={cx} cy={cy} r={r_dx} fill="rgba(255,250,235,0.14)" stroke={hoveredLayer === "dielectric" || selectedLayer === "dielectric" ? "#fde68a" : "rgba(217,119,6,0.4)"} strokeWidth={hoveredLayer === "dielectric" || selectedLayer === "dielectric" ? 1.5 : 0.5} style={{ color: "#fde68a", ...layerStyle("dielectric", 2) }} {...handlers("dielectric")} />
 
       {strandData ? (
-        <g transform={`translate(${cx}, ${cy})`}>
+        <g transform={`translate(${cx}, ${cy})`} style={{ color: "#fbbf24", ...layerStyle("conductor", 1) }} {...handlers("conductor")}>
           <g>
             <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="40s" repeatCount="indefinite" />
             {strandData.positions.map(([x, y], i) => (
@@ -1186,7 +1342,7 @@ function CrossSection({ d, D, shield, jacket, units, cons }) {
           </g>
         </g>
       ) : (
-        <circle cx={cx} cy={cy} r={r_in} fill="url(#cu-grad)" />
+        <circle cx={cx} cy={cy} r={r_in} fill="url(#cu-grad)" stroke={hoveredLayer === "conductor" || selectedLayer === "conductor" ? "#fbbf24" : "none"} strokeWidth={hoveredLayer === "conductor" || selectedLayer === "conductor" ? 1.5 : 0} style={{ color: "#fbbf24", ...layerStyle("conductor", 1) }} {...handlers("conductor")} />
       )}
 
       {callouts.map(drawCallout)}
