@@ -668,15 +668,19 @@ function SettingsIcon() {
 // ═══════════════════════════════════════════════════════════════
 // ASK VIEW
 // ═══════════════════════════════════════════════════════════════
-// Drops any tool_use blocks from assistant messages that aren't followed by
-// a matching tool_result — protects against histories saved before tool_result
-// messages were persisted, which the API rejects with 400.
+// Guarantees a payload the Messages API will accept:
+//  - strips tool_use blocks that have no matching tool_result
+//  - strips orphan tool_result blocks
+//  - drops empty messages
+//  - merges consecutive same-role messages (API requires alternation)
+//  - ensures it starts with a user turn
 function sanitizeHistory(msgs) {
   if (!Array.isArray(msgs)) return [];
-  const out = [];
+  const pass1 = [];
   for (let i = 0; i < msgs.length; i++) {
     const m = msgs[i];
-    if (m?.role === "assistant" && Array.isArray(m.content)) {
+    if (!m || !m.role) continue;
+    if (m.role === "assistant" && Array.isArray(m.content)) {
       const toolUseIds = m.content.filter(b => b?.type === "tool_use").map(b => b.id);
       if (toolUseIds.length > 0) {
         const next = msgs[i + 1];
@@ -686,14 +690,37 @@ function sanitizeHistory(msgs) {
         const allMatched = toolUseIds.every(id => resultIds.includes(id));
         if (!allMatched) {
           const stripped = m.content.filter(b => b?.type !== "tool_use");
-          if (stripped.length > 0) out.push({ ...m, content: stripped });
+          if (stripped.length > 0) pass1.push({ role: "assistant", content: stripped });
           continue;
         }
       }
     }
-    out.push(m);
+    if (m.role === "user" && Array.isArray(m.content)) {
+      const prev = msgs[i - 1];
+      const prevToolUseIds = prev?.role === "assistant" && Array.isArray(prev.content)
+        ? prev.content.filter(b => b?.type === "tool_use").map(b => b.id)
+        : [];
+      const cleaned = m.content.filter(b => b?.type !== "tool_result" || prevToolUseIds.includes(b.tool_use_id));
+      if (cleaned.length === 0) continue;
+      pass1.push({ role: "user", content: cleaned });
+      continue;
+    }
+    if (Array.isArray(m.content) && m.content.length === 0) continue;
+    if (typeof m.content === "string" && m.content.trim() === "") continue;
+    pass1.push({ role: m.role, content: m.content });
   }
-  return out;
+  const merged = [];
+  for (const m of pass1) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.role === m.role) {
+      const toArr = c => Array.isArray(c) ? c : [{ type: "text", text: String(c) }];
+      prev.content = [...toArr(prev.content), ...toArr(m.content)];
+    } else {
+      merged.push({ role: m.role, content: m.content });
+    }
+  }
+  while (merged.length && merged[0].role !== "user") merged.shift();
+  return merged;
 }
 
 function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
@@ -768,13 +795,18 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
     setPendingImage(null);
     setLoading(true);
     try {
-      let api = newMessages.map(m => ({ role: m.role, content: m.content }));
+      let api = sanitizeHistory(newMessages);
       for (let i = 0; i < 10; i++) {
         const res = await fetch("/api/claude", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, system: SYSTEM_PROMPT, messages: api, tools: TOOLS }),
         });
-        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        if (!res.ok) {
+          let detail = "";
+          try { const body = await res.json(); detail = body?.error?.message || body?.error || JSON.stringify(body); }
+          catch { try { detail = await res.text(); } catch {} }
+          throw new Error(`API error ${res.status}: ${detail}`.trim());
+        }
         const data = await res.json();
         api.push({ role: "assistant", content: data.content });
         setMessages(prev => [...prev.filter(m => m.role !== "assistant_pending"), { role: "assistant", content: data.content }]);
