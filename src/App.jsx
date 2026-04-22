@@ -668,10 +668,69 @@ function SettingsIcon() {
 // ═══════════════════════════════════════════════════════════════
 // ASK VIEW
 // ═══════════════════════════════════════════════════════════════
+// Guarantees a payload the Messages API will accept:
+//  - strips tool_use blocks that have no matching tool_result
+//  - strips orphan tool_result blocks
+//  - drops empty messages
+//  - merges consecutive same-role messages (API requires alternation)
+//  - ensures it starts with a user turn
+function sanitizeHistory(msgs) {
+  if (!Array.isArray(msgs)) return [];
+  const pass1 = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (!m || !m.role) continue;
+    if (m.role === "assistant" && Array.isArray(m.content)) {
+      const toolUseIds = m.content.filter(b => b?.type === "tool_use").map(b => b.id);
+      if (toolUseIds.length > 0) {
+        const next = msgs[i + 1];
+        const resultIds = next?.role === "user" && Array.isArray(next.content)
+          ? next.content.filter(b => b?.type === "tool_result").map(b => b.tool_use_id)
+          : [];
+        const allMatched = toolUseIds.every(id => resultIds.includes(id));
+        if (!allMatched) {
+          const stripped = m.content.filter(b => b?.type !== "tool_use");
+          if (stripped.length > 0) pass1.push({ role: "assistant", content: stripped });
+          continue;
+        }
+      }
+    }
+    if (m.role === "user" && Array.isArray(m.content)) {
+      const prev = msgs[i - 1];
+      const prevToolUseIds = prev?.role === "assistant" && Array.isArray(prev.content)
+        ? prev.content.filter(b => b?.type === "tool_use").map(b => b.id)
+        : [];
+      const cleaned = m.content.filter(b => b?.type !== "tool_result" || prevToolUseIds.includes(b.tool_use_id));
+      if (cleaned.length === 0) continue;
+      pass1.push({ role: "user", content: cleaned });
+      continue;
+    }
+    if (Array.isArray(m.content) && m.content.length === 0) continue;
+    if (typeof m.content === "string" && m.content.trim() === "") continue;
+    pass1.push({ role: m.role, content: m.content });
+  }
+  const merged = [];
+  for (const m of pass1) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.role === m.role) {
+      const toArr = c => Array.isArray(c) ? c : [{ type: "text", text: String(c) }];
+      prev.content = [...toArr(prev.content), ...toArr(m.content)];
+    } else {
+      merged.push({ role: m.role, content: m.content });
+    }
+  }
+  while (merged.length && merged[0].role !== "user") merged.shift();
+  return merged;
+}
+
 function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
   const { showTools, ttsEnabled } = useContext(SettingsContext);
   const [messages, setMessages] = useState(() => {
-    try { const s = localStorage.getItem("rf-chat-history"); return s ? JSON.parse(s) : []; } catch { return []; }
+    try {
+      const s = localStorage.getItem("rf-chat-history");
+      const raw = s ? JSON.parse(s) : [];
+      return sanitizeHistory(raw);
+    } catch { return []; }
   });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -735,22 +794,50 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
     setMessages(newMessages);
     setPendingImage(null);
     setLoading(true);
+    const freshUser = { role: "user", content: userContent };
+    const callApi = async (messagesPayload) => {
+      const res = await fetch("/api/claude", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, system: SYSTEM_PROMPT, messages: messagesPayload, tools: TOOLS }),
+      });
+      if (!res.ok) {
+        let detail = "";
+        try { const body = await res.json(); detail = body?.error?.message || body?.error || JSON.stringify(body); }
+        catch { try { detail = await res.text(); } catch {} }
+        const err = new Error(`API error ${res.status}: ${detail}`.trim());
+        err.status = res.status;
+        err.payload = messagesPayload;
+        throw err;
+      }
+      return res.json();
+    };
     try {
-      let api = newMessages.map(m => ({ role: m.role, content: m.content }));
+      let api = sanitizeHistory(newMessages);
+      let recoveredFromBadHistory = false;
       for (let i = 0; i < 10; i++) {
-        const res = await fetch("/api/claude", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, system: SYSTEM_PROMPT, messages: api, tools: TOOLS }),
-        });
-        if (!res.ok) throw new Error(`API error: ${res.status}`);
-        const data = await res.json();
+        let data;
+        try {
+          data = await callApi(api);
+        } catch (e) {
+          if (e.status === 400 && !recoveredFromBadHistory && i === 0) {
+            console.warn("[chat] 400 on first turn — retrying with cleared history:", e.message, e.payload);
+            recoveredFromBadHistory = true;
+            api = [freshUser];
+            setMessages([freshUser]);
+            data = await callApi(api);
+          } else { throw e; }
+        }
         api.push({ role: "assistant", content: data.content });
         setMessages(prev => [...prev.filter(m => m.role !== "assistant_pending"), { role: "assistant", content: data.content }]);
         if (data.stop_reason !== "tool_use") break;
         const results = data.content.filter(b => b.type === "tool_use").map(b => ({ type: "tool_result", tool_use_id: b.id, content: JSON.stringify(executeTool(b.name, b.input)) }));
         api.push({ role: "user", content: results });
+        setMessages(prev => [...prev, { role: "user", content: results }]);
       }
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      console.error("[chat] request failed:", e.message, e.payload);
+      setError(e.message);
+    }
     finally { setLoading(false); }
   };
 
@@ -819,6 +906,7 @@ function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign }) {
   if (m.role === "user") {
     if (typeof m.content === "string") return <div className="msg-anim" style={S.userMsg}><div style={S.userBubble}>{m.content}</div></div>;
     if (Array.isArray(m.content)) {
+      if (m.content.every(b => b.type === "tool_result")) return null;
       return (
         <div className="msg-anim" style={S.userMsg}>
           <div style={S.userBubble}>
