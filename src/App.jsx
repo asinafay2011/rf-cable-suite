@@ -1397,12 +1397,12 @@ function SignalFlow({ cable }) {
 
   const Pulse = ({ delay }) => (
     <g>
-      <circle r="9" fill="#fbbf24">
+      <circle cy={cableY} r="9" fill="#fbbf24">
         <animate attributeName="cx" values={`${cableX1};${cableX2}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
         <animate attributeName="r" values={`10;${ok ? 4 : 2}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
         <animate attributeName="opacity" values={`0.95;${ok ? 0.35 : 0.1}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
       </circle>
-      <circle r="14" fill="none" stroke="#fbbf24" strokeWidth="1" opacity="0.5">
+      <circle cy={cableY} r="14" fill="none" stroke="#fbbf24" strokeWidth="1" opacity="0.5">
         <animate attributeName="cx" values={`${cableX1};${cableX2}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
         <animate attributeName="r" values={`16;${ok ? 6 : 3}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
         <animate attributeName="opacity" values={`0.6;0`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
