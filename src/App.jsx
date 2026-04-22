@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useRef, useEffect, createContext, useContext } from "react";
-import * as THREE from "three";
 
 // ═══════════════════════════════════════════════════════════════
 // RF CABLE ENGINEERING SUITE · v2
@@ -1004,9 +1003,10 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
   const [buildStep, setBuildStep] = useState(4);
   const [selectedLayer, setSelectedLayer] = useState(null);
   const [hoveredLayer, setHoveredLayer] = useState(null);
+  const [expandedStep, setExpandedStep] = useState(null);
 
   useEffect(() => {
-    if (expanded) { setBuildStep(0); setSelectedLayer(null); }
+    if (expanded) { setBuildStep(0); setSelectedLayer(null); setExpandedStep(null); }
   }, [expanded]);
 
   useEffect(() => {
@@ -1058,10 +1058,6 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
               {selectedLayer && <LayerDetailPanel layer={selectedLayer} c={c} onClose={() => setSelectedLayer(null)} units={units} />}
             </div>
           </div>
-          <div style={{ padding: "6px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 }}>
-            <div style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#a8a29e", marginBottom: 6, textTransform: "uppercase" }}>3D Model · Stepped cutaway</div>
-            <Cable3D d={c.d} D={c.D} shield={c.shield} jacket={c.OD} />
-          </div>
           <div style={S.detailsGrid}>
             <div>
               <DS title="Electrical">
@@ -1100,13 +1096,27 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
                 <Layer n="4" name="Jacket" color="#57534e" desc={c.cons.jacket} />
               </DS>
               <DS title="Manufacturing Process">
-                {c.proc.map((s, i) => (
-                  <div key={i} style={S.procStep}>
-                    <div style={S.procNum}>{i + 1}</div>
-                    <StepIcon text={s} />
-                    <div style={S.procText}>{s}</div>
-                  </div>
-                ))}
+                {c.proc.map((s, i) => {
+                  const info = explainStep(s);
+                  const hasInfo = !!info;
+                  const isOpen = expandedStep === i;
+                  return (
+                    <React.Fragment key={i}>
+                      <div style={{ ...S.procStep, cursor: hasInfo ? "pointer" : "default", ...(isOpen ? { background: "rgba(217,119,6,0.05)" } : {}) }} onClick={() => hasInfo && setExpandedStep(isOpen ? null : i)}>
+                        <div style={S.procNum}>{i + 1}</div>
+                        <StepIcon text={s} />
+                        <div style={{ ...S.procText, flex: 1 }}>{s}</div>
+                        {hasInfo && <span style={{ color: "#d97706", fontSize: 11, fontFamily: "monospace", transition: "transform 0.2s", transform: isOpen ? "rotate(90deg)" : "none", userSelect: "none" }}>▸</span>}
+                      </div>
+                      {isOpen && info && (
+                        <div style={{ background: "rgba(217,119,6,0.06)", padding: "10px 14px 12px", margin: "0 0 6px 26px", borderLeft: "2px solid #d97706", fontSize: 10, lineHeight: 1.6, color: "#d6cfc4" }}>
+                          <div style={{ fontWeight: 700, color: "#fbbf24", marginBottom: 5, letterSpacing: 0.3, fontSize: 10.5 }}>{info.title}</div>
+                          {info.body}
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </DS>
               <DS title="Suppliers"><DR label="Typical makers" v={c.makers} /></DS>
             </div>
@@ -1171,63 +1181,36 @@ function LayerDetailPanel({ layer, c, onClose, units }) {
   );
 }
 
-function Cable3D({ d, D, shield, jacket }) {
-  const mountRef = useRef(null);
-  useEffect(() => {
-    const mount = mountRef.current;
-    if (!mount) return;
-    const w = 280, h = 240;
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(32, w / h, 0.1, 100);
-    camera.position.set(8, 3.5, 12);
-    camera.lookAt(0, 0.5, 0);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(w, h);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    mount.appendChild(renderer.domElement);
+const STEP_PATTERNS = [
+  [/\b(ccs|copper[- ]clad[- ]steel)\b/i, { title: "CCS (Copper-Clad Steel)", body: "Steel wire electroplated with copper. RF current flows in the outer skin depth (~2 µm at 1 GHz), so a thin Cu layer carries all the RF signal. Steel core adds tensile strength and reduces cost vs pure Cu. Drawback: higher DC/LF resistance." }],
+  [/\b(spc|silver[- ]?plat)/i, { title: "Silver-plated copper (SPC)", body: "Cu wire with thin Ag coating (~2-5 µm). Silver has the highest conductivity of any metal, reducing skin-effect loss at GHz. Also resists oxidation — stable over years. Common in aerospace, military, and precision RF cables." }],
+  [/\b(tin[- ]?plat|tinned\s+c[ou])/i, { title: "Tin-plated copper", body: "Cu strand with tin plating. Tin resists oxidation (still solderable after years in humid/marine environments). Slightly lower conductivity than bare Cu, but far more reliable for outdoor / long-life service. Standard for shields and conductors in commercial RF cables." }],
+  [/(19|7)[- ]?strand|draw.*(bunch|strand)|bunch.*strand|stranded/i, { title: "Drawing + stranding", body: "Copper rod is pulled through progressively smaller dies to reach target strand diameter (e.g. 0.18 mm). Multiple strands are then twisted together (bunched or concentric-lay). Stranded = flexible bend. Solid = slightly lower RF loss but breaks at repeated flex points. 19-strand pattern = 1 center + 6 inner + 12 outer." }],
+  [/foam\s*pe|gas[- ]?foam|gas[- ]?inject/i, { title: "Foam PE dielectric", body: "Polyethylene with gas bubbles injected (~30-50% air by volume). Lower effective εr (~1.45 vs 2.30 solid PE) → higher velocity factor (VP 80-88%) and lower loss. Used in low-loss cables: LMR, Heliax, RG-6. Downside: open-cell foam can absorb moisture over time." }],
+  [/ptfe|teflon|sinter/i, { title: "PTFE / Teflon dielectric", body: "Paste-extruded PTFE, then sintered at 370°C. Very low loss tangent, stable -55 to +260°C, εr ≈ 2.10. Used in aerospace / military / high-freq (RG-142, RG-178, semi-rigid). Expensive, needs specialized extrusion." }],
+  [/\b(pe|polyeth)\s*(extrus|jacket|dielectric)|extrude\s+(solid\s+)?pe|pe\s+at\s+\d/i, { title: "PE dielectric extrusion", body: "Polyethylene pellets melted at 180-220°C, extruded through a die that wraps the conductor concentrically. PE = cheap, stable, low loss, εr ≈ 2.30. Geometry sets impedance and velocity factor. Concentricity tolerance is tight (±0.05 mm) — determines cable quality." }],
+  [/\bextrud(e|ing|ed|sion)\b/i, { title: "Extrusion", body: "Molten polymer pushed through a shaped die around the conductor or dielectric. Temperature, pressure, and line speed are tightly controlled. Defects (voids, eccentricity) cause impedance ripple that shows up as VSWR bumps." }],
+  [/\bbraid/i, { title: "Braided shield", body: "Multiple thin wires (tinned or bare Cu) woven at an angle around the dielectric. Coverage % (80-97%) = fraction of surface covered. Higher coverage = better EMI shielding. Flexible, kink-tolerant. Trade-off: can't reach 100% like foil, so high-freq leakage through braid gaps." }],
+  [/al[- ]?(polymer|foil)|\bfoil\b|duobond|longitudinal.*(tape|foil)/i, { title: "Foil shield", body: "Thin aluminum foil bonded to a polymer film, wrapped longitudinally around the dielectric. 100% coverage — blocks high-frequency EMI perfectly. Usually paired with a braid underneath (foil+braid combo) so the braid provides mechanical continuity at connector crimps." }],
+  [/corrugat|heliax|seam[- ]?weld|solid\s+cu\s+tube|rigid/i, { title: "Corrugated Cu tube shield", body: "Solid copper tape formed into a tube around the dielectric, seams welded continuously. Corrugations let it flex (accordion-like). 100% shielding, virtually zero leakage — used in Heliax / rigid tower feeders. Expensive, stiff, requires minimum bend radius (~20× OD)." }],
+  [/\bfep\b/i, { title: "FEP jacket/dielectric", body: "Fluorinated Ethylene Propylene. High-temp (200°C continuous), chemically inert, low smoke. Used for high-temp cables and plenum-rated commercial building cables (air-handling space). Expensive but required by fire code in some installs." }],
+  [/\bpvc\b.*jacket|jacket.*pvc|non[- ]?contaminating\s+pvc/i, { title: "PVC jacket", body: "Polyvinyl chloride, extruded over the shield at 160-200°C. Cheap, flexible, flame-retardant (self-extinguishing). Indoor-rated. 'Non-contaminating' grade = no plasticizer migration into dielectric (would slowly degrade foam PE). Emits HCl when burning — not allowed in LSZH zones." }],
+  [/\bpe\s*jacket|black\s+(uv|pe).*jacket|uv[- ]?resist|carbon[- ]?black/i, { title: "PE jacket (UV-stable)", body: "Polyethylene jacket, carbon-black-filled for UV stability. Tough, moisture-resistant, outdoor/buried-rated. Higher temp limit and chemical resistance than PVC. Used for outdoor drops, towers, marine. Less flexible than PVC." }],
+  [/\b(lszh|low[- ]?smoke|plenum)\b/i, { title: "LSZH / plenum jacket", body: "Low-Smoke Zero-Halogen jacket. When burning, releases minimal smoke and no hydrogen halides (corrosive). Required in buildings where cables run through air-return plenums — burning PVC would release HCl that damages electronics and hurts people. FEP, LSZH PVC, or specialty compounds." }],
+  [/tdr|time[- ]?domain|impedance.*test/i, { title: "TDR (Time-Domain Reflectometry)", body: "Sends a fast-rising step pulse into the cable; measures reflections vs time. Detects impedance discontinuities, damage, connector quality, and cable length. Production QC for every reel. A healthy 50 Ω cable shows a flat trace at 50 Ω ±1-2 Ω along its length." }],
+  [/capacit.*(test|check)|\btest.*capacit|\bcap\b.*test/i, { title: "Capacitance test", body: "Measures capacitance per unit length (pF/m). Verifies dielectric geometry and material consistency. Typical for 50Ω: 100 pF/m (solid PE), 80 pF/m (foam PE). Deviation → off-center conductor or voids in dielectric → impedance variations." }],
+  [/hi[- ]?pot|high[- ]?pot|voltage\s+test|impulse.*voltage/i, { title: "High-voltage (hi-pot) test", body: "Applies 2-10 kV between conductor and shield for a set time (e.g. 1 minute). Verifies dielectric has no voids, no moisture, no defects that would arc-over in service. Impulse variant uses a fast lightning-simulation pulse. Failure = arc = reject reel." }],
+  [/sweep|vswr.*sweep|insertion.*loss.*sweep|vna/i, { title: "VSWR / loss sweep test", body: "Sweeps frequency across the cable's spec range, measuring VSWR (reflection) and insertion loss. Verifies impedance consistency and attenuation spec. Production: automated sweep. Precision instrument cables: full VNA characterization (S-parameters, phase)." }],
+  [/draw|die|pull/i, { title: "Wire drawing", body: "Copper rod (~8mm) is pulled through a series of progressively smaller hardened-steel or diamond dies. Each die reduces diameter ~20%. Annealing (heat-softening) between passes keeps the metal ductile. End product: precise Cu wire at target diameter." }],
+  [/jacket/i, { title: "Jacket extrusion", body: "Outermost protective layer — extruded over the shield. Material choice sets the cable's environment rating: PVC (indoor), PE (outdoor UV), FEP (high-temp), LSZH (fire-safety zones). Wall thickness affects impact/abrasion resistance and cable OD." }],
+];
 
-    const group = new THREE.Group();
-    scene.add(group);
-    group.rotation.z = Math.PI / 2;
-
-    const scale = 4 / (jacket / 2);
-    const baseL = 8;
-    const step = 0.7;
-    const disposables = [];
-
-    const addLayer = (radius, lenExtra, color, opacity = 1, metalness = 0.2, roughness = 0.55) => {
-      const len = baseL + lenExtra;
-      const g = new THREE.CylinderGeometry(radius * scale, radius * scale, len, 64, 1, false);
-      const m = new THREE.MeshStandardMaterial({ color, roughness, metalness, transparent: opacity < 1, opacity, side: THREE.FrontSide });
-      const mesh = new THREE.Mesh(g, m);
-      mesh.position.y = lenExtra / 2;
-      group.add(mesh);
-      disposables.push(g, m);
-      return mesh;
-    };
-
-    addLayer(jacket / 2, 0,        0x1a1410, 1, 0.05, 0.85);
-    addLayer(shield / 2, step,     0xa8a8a8, 1, 0.85, 0.35);
-    addLayer(D / 2,      step * 2, 0xfde68a, 0.4, 0, 0.4);
-    addLayer(d / 2,      step * 3, 0xd97706, 1, 0.92, 0.3);
-
-    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
-    const key = new THREE.DirectionalLight(0xffd89a, 1.3); key.position.set(6, 8, 8); scene.add(key);
-    const fill = new THREE.DirectionalLight(0x88aaff, 0.5); fill.position.set(-6, -4, 4); scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xff8844, 0.4); rim.position.set(-3, 2, -6); scene.add(rim);
-
-    let raf = 0;
-    const animate = () => { group.rotation.x += 0.007; renderer.render(scene, camera); raf = requestAnimationFrame(animate); };
-    animate();
-
-    return () => {
-      cancelAnimationFrame(raf);
-      disposables.forEach(d => d.dispose && d.dispose());
-      renderer.dispose();
-      if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
-    };
-  }, [d, D, shield, jacket]);
-  return <div ref={mountRef} style={{ width: 280, height: 240, margin: "0 auto" }} />;
+function explainStep(text) {
+  const t = text || "";
+  for (const [pattern, info] of STEP_PATTERNS) {
+    if (pattern.test(t)) return info;
+  }
+  return null;
 }
 
 function shortMat(s) {
