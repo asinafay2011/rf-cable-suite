@@ -1459,7 +1459,80 @@ function SignalFlow({ cable }) {
         <span style={{ color: "#a8a29e" }}>Link margin: </span>
         <span style={{ color: ok ? "#34d399" : "#ef4444", fontWeight: 700 }}>{margin > 0 ? "+" : ""}{margin.toFixed(2)} dB</span>
         <span style={{ color: "#a8a29e" }}> — {ok ? "link closes ✓" : "below sensitivity ✗"}</span>
+        <span style={{ color: "#57534e", marginLeft: 8, fontSize: 9 }}>(headroom above RX sensitivity)</span>
       </div>
+      <DbmRuler txPower={txPower} rxPower={rxPower} />
+      <div style={{ fontSize: 10, color: "#a8a29e", lineHeight: 1.6, padding: "10px 12px", background: "rgba(15,10,5,0.4)", borderRadius: 3, marginTop: 10 }}>
+        <div style={{ color: "#fbbf24", fontWeight: 700, marginBottom: 4, fontSize: 10.5 }}>💡 Quick guide</div>
+        <div style={{ marginBottom: 3 }}><strong style={{ color: "#fbbf24" }}>TX dBm</strong> = how much power the transmitter sends INTO the cable. +30 dBm = 1 W, +20 dBm = 100 mW (typical WiFi router).</div>
+        <div style={{ marginBottom: 3 }}><strong style={{ color: "#34d399" }}>RX dBm</strong> = how much arrives AT the receiver after cable loss. Must be stronger than the receiver's sensitivity threshold.</div>
+        <div style={{ marginBottom: 3 }}><strong style={{ color: "#e7e5e4" }}>dBm is logarithmic</strong> — each +10 dB = 10× more power, each +3 dB ≈ 2×. So -80 dBm is 10,000,000× weaker than -10 dBm.</div>
+        <div><strong style={{ color: "#e7e5e4" }}>Link margin</strong> = RX power − RX sensitivity. Positive = works. Larger margin = more reliable (rain, aging cable, interference eat margin).</div>
+      </div>
+    </div>
+  );
+}
+
+const DB_REFS = [
+  { db: 50, label: "Cell tower" },
+  { db: 30, label: "LoRa / 1W" },
+  { db: 20, label: "WiFi router" },
+  { db: 10, label: "Bluetooth" },
+  { db: 0, label: "1 mW" },
+  { db: -30, label: "1 µW" },
+  { db: -85, label: "WiFi sens" },
+  { db: -110, label: "Cell edge" },
+  { db: -130, label: "GPS sens" },
+];
+
+function DbmRuler({ txPower, rxPower }) {
+  const W = 720, H = 90;
+  const minDb = -150, maxDb = 60;
+  const padL = 24, padR = 24;
+  const rulerY = 40;
+  const rulerX1 = padL, rulerX2 = W - padR;
+  const pos = (db) => rulerX1 + (db - minDb) / (maxDb - minDb) * (rulerX2 - rulerX1);
+  const txX = pos(Math.max(minDb, Math.min(maxDb, txPower)));
+  const rxX = pos(Math.max(minDb, Math.min(maxDb, rxPower)));
+  const rxClamped = rxPower < minDb;
+  return (
+    <div style={{ marginTop: 14, padding: "10px 0 0", borderTop: "1px dashed rgba(217,119,6,0.15)" }}>
+      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", textAlign: "center", marginBottom: 6 }}>Your TX/RX vs common systems</div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        <defs>
+          <linearGradient id="dbm-grad" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor="#1e3a3a" />
+            <stop offset="45%" stopColor="#3f3f46" />
+            <stop offset="80%" stopColor="#d97706" />
+            <stop offset="100%" stopColor="#dc2626" />
+          </linearGradient>
+        </defs>
+        <line x1={rulerX1} y1={rulerY} x2={rulerX2} y2={rulerY} stroke="url(#dbm-grad)" strokeWidth="5" strokeLinecap="round" />
+        {[-150, -120, -90, -60, -30, 0, 30, 60].map((v, i) => (
+          <g key={i}>
+            <line x1={pos(v)} y1={rulerY - 4} x2={pos(v)} y2={rulerY + 4} stroke="#78716c" strokeWidth="0.8" />
+            <text x={pos(v)} y={rulerY + 14} fontSize="8" fill="#78716c" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{v}</text>
+          </g>
+        ))}
+        {DB_REFS.map((r, i) => (
+          <g key={i}>
+            <circle cx={pos(r.db)} cy={rulerY} r="2.5" fill="#d6cfc4" />
+            <text x={pos(r.db)} y={rulerY + 28} fontSize="7.5" fill="#a8a29e" textAnchor="middle" transform={`rotate(-28, ${pos(r.db)}, ${rulerY + 28})`}>{r.label}</text>
+          </g>
+        ))}
+        <g>
+          <line x1={txX} y1={rulerY - 22} x2={txX} y2={rulerY - 3} stroke="#fbbf24" strokeWidth="1.5" />
+          <circle cx={txX} cy={rulerY - 24} r="5" fill="#fbbf24" stroke="#d97706" strokeWidth="1.5" />
+          <text x={txX} y={rulerY - 31} fontSize="9" fill="#fbbf24" textAnchor="middle" fontWeight="700" fontFamily="JetBrains Mono, monospace">TX</text>
+        </g>
+        {!rxClamped && (
+          <g>
+            <line x1={rxX} y1={rulerY + 5} x2={rxX} y2={rulerY + 22} stroke="#34d399" strokeWidth="1.5" />
+            <circle cx={rxX} cy={rulerY + 24} r="5" fill="#34d399" stroke="#10b981" strokeWidth="1.5" />
+            <text x={rxX} y={rulerY + 42} fontSize="9" fill="#34d399" textAnchor="middle" fontWeight="700" fontFamily="JetBrains Mono, monospace">RX</text>
+          </g>
+        )}
+      </svg>
     </div>
   );
 }
