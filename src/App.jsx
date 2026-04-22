@@ -1455,95 +1455,94 @@ function SignalFlow({ cable }) {
         <text x={W / 2} y={cableY - 22} fontSize="9" fill="#a8a29e" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{cable.name} · {length} m · {freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}</text>
         <text x={W / 2} y={cableY + 28} fontSize="10" fill="#fbbf24" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontWeight="700">Loss: {totalLoss.toFixed(2)} dB ({attenPer100m.toFixed(2)} dB/100m)</text>
       </svg>
-      <div style={{ textAlign: "center", marginTop: 8, fontSize: 11, fontFamily: "JetBrains Mono, monospace" }}>
-        <span style={{ color: "#a8a29e" }}>Link margin: </span>
-        <span style={{ color: ok ? "#34d399" : "#ef4444", fontWeight: 700 }}>{margin > 0 ? "+" : ""}{margin.toFixed(2)} dB</span>
-        <span style={{ color: "#a8a29e" }}> — {ok ? "link closes ✓" : "below sensitivity ✗"}</span>
-        <span style={{ color: "#57534e", marginLeft: 8, fontSize: 9 }}>(headroom above RX sensitivity)</span>
-      </div>
-      <DbmRuler txPower={txPower} rxPower={rxPower} />
-      <div style={{ fontSize: 10, color: "#a8a29e", lineHeight: 1.6, padding: "10px 12px", background: "rgba(15,10,5,0.4)", borderRadius: 3, marginTop: 10 }}>
-        <div style={{ color: "#fbbf24", fontWeight: 700, marginBottom: 4, fontSize: 10.5 }}>💡 Quick guide</div>
-        <div style={{ marginBottom: 3 }}><strong style={{ color: "#fbbf24" }}>TX dBm</strong> = how much power the transmitter sends INTO the cable. +30 dBm = 1 W, +20 dBm = 100 mW (typical WiFi router).</div>
-        <div style={{ marginBottom: 3 }}><strong style={{ color: "#34d399" }}>RX dBm</strong> = how much arrives AT the receiver after cable loss. Must be stronger than the receiver's sensitivity threshold.</div>
-        <div style={{ marginBottom: 3 }}><strong style={{ color: "#e7e5e4" }}>dBm is logarithmic</strong> — each +10 dB = 10× more power, each +3 dB ≈ 2×. So -80 dBm is 10,000,000× weaker than -10 dBm.</div>
-        <div><strong style={{ color: "#e7e5e4" }}>Link margin</strong> = RX power − RX sensitivity. Positive = works. Larger margin = more reliable (rain, aging cable, interference eat margin).</div>
-      </div>
+      <PowerSummary txPower={txPower} rxPower={rxPower} totalLoss={totalLoss} margin={margin} cable={cable} length={length} freq={freq} />
     </div>
   );
 }
 
-const DB_REFS = [
-  { db: 50, label: "Cell tower" },
-  { db: 30, label: "LoRa / 1W" },
-  { db: 20, label: "WiFi router" },
-  { db: 10, label: "Bluetooth" },
-  { db: 0, label: "1 mW" },
-  { db: -30, label: "1 µW" },
-  { db: -85, label: "WiFi sens" },
-  { db: -110, label: "Cell edge" },
-  { db: -130, label: "GPS sens" },
-];
+function dbmToPower(dbm) {
+  const mW = Math.pow(10, dbm / 10);
+  if (mW >= 1000) return `${(mW / 1000).toFixed(1)} W`;
+  if (mW >= 1) return `${mW.toFixed(mW >= 100 ? 0 : 1)} mW`;
+  if (mW >= 0.001) return `${(mW * 1000).toFixed(mW >= 0.1 ? 0 : 1)} µW`;
+  if (mW >= 1e-6) return `${(mW * 1e6).toFixed(1)} nW`;
+  if (mW >= 1e-9) return `${(mW * 1e9).toFixed(1)} pW`;
+  if (mW >= 1e-12) return `${(mW * 1e12).toFixed(1)} fW`;
+  return `${mW.toExponential(2)} mW`;
+}
 
-function DbmRuler({ txPower, rxPower }) {
-  const W = 720, H = 130;
-  const minDb = -150, maxDb = 60;
-  const padL = 24, padR = 24;
-  const rulerY = 48;
-  const rulerX1 = padL, rulerX2 = W - padR;
-  const pos = (db) => rulerX1 + (db - minDb) / (maxDb - minDb) * (rulerX2 - rulerX1);
-  const clamp = (v) => Math.max(minDb, Math.min(maxDb, v));
-  const txX = pos(clamp(txPower));
-  const rxX = pos(clamp(rxPower));
-  const rxClamped = rxPower < minDb;
+function powerAnalogy(dbm) {
+  if (dbm >= 60) return "broadcast TV / FM transmitter";
+  if (dbm >= 45) return "cell tower / high-power radio";
+  if (dbm >= 28) return "amateur radio / LoRa gateway";
+  if (dbm >= 18) return "WiFi router transmit";
+  if (dbm >= 8) return "Bluetooth class 1 / small IoT";
+  if (dbm >= -10) return "signal close to an antenna";
+  if (dbm >= -40) return "signal a few meters away";
+  if (dbm >= -70) return "moderate WiFi signal";
+  if (dbm >= -90) return "weak-but-usable WiFi / cellular";
+  if (dbm >= -110) return "edge of cellular coverage";
+  if (dbm >= -135) return "GPS from satellite";
+  return "near thermal noise floor";
+}
+
+function linkVerdict(margin) {
+  if (margin < 0) return { icon: "❌", title: "BROKEN", color: "#ef4444", desc: "RX power is below the receiver's sensitivity. Signal won't decode — no link." };
+  if (margin < 3) return { icon: "⚠️", title: "MARGINAL", color: "#f97316", desc: "Barely works. Rain, cable aging, or minor interference will break it." };
+  if (margin < 10) return { icon: "⚠", title: "TIGHT", color: "#fbbf24", desc: "Works most of the time. Risky for mission-critical systems." };
+  if (margin < 20) return { icon: "✓", title: "GOOD", color: "#34d399", desc: "Healthy margin. Link should be reliable in normal conditions." };
+  if (margin < 40) return { icon: "✓", title: "EXCELLENT", color: "#34d399", desc: "Plenty of headroom for weather, aging, interference." };
+  return { icon: "🚀", title: "OVERKILL", color: "#34d399", desc: "Massive margin. You could use lower TX power or cheaper cable." };
+}
+
+function PowerSummary({ txPower, rxPower, totalLoss, margin, cable, length, freq }) {
+  const v = linkVerdict(margin);
+  const txPw = dbmToPower(txPower);
+  const rxPw = dbmToPower(rxPower);
+  const txAnalogy = powerAnalogy(txPower);
+  const rxAnalogy = powerAnalogy(rxPower);
+  const pctKept = Math.pow(10, -totalLoss / 10) * 100;
+  const marginRatio = Math.pow(10, margin / 10);
+  const marginTxt = marginRatio >= 1000000 ? `${(marginRatio / 1e6).toFixed(0)} million×` : marginRatio >= 1000 ? `${(marginRatio / 1000).toFixed(0)}k×` : `${marginRatio.toFixed(1)}×`;
+
+  const Row = ({ icon, color, title, body }) => (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
+      <div style={{ fontSize: 18, flexShrink: 0, width: 24, textAlign: "center" }}>{icon}</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 10, color, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 2 }}>{title}</div>
+        <div style={{ fontSize: 11, color: "#d6cfc4", lineHeight: 1.55 }}>{body}</div>
+      </div>
+    </div>
+  );
+
   return (
-    <div style={{ marginTop: 14, padding: "10px 0 0", borderTop: "1px dashed rgba(217,119,6,0.15)" }}>
-      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", textAlign: "center", marginBottom: 6 }}>Your TX/RX vs common systems</div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
-        <defs>
-          <linearGradient id="dbm-grad" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#1e3a3a" />
-            <stop offset="45%" stopColor="#3f3f46" />
-            <stop offset="80%" stopColor="#d97706" />
-            <stop offset="100%" stopColor="#dc2626" />
-          </linearGradient>
-        </defs>
+    <div style={{ marginTop: 14, padding: "14px 16px", background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid rgba(217,119,6,0.15)" }}>
+      <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 12, textAlign: "center" }}>What this means in plain English</div>
 
-        <g>
-          <text x={txX} y={10} fontSize="9" fill="#fbbf24" textAnchor="middle" fontWeight="700" fontFamily="JetBrains Mono, monospace">TX {txPower.toFixed(0)} dBm</text>
-          <line x1={txX} y1={14} x2={txX} y2={rulerY - 4} stroke="#fbbf24" strokeWidth="1.2" strokeDasharray="2,2" opacity="0.7" />
-          <circle cx={txX} cy={rulerY} r="5.5" fill="#fbbf24" stroke="#d97706" strokeWidth="1.5" />
-        </g>
+      <Row icon="📡" color="#fbbf24" title="TX — what you transmit" body={<>
+        <strong style={{ color: "#fbbf24" }}>{txPw}</strong> <span style={{ color: "#78716c" }}>({txPower.toFixed(0)} dBm)</span> — like a {txAnalogy}.
+      </>} />
 
-        <line x1={rulerX1} y1={rulerY} x2={rulerX2} y2={rulerY} stroke="url(#dbm-grad)" strokeWidth="5" strokeLinecap="round" />
-        {[-150, -120, -90, -60, -30, 0, 30, 60].map((v, i) => (
-          <g key={i}>
-            <line x1={pos(v)} y1={rulerY - 4} x2={pos(v)} y2={rulerY + 4} stroke="#78716c" strokeWidth="0.8" />
-            <text x={pos(v)} y={rulerY + 14} fontSize="7.5" fill="#78716c" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{v}</text>
-          </g>
-        ))}
+      <Row icon="📏" color="#a8a29e" title={`Cable — ${cable.name}, ${length} m @ ${freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}`} body={<>
+        Eats <strong style={{ color: "#ef4444" }}>{totalLoss.toFixed(2)} dB</strong> → <strong style={{ color: "#fbbf24" }}>{pctKept.toFixed(pctKept < 10 ? 2 : 0)}%</strong> of TX power survives. {totalLoss < 1 ? "Negligible — short/low-freq." : totalLoss < 5 ? "Small loss — typical for most setups." : totalLoss < 15 ? "Moderate loss — noticeable but OK." : totalLoss < 30 ? "Heavy loss — link is losing a lot." : "Severe loss — consider a bigger cable or shorter run."}
+      </>} />
 
-        {DB_REFS.map((r, i) => {
-          const yOff = (i % 2) * 10;
-          return (
-            <g key={i}>
-              <circle cx={pos(r.db)} cy={rulerY} r="2" fill="#d6cfc4" opacity="0.65" />
-              <text x={pos(r.db)} y={rulerY + 26 + yOff} fontSize="7" fill="#a8a29e" textAnchor="middle">{r.label}</text>
-            </g>
-          );
-        })}
+      <Row icon="🎯" color="#34d399" title="RX — what arrives at receiver" body={<>
+        <strong style={{ color: "#34d399" }}>{rxPw}</strong> <span style={{ color: "#78716c" }}>({rxPower.toFixed(1)} dBm)</span> — like {rxAnalogy}.
+      </>} />
 
-        {!rxClamped && (
-          <g>
-            <circle cx={rxX} cy={rulerY} r="5.5" fill="#34d399" stroke="#10b981" strokeWidth="1.5" />
-            <line x1={rxX} y1={rulerY + 6} x2={rxX} y2={H - 16} stroke="#34d399" strokeWidth="1.2" strokeDasharray="2,2" opacity="0.7" />
-            <text x={rxX} y={H - 4} fontSize="9" fill="#34d399" textAnchor="middle" fontWeight="700" fontFamily="JetBrains Mono, monospace">RX {rxPower.toFixed(1)} dBm</text>
-          </g>
-        )}
-      </svg>
+      <div style={{ padding: "10px 12px", background: `${v.color}15`, borderLeft: `3px solid ${v.color}`, borderRadius: 3, marginTop: 4 }}>
+        <div style={{ fontSize: 11, color: v.color, fontWeight: 700, letterSpacing: 0.5 }}>{v.icon} {v.title} · margin {margin > 0 ? "+" : ""}{margin.toFixed(1)} dB {margin > 0 && `(≈ ${marginTxt} stronger than minimum)`}</div>
+        <div style={{ fontSize: 10.5, color: "#d6cfc4", marginTop: 4, lineHeight: 1.5 }}>{v.desc}</div>
+      </div>
+
+      <div style={{ fontSize: 10, color: "#78716c", marginTop: 10, paddingTop: 8, borderTop: "1px dashed rgba(217,119,6,0.1)", lineHeight: 1.5 }}>
+        💡 <strong style={{ color: "#a8a29e" }}>dBm</strong> is a logarithmic power scale. +10 dB = 10× more power, −3 dB ≈ half. 0 dBm = 1 mW reference. Common targets: rule of thumb wants <strong style={{ color: "#a8a29e" }}>10-20 dB margin</strong> above RX sensitivity for a robust link.
+      </div>
     </div>
   );
 }
+
 
 function shortMat(s) {
   if (!s) return null;
