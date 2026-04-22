@@ -556,8 +556,12 @@ export default function RFCableSuite() {
   const [units, setUnits] = useState("both");
   const [showTools, setShowTools] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(() => {
+    try { return localStorage.getItem("rf-tts") === "1"; } catch { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem("rf-tts", ttsEnabled ? "1" : "0"); } catch {} }, [ttsEnabled]);
 
-  const settingsCtx = { units, setUnits, showTools, setShowTools };
+  const settingsCtx = { units, setUnits, showTools, setShowTools, ttsEnabled, setTtsEnabled };
 
   const loadCableIntoDesign = (id) => { setActiveCable(id); setTab("design"); };
   const askAboutCable = (id) => {
@@ -622,7 +626,14 @@ export default function RFCableSuite() {
                 <button onClick={() => setShowTools(true)} style={{ ...S.segBtn, ...(showTools ? S.segBtnActive : {}) }}>Visible</button>
               </div>
             </div>
-            <div style={S.settingsHint}>Hidden tool calls keep the chat clean for non-technical viewers. Agent still runs tools — you just don't see the internals.</div>
+            <div style={S.settingsRow}>
+              <div style={S.settingsLabel}>Voice reply (TTS)</div>
+              <div style={S.segControl}>
+                <button onClick={() => setTtsEnabled(false)} style={{ ...S.segBtn, ...(!ttsEnabled ? S.segBtnActive : {}) }}>Off</button>
+                <button onClick={() => setTtsEnabled(true)} style={{ ...S.segBtn, ...(ttsEnabled ? S.segBtnActive : {}) }}>On</button>
+              </div>
+            </div>
+            <div style={S.settingsHint}>Hidden tool calls keep the chat clean for non-technical viewers. TTS reads agent replies aloud (English voice) — useful for hands-free lab work.</div>
           </div>
         )}
 
@@ -658,21 +669,71 @@ function SettingsIcon() {
 // ASK VIEW
 // ═══════════════════════════════════════════════════════════════
 function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
-  const { showTools } = useContext(SettingsContext);
-  const [messages, setMessages] = useState([]);
+  const { showTools, ttsEnabled } = useContext(SettingsContext);
+  const [messages, setMessages] = useState(() => {
+    try { const s = localStorage.getItem("rf-chat-history"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [listening, setListening] = useState(false);
+  const [pendingImage, setPendingImage] = useState(null);
   const scrollRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, loading]);
   useEffect(() => { if (queuedPrompt) { sendMessage(queuedPrompt); clearQueued(); } /* eslint-disable-next-line */ }, [queuedPrompt]);
+  useEffect(() => {
+    try { localStorage.setItem("rf-chat-history", JSON.stringify(messages)); } catch {}
+  }, [messages]);
+  useEffect(() => {
+    if (!ttsEnabled || !window.speechSynthesis) return;
+    const last = messages[messages.length - 1];
+    if (last?.role === "assistant" && Array.isArray(last.content)) {
+      const text = last.content.filter(b => b.type === "text").map(b => b.text).join(" ").slice(0, 600);
+      if (text) {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.rate = 1.05; u.pitch = 1;
+        window.speechSynthesis.speak(u);
+      }
+    }
+  }, [messages, ttsEnabled]);
+
+  const clearHistory = () => { setMessages([]); try { localStorage.removeItem("rf-chat-history"); } catch {} };
+
+  const toggleListen = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert("Voice input không hỗ trợ. Dùng Chrome / Edge / Safari."); return; }
+    if (listening) { recognitionRef.current?.stop(); return; }
+    const rec = new SR();
+    rec.lang = "en-US"; rec.continuous = false; rec.interimResults = false;
+    rec.onresult = (e) => { const t = e.results[0][0].transcript; setInput(p => p + (p ? " " : "") + t); };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    recognitionRef.current = rec; rec.start(); setListening(true);
+  };
+
+  const handleFile = (f) => {
+    if (!f) return;
+    if (!/^image\//.test(f.type)) { alert("Chỉ hỗ trợ file ảnh (JPG, PNG, WebP, GIF)."); return; }
+    if (f.size > 5 * 1024 * 1024) { alert("Ảnh quá lớn (>5MB). Nén lại giúp."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setPendingImage({ mediaType: f.type, data: reader.result.split(",")[1], preview: reader.result });
+    reader.readAsDataURL(f);
+  };
 
   const sendMessage = async (text) => {
-    if (!text.trim() || loading) return;
+    if ((!text.trim() && !pendingImage) || loading) return;
     setError(null); setInput("");
-    const newMessages = [...messages, { role: "user", content: text }];
+    const userContent = pendingImage ? [
+      { type: "image", source: { type: "base64", media_type: pendingImage.mediaType, data: pendingImage.data } },
+      { type: "text", text: text || "What cable is this? Identify material, type, likely impedance, and nearest match in the database." },
+    ] : text;
+    const newMessages = [...messages, { role: "user", content: userContent }];
     setMessages(newMessages);
+    setPendingImage(null);
     setLoading(true);
     try {
       let api = newMessages.map(m => ({ role: m.role, content: m.content }));
@@ -704,9 +765,14 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
 
   return (
     <div style={S.viewInner}>
-      <div style={S.viewIntro}>
-        <strong style={S.viewIntroStrong}>Ask mode.</strong> Senior RF engineer agent with 12 tools for lookup, calculation, and validation.
-        Replies are grounded in the database — all numerical claims come from tool calls, not memory.
+      <div style={{ ...S.viewIntro, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <strong style={S.viewIntroStrong}>Ask mode.</strong> Senior RF engineer agent with 12 tools for lookup, calculation, and validation.
+          Replies are grounded in the database — all numerical claims come from tool calls, not memory.
+        </div>
+        {messages.length > 0 && (
+          <button onClick={clearHistory} style={{ background: "transparent", color: "#a8a29e", border: "1px solid #57534e", padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 1, textTransform: "uppercase", whiteSpace: "nowrap" }}>✕ Clear ({messages.length})</button>
+        )}
       </div>
 
       <div style={S.chatArea} ref={scrollRef}>
@@ -728,19 +794,44 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
         {error && <div style={S.errorBox}><div style={{ color: "#fca5a5", fontSize: 11 }}>Error</div><div style={{ fontSize: 12, marginTop: 3 }}>{error}</div></div>}
       </div>
 
+      {pendingImage && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "rgba(217,119,6,0.08)", border: "1px solid #d97706", borderRadius: 3, marginBottom: 8 }}>
+          <img src={pendingImage.preview} alt="upload preview" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 3 }} />
+          <div style={{ flex: 1, fontSize: 11, color: "#d6cfc4" }}>Image attached. Agent will analyze it with your question (or generic identify if you don't type anything).</div>
+          <button onClick={() => setPendingImage(null)} style={{ background: "none", border: "none", color: "#a8a29e", cursor: "pointer", fontSize: 16 }}>✕</button>
+        </div>
+      )}
       <div style={S.inputBar}>
+        <input type="file" ref={fileInputRef} accept="image/*" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files?.[0])} />
+        <button onClick={() => fileInputRef.current?.click()} disabled={loading} title="Upload image of a cable" style={{ background: "rgba(217,119,6,0.1)", color: pendingImage ? "#fbbf24" : "#a8a29e", border: "1px solid #57534e", padding: "0 10px", cursor: "pointer", fontSize: 16, borderRadius: 3, alignSelf: "stretch" }}>📎</button>
+        <button onClick={toggleListen} disabled={loading} title={listening ? "Stop listening" : "Voice input"} style={{ background: listening ? "#d97706" : "rgba(217,119,6,0.1)", color: listening ? "#0a0705" : "#a8a29e", border: "1px solid #57534e", padding: "0 10px", cursor: "pointer", fontSize: 14, borderRadius: 3, alignSelf: "stretch", fontWeight: 600 }}>{listening ? "● REC" : "🎤"}</button>
         <textarea value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
-          placeholder="Ask about cable selection, design, link budgets, or troubleshooting..."
+          placeholder={pendingImage ? "Optional: ask a specific question about this image..." : "Ask about cable selection, design, link budgets, or troubleshooting..."}
           style={S.textarea} rows={2} disabled={loading} />
-        <button onClick={() => sendMessage(input)} disabled={loading || !input.trim()} style={S.sendBtn}>Send ↵</button>
+        <button onClick={() => sendMessage(input)} disabled={loading || (!input.trim() && !pendingImage)} style={S.sendBtn}>Send ↵</button>
       </div>
     </div>
   );
 }
 
 function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign }) {
-  if (m.role === "user") return <div className="msg-anim" style={S.userMsg}><div style={S.userBubble}>{m.content}</div></div>;
+  if (m.role === "user") {
+    if (typeof m.content === "string") return <div className="msg-anim" style={S.userMsg}><div style={S.userBubble}>{m.content}</div></div>;
+    if (Array.isArray(m.content)) {
+      return (
+        <div className="msg-anim" style={S.userMsg}>
+          <div style={S.userBubble}>
+            {m.content.map((b, i) => {
+              if (b.type === "image") return <img key={i} src={`data:${b.source.media_type};base64,${b.source.data}`} alt="upload" style={{ maxWidth: 280, maxHeight: 280, display: "block", borderRadius: 4, marginBottom: 6 }} />;
+              if (b.type === "text") return <div key={i}>{b.text}</div>;
+              return null;
+            })}
+          </div>
+        </div>
+      );
+    }
+  }
   if (typeof m.content === "string") return <div className="msg-anim" style={S.assistantMsg}><div style={S.assistantText}>{m.content}</div></div>;
 
   return (
@@ -1029,8 +1120,8 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
               <span style={{ ...S.catBadge, color: cat.color, borderColor: cat.color }}>{cat.label}</span>
               <span style={{ ...S.cxBadge, background: `${cxColor}22`, color: cxColor, borderColor: cxColor }}>{cxLabel}</span>
             </div>
-            {c.alias && <div style={S.cableAlias}>{c.alias}</div>}
-            <div style={S.cableApps}>{c.apps}</div>
+            {c.alias && <div style={S.cableAlias}>{wrapTerms(c.alias)}</div>}
+            <div style={S.cableApps}>{wrapTerms(c.apps)}</div>
           </div>
         </div>
         <div style={S.quickStats}>
@@ -1057,6 +1148,10 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
               <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} cons={c.cons} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} onLayerClick={setSelectedLayer} onLayerHover={setHoveredLayer} />
               {selectedLayer && <LayerDetailPanel layer={selectedLayer} c={c} onClose={() => setSelectedLayer(null)} units={units} />}
             </div>
+          </div>
+          <div style={{ padding: "4px 0 16px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 }}>
+            <div style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#a8a29e", marginBottom: 10, textTransform: "uppercase" }}>Signal Flow · Live link-budget simulator</div>
+            <SignalFlow cable={c} />
           </div>
           <div style={S.detailsGrid}>
             <div>
@@ -1105,7 +1200,7 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
                       <div style={{ ...S.procStep, cursor: hasInfo ? "pointer" : "default", ...(isOpen ? { background: "rgba(217,119,6,0.05)" } : {}) }} onClick={() => hasInfo && setExpandedStep(isOpen ? null : i)}>
                         <div style={S.procNum}>{i + 1}</div>
                         <StepIcon text={s} />
-                        <div style={{ ...S.procText, flex: 1 }}>{s}</div>
+                        <div style={{ ...S.procText, flex: 1 }}>{wrapTerms(s)}</div>
                         {hasInfo && <span style={{ color: "#d97706", fontSize: 11, fontFamily: "monospace", transition: "transform 0.2s", transform: isOpen ? "rotate(90deg)" : "none", userSelect: "none" }}>▸</span>}
                       </div>
                       {isOpen && info && (
@@ -1118,7 +1213,7 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
                   );
                 })}
               </DS>
-              <DS title="Suppliers"><DR label="Typical makers" v={c.makers} /></DS>
+              <DS title="Suppliers"><DR label="Typical makers" v={wrapTerms(c.makers)} /></DS>
             </div>
           </div>
         </div>
@@ -1130,6 +1225,61 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
 // ═══════════════════════════════════════════════════════════════
 // SHARED COMPONENTS
 // ═══════════════════════════════════════════════════════════════
+const GLOSSARY = {
+  CCS: "Copper-Clad Steel — steel wire plated with Cu. RF flows in Cu skin-depth, steel core adds tensile strength.",
+  SPC: "Silver-Plated Copper — Cu wire with Ag coating. Highest conductivity, resists oxidation. Used in precision RF.",
+  OFC: "Oxygen-Free Copper — 99.95%+ pure Cu, no oxide inclusions. Low-loss, used in audio and precision cables.",
+  PE: "Polyethylene — common dielectric. εr ≈ 2.30 (solid), ~1.45 (foam). Cheap, stable.",
+  HDPE: "High-Density Polyethylene — harder PE grade, used for tough jackets.",
+  LDPE: "Low-Density Polyethylene — softer, more flexible PE.",
+  PVC: "Polyvinyl Chloride — cheap flexible jacket material. Indoor-rated. Emits HCl when burning.",
+  PTFE: "Polytetrafluoroethylene (Teflon) — low-loss high-temp dielectric. εr ≈ 2.10. -55 to +260 °C.",
+  FEP: "Fluorinated Ethylene Propylene — high-temp (200 °C) jacket/dielectric. Plenum-rated, chemical resistant.",
+  LSZH: "Low-Smoke Zero-Halogen jacket — fire-safe. Releases no corrosive gases when burning.",
+  TPE: "Thermoplastic Elastomer — flexible jacket, better cold-temp performance than PVC.",
+  VP: "Velocity of Propagation — signal speed relative to speed of light. VP = 1/√εr. Typical 66-88%.",
+  "Z0": "Characteristic impedance (Ω). 50 Ω = power/RF, 75 Ω = video/CATV.",
+  εr: "Relative permittivity (dielectric constant). Sets impedance and VP. Air=1, PE=2.3, PTFE=2.1.",
+  VSWR: "Voltage Standing Wave Ratio — measure of impedance match. 1.0 = perfect, >2.0 = significant mismatch.",
+  TDR: "Time-Domain Reflectometry — fast-pulse test that locates discontinuities along cable length.",
+  VNA: "Vector Network Analyzer — instrument for full S-parameter (magnitude + phase) characterization.",
+  EMI: "Electromagnetic Interference — unwanted radiated noise that shield must block.",
+  RF: "Radio Frequency — roughly 100 kHz to 300 GHz band.",
+  CCTV: "Closed-Circuit Television — private video surveillance systems (75 Ω).",
+  CATV: "Community Antenna Television (cable TV) — 75 Ω distribution.",
+  DAS: "Distributed Antenna System — multiple antennas fed through cables for indoor cellular.",
+  GPS: "Global Positioning System — 1.57542 GHz (L1) satellite nav. Low-loss cable needed.",
+  "MIL-C-17": "US military RF cable specification — defines RG-/M17 cables.",
+  BNC: "Bayonet Neill-Concelman — quick-lock connector. OK up to ~4 GHz. Common for test/video.",
+  SMA: "SubMiniature A — threaded connector, usable up to 18 GHz (precision to 26).",
+  TNC: "Threaded Neill-Concelman — threaded version of BNC, better at mid freq.",
+  UHF: "UHF = Ultra High Frequency (300 MHz-3 GHz). Also old PL-259 connector (unrelated to freq).",
+  SHF: "Super High Frequency (3-30 GHz).",
+  EHF: "Extremely High Frequency (30-300 GHz) — mmWave.",
+  dBm: "Decibel-milliwatt. 0 dBm = 1 mW, +30 dBm = 1 W, -30 dBm = 1 µW.",
+  OD: "Outer Diameter.",
+  ID: "Inner Diameter.",
+  AWG: "American Wire Gauge — wire diameter standard. Lower number = thicker wire.",
+  "RG-": "Radio Guide — US military-origin cable nomenclature (RG-58, RG-213...).",
+  QC: "Quality Control — factory testing of finished cable.",
+  fc: "Cutoff frequency — above this, higher-order modes propagate. Coax limit.",
+};
+const GLOSSARY_KEYS = Object.keys(GLOSSARY).sort((a, b) => b.length - a.length);
+const GLOSSARY_REGEX = new RegExp(`\\b(${GLOSSARY_KEYS.map(k => k.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")).join("|")})\\b`, "g");
+
+function Term({ children }) {
+  const key = String(children).toUpperCase();
+  const def = GLOSSARY[children] || GLOSSARY[key] || GLOSSARY[children?.toString()];
+  if (!def) return <>{children}</>;
+  return <span title={def} style={{ borderBottom: "1px dotted rgba(217,119,6,0.55)", cursor: "help" }}>{children}</span>;
+}
+
+function wrapTerms(text) {
+  if (!text || typeof text !== "string") return text;
+  const parts = text.split(GLOSSARY_REGEX);
+  return parts.map((part, i) => GLOSSARY[part] ? <Term key={i}>{part}</Term> : <React.Fragment key={i}>{part}</React.Fragment>);
+}
+
 const LAYER_INFO = {
   conductor: {
     function: "Carries the RF signal. Ohmic loss depends on conductivity and skin depth — at high freq, current flows only in the outer ~skin-depth of the wire.",
@@ -1169,7 +1319,7 @@ function LayerDetailPanel({ layer, c, onClose, units }) {
         <div style={{ color: matColor, fontSize: 10, letterSpacing: 2, fontWeight: 700, textTransform: "uppercase" }}>{layer}</div>
         <button onClick={onClose} style={{ background: "none", border: "none", color: "#a8a29e", cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1 }}>✕</button>
       </div>
-      <div style={{ color: "#e7e5e4", fontWeight: 600, marginBottom: 4 }}>{c.cons[layer]}</div>
+      <div style={{ color: "#e7e5e4", fontWeight: 600, marginBottom: 4 }}>{wrapTerms(c.cons[layer])}</div>
       <div style={{ color: "#d6cfc4", marginBottom: 10 }}>{dims.label}: {fmtLen(dims.mm, units)}</div>
       <div style={{ color: "#a8a29e", fontSize: 9.5, letterSpacing: 1.5, marginTop: 8, marginBottom: 3, textTransform: "uppercase" }}>Function</div>
       <div style={{ color: "#d6cfc4", marginBottom: 8 }}>{info.function}</div>
@@ -1211,6 +1361,107 @@ function explainStep(text) {
     if (pattern.test(t)) return info;
   }
   return null;
+}
+
+function interpAtten(atten, freqMHz) {
+  if (!atten || atten.length === 0) return 0;
+  if (freqMHz <= atten[0][0]) return atten[0][1];
+  if (freqMHz >= atten[atten.length - 1][0]) return atten[atten.length - 1][1];
+  for (let i = 0; i < atten.length - 1; i++) {
+    const [f1, a1] = atten[i], [f2, a2] = atten[i + 1];
+    if (freqMHz >= f1 && freqMHz <= f2) {
+      const lf1 = Math.log(f1), lf2 = Math.log(f2), lf = Math.log(freqMHz);
+      const la1 = Math.log(a1), la2 = Math.log(a2);
+      return Math.exp(la1 + (lf - lf1) / (lf2 - lf1) * (la2 - la1));
+    }
+  }
+  return atten[atten.length - 1][1];
+}
+
+function SignalFlow({ cable }) {
+  const [length, setLength] = useState(10);
+  const [freq, setFreq] = useState(900);
+  const [txPower, setTxPower] = useState(20);
+  const [rxSens, setRxSens] = useState(-85);
+
+  const attenPer100m = interpAtten(cable.atten, freq);
+  const totalLoss = attenPer100m * length / 100;
+  const rxPower = txPower - totalLoss;
+  const margin = rxPower - rxSens;
+  const ok = margin > 0;
+
+  const W = 720, H = 150;
+  const cableX1 = 80, cableX2 = W - 80;
+  const cableY = H / 2;
+  const pulseDur = Math.max(1.5, Math.min(4, length / 3));
+
+  const Pulse = ({ delay }) => (
+    <g>
+      <circle r="9" fill="#fbbf24">
+        <animate attributeName="cx" values={`${cableX1};${cableX2}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
+        <animate attributeName="r" values={`10;${ok ? 4 : 2}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
+        <animate attributeName="opacity" values={`0.95;${ok ? 0.35 : 0.1}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
+      </circle>
+      <circle r="14" fill="none" stroke="#fbbf24" strokeWidth="1" opacity="0.5">
+        <animate attributeName="cx" values={`${cableX1};${cableX2}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
+        <animate attributeName="r" values={`16;${ok ? 6 : 3}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
+        <animate attributeName="opacity" values={`0.6;0`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
+      </circle>
+    </g>
+  );
+
+  const Ctrl = ({ label, val, set, min, max, step = 1, unit }) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1, minWidth: 110 }}>
+      <div style={{ fontSize: 9, letterSpacing: 1, color: "#a8a29e", textTransform: "uppercase", display: "flex", justifyContent: "space-between" }}>
+        <span>{label}</span>
+        <span style={{ color: "#fbbf24" }}>{val}{unit}</span>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={val} onChange={(e) => set(Number(e.target.value))} style={{ width: "100%", accentColor: "#d97706" }} onClick={(e) => e.stopPropagation()} />
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 10 }} onClick={(e) => e.stopPropagation()}>
+        <Ctrl label="TX power" val={txPower} set={setTxPower} min={0} max={40} unit=" dBm" />
+        <Ctrl label="Length" val={length} set={setLength} min={1} max={100} unit=" m" />
+        <Ctrl label="Frequency" val={freq} set={setFreq} min={10} max={Math.round(cable.fMax * 1000)} unit=" MHz" />
+        <Ctrl label="RX sensitivity" val={rxSens} set={setRxSens} min={-120} max={-30} unit=" dBm" />
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", background: "rgba(15,10,5,0.35)", borderRadius: 3 }}>
+        <defs>
+          <linearGradient id="cable-grad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#fbbf24" stopOpacity="0.9" />
+            <stop offset="100%" stopColor="#fbbf24" stopOpacity={ok ? 0.3 : 0.1} />
+          </linearGradient>
+        </defs>
+        <rect x={10} y={cableY - 28} width={70} height={56} fill="#1f1611" stroke="#d97706" strokeWidth="1.5" rx="3" />
+        <text x={45} y={cableY - 10} fontSize="10" fill="#fbbf24" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontWeight="700">TX</text>
+        <text x={45} y={cableY + 5} fontSize="8.5" fill="#fbbf24" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{txPower.toFixed(0)} dBm</text>
+        <text x={45} y={cableY + 18} fontSize="7" fill="#a8a29e" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{(10 ** (txPower / 10)).toFixed(0)} mW</text>
+
+        <line x1={cableX1} y1={cableY} x2={cableX2} y2={cableY} stroke="#2a2520" strokeWidth="10" strokeLinecap="round" />
+        <line x1={cableX1} y1={cableY} x2={cableX2} y2={cableY} stroke="url(#cable-grad)" strokeWidth="4" strokeLinecap="round" />
+
+        <Pulse delay={0} />
+        <Pulse delay={pulseDur * 0.33} />
+        <Pulse delay={pulseDur * 0.66} />
+
+        <rect x={W - 80} y={cableY - 28} width={70} height={56} fill="#1f1611" stroke={ok ? "#34d399" : "#ef4444"} strokeWidth="1.5" rx="3" />
+        <text x={W - 45} y={cableY - 10} fontSize="10" fill={ok ? "#34d399" : "#ef4444"} textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontWeight="700">RX</text>
+        <text x={W - 45} y={cableY + 5} fontSize="8.5" fill={ok ? "#34d399" : "#ef4444"} textAnchor="middle" fontFamily="JetBrains Mono, monospace">{rxPower.toFixed(1)} dBm</text>
+        <text x={W - 45} y={cableY + 18} fontSize="7" fill="#a8a29e" textAnchor="middle" fontFamily="JetBrains Mono, monospace">sens: {rxSens} dBm</text>
+
+        <text x={W / 2} y={cableY - 22} fontSize="9" fill="#a8a29e" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{cable.name} · {length} m · {freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}</text>
+        <text x={W / 2} y={cableY + 28} fontSize="10" fill="#fbbf24" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontWeight="700">Loss: {totalLoss.toFixed(2)} dB ({attenPer100m.toFixed(2)} dB/100m)</text>
+      </svg>
+      <div style={{ textAlign: "center", marginTop: 8, fontSize: 11, fontFamily: "JetBrains Mono, monospace" }}>
+        <span style={{ color: "#a8a29e" }}>Link margin: </span>
+        <span style={{ color: ok ? "#34d399" : "#ef4444", fontWeight: 700 }}>{margin > 0 ? "+" : ""}{margin.toFixed(2)} dB</span>
+        <span style={{ color: "#a8a29e" }}> — {ok ? "link closes ✓" : "below sensitivity ✗"}</span>
+      </div>
+    </div>
+  );
 }
 
 function shortMat(s) {
@@ -1403,7 +1654,7 @@ const Headline = ({ label, value, match }) => (<div style={S.headline}><div styl
 const QS = ({ label, v }) => (<div style={{ textAlign: "right", minWidth: 40 }}><div style={{ fontSize: 8, color: "#78716c", textTransform: "uppercase", letterSpacing: "0.1em" }}>{label}</div><div style={{ fontSize: 11, color: "#fbbf24" }}>{v}</div></div>);
 const DS = ({ title, children }) => (<div style={{ marginBottom: 18 }}><div style={S.dsTitle}>{title}</div>{children}</div>);
 const DR = ({ label, v }) => (<div style={S.dr}><span style={{ color: "#a89d8e" }}>{label}</span><span style={{ color: "#fbbf24", textAlign: "right" }}>{v}</span></div>);
-const Layer = ({ n, name, color, desc }) => (<div style={S.layer}><div style={{ ...S.layerDot, background: color }}>{n}</div><div style={{ flex: 1 }}><div style={S.layerName}>{name}</div><div style={S.layerDesc}>{desc}</div></div></div>);
+const Layer = ({ n, name, color, desc }) => (<div style={S.layer}><div style={{ ...S.layerDot, background: color }}>{n}</div><div style={{ flex: 1 }}><div style={S.layerName}>{name}</div><div style={S.layerDesc}>{wrapTerms(desc)}</div></div></div>);
 
 // ═══════════════════════════════════════════════════════════════
 // STYLES
