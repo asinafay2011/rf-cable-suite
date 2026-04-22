@@ -668,10 +668,42 @@ function SettingsIcon() {
 // ═══════════════════════════════════════════════════════════════
 // ASK VIEW
 // ═══════════════════════════════════════════════════════════════
+// Drops any tool_use blocks from assistant messages that aren't followed by
+// a matching tool_result — protects against histories saved before tool_result
+// messages were persisted, which the API rejects with 400.
+function sanitizeHistory(msgs) {
+  if (!Array.isArray(msgs)) return [];
+  const out = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m?.role === "assistant" && Array.isArray(m.content)) {
+      const toolUseIds = m.content.filter(b => b?.type === "tool_use").map(b => b.id);
+      if (toolUseIds.length > 0) {
+        const next = msgs[i + 1];
+        const resultIds = next?.role === "user" && Array.isArray(next.content)
+          ? next.content.filter(b => b?.type === "tool_result").map(b => b.tool_use_id)
+          : [];
+        const allMatched = toolUseIds.every(id => resultIds.includes(id));
+        if (!allMatched) {
+          const stripped = m.content.filter(b => b?.type !== "tool_use");
+          if (stripped.length > 0) out.push({ ...m, content: stripped });
+          continue;
+        }
+      }
+    }
+    out.push(m);
+  }
+  return out;
+}
+
 function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
   const { showTools, ttsEnabled } = useContext(SettingsContext);
   const [messages, setMessages] = useState(() => {
-    try { const s = localStorage.getItem("rf-chat-history"); return s ? JSON.parse(s) : []; } catch { return []; }
+    try {
+      const s = localStorage.getItem("rf-chat-history");
+      const raw = s ? JSON.parse(s) : [];
+      return sanitizeHistory(raw);
+    } catch { return []; }
   });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -749,6 +781,7 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
         if (data.stop_reason !== "tool_use") break;
         const results = data.content.filter(b => b.type === "tool_use").map(b => ({ type: "tool_result", tool_use_id: b.id, content: JSON.stringify(executeTool(b.name, b.input)) }));
         api.push({ role: "user", content: results });
+        setMessages(prev => [...prev, { role: "user", content: results }]);
       }
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -819,6 +852,7 @@ function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign }) {
   if (m.role === "user") {
     if (typeof m.content === "string") return <div className="msg-anim" style={S.userMsg}><div style={S.userBubble}>{m.content}</div></div>;
     if (Array.isArray(m.content)) {
+      if (m.content.every(b => b.type === "tool_result")) return null;
       return (
         <div className="msg-anim" style={S.userMsg}>
           <div style={S.userBubble}>
