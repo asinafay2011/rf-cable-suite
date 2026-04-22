@@ -1032,7 +1032,7 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
           </div>
           <div style={{ padding: "14px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 }}>
             <div style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#a8a29e", marginBottom: 6, textTransform: "uppercase" }}>Cross-Section · Scaled to OD</div>
-            <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} />
+            <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} cons={c.cons} />
           </div>
           <div style={S.detailsGrid}>
             <div>
@@ -1075,6 +1075,7 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
                 {c.proc.map((s, i) => (
                   <div key={i} style={S.procStep}>
                     <div style={S.procNum}>{i + 1}</div>
+                    <StepIcon text={s} />
                     <div style={S.procText}>{s}</div>
                   </div>
                 ))}
@@ -1091,7 +1092,33 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
 // ═══════════════════════════════════════════════════════════════
 // SHARED COMPONENTS
 // ═══════════════════════════════════════════════════════════════
-function CrossSection({ d, D, shield, jacket, units }) {
+function shortMat(s) {
+  if (!s) return null;
+  const before = s.split(",")[0].trim();
+  return before.replace(/^(\d+[- ]?strand(ed)?|solid|bare|single|double|triple|quad)\s+/i, "").replace(/\s+(each|wire)$/i, "");
+}
+
+function getStrands(n, totalR) {
+  if (n <= 1) return null;
+  if (n === 7) {
+    const r = totalR / 3;
+    return { strandR: r, positions: [[0, 0], ...Array.from({ length: 6 }, (_, i) => { const a = i * Math.PI / 3 - Math.PI / 2; return [Math.cos(a) * r * 2, Math.sin(a) * r * 2]; })] };
+  }
+  if (n === 19) {
+    const r = totalR / 5;
+    const positions = [[0, 0]];
+    for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 - Math.PI / 2; positions.push([Math.cos(a) * r * 2, Math.sin(a) * r * 2]); }
+    for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 - Math.PI / 2; positions.push([Math.cos(a) * r * 4, Math.sin(a) * r * 4]); }
+    for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 - Math.PI / 6; positions.push([Math.cos(a) * r * 3.464, Math.sin(a) * r * 3.464]); }
+    return { strandR: r, positions };
+  }
+  const r = totalR / Math.max(3, Math.sqrt(n));
+  const positions = [[0, 0]];
+  for (let i = 1; i < Math.min(n, 12); i++) { const a = (i - 1) * 2 * Math.PI / Math.max(6, n - 1); positions.push([Math.cos(a) * (totalR - r), Math.sin(a) * (totalR - r)]); }
+  return { strandR: r, positions };
+}
+
+function CrossSection({ d, D, shield, jacket, units, cons }) {
   const size = 300, cx = size / 2, cy = size / 2, maxR = size * 0.26;
   const scale = maxR / (jacket / 2);
   const r_in = (d / 2) * scale, r_dx = (D / 2) * scale, r_sh = (shield / 2) * scale, r_jk = (jacket / 2) * scale;
@@ -1103,14 +1130,18 @@ function CrossSection({ d, D, shield, jacket, units }) {
     return `${fmt(mm, 2)}mm`;
   };
 
+  const strandMatch = cons?.conductor?.match(/(\d+)[- ]?strand/i);
+  const strands = strandMatch ? parseInt(strandMatch[1]) : 1;
+  const strandData = strands > 1 ? getStrands(strands, r_in) : null;
+
   const callouts = [
-    { angle: -140, r: r_in, name: "Conductor", value: compact(d), color: "#fbbf24" },
-    { angle: -40,  r: r_dx, name: "Dielectric", value: compact(D), color: "#fde68a" },
-    { angle:  40,  r: r_sh, name: "Shield",    value: compact(shield), color: "#9ca3af" },
-    { angle: 140,  r: r_jk, name: "Jacket",    value: compact(jacket), color: "#a8a29e" },
+    { angle: -140, r: r_in, name: "Conductor", value: compact(d), mat: shortMat(cons?.conductor), color: "#fbbf24" },
+    { angle: -40,  r: r_dx, name: "Dielectric", value: compact(D), mat: shortMat(cons?.dielectric), color: "#fde68a" },
+    { angle:  40,  r: r_sh, name: "Shield",    value: compact(shield), mat: shortMat(cons?.shield), color: "#9ca3af" },
+    { angle: 140,  r: r_jk, name: "Jacket",    value: compact(jacket), mat: shortMat(cons?.jacket), color: "#a8a29e" },
   ];
 
-  const drawCallout = ({ angle, r, name, value, color }, i) => {
+  const drawCallout = ({ angle, r, name, value, mat, color }, i) => {
     const rad = angle * Math.PI / 180;
     const cos = Math.cos(rad), sin = Math.sin(rad);
     const x1 = cx + cos * r, y1 = cy + sin * r;
@@ -1118,12 +1149,14 @@ function CrossSection({ d, D, shield, jacket, units }) {
     const x2 = cx + cos * elbowR, y2 = cy + sin * elbowR;
     const textX = cos < 0 ? x2 - 6 : x2 + 6;
     const anchor = cos < 0 ? "end" : "start";
+    const topY = y2 - (mat ? 12 : 4);
     return (
       <g key={i}>
         <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth="0.7" strokeDasharray="2,2" opacity="0.7" />
         <circle cx={x1} cy={y1} r="1.6" fill={color} />
-        <text x={textX} y={y2 - 3} fill={color} fontSize="10" fontFamily="JetBrains Mono, monospace" textAnchor={anchor} fontWeight="600" letterSpacing="0.5">{name.toUpperCase()}</text>
-        <text x={textX} y={y2 + 9} fill={color} fontSize="9" fontFamily="JetBrains Mono, monospace" textAnchor={anchor} opacity="0.85">{value}</text>
+        <text x={textX} y={topY} fill={color} fontSize="10" fontFamily="JetBrains Mono, monospace" textAnchor={anchor} fontWeight="600" letterSpacing="0.5">{name.toUpperCase()}</text>
+        {mat && <text x={textX} y={topY + 10} fill={color} fontSize="8" fontFamily="JetBrains Mono, monospace" textAnchor={anchor} opacity="0.7" fontStyle="italic">{mat}</text>}
+        <text x={textX} y={topY + (mat ? 20 : 10)} fill={color} fontSize="9" fontFamily="JetBrains Mono, monospace" textAnchor={anchor} opacity="0.9">{value}</text>
       </g>
     );
   };
@@ -1132,16 +1165,66 @@ function CrossSection({ d, D, shield, jacket, units }) {
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block", margin: "0 auto" }}>
       <defs>
         <radialGradient id="cu-grad" cx="35%" cy="35%"><stop offset="0%" stopColor="#fde68a" /><stop offset="35%" stopColor="#fbbf24" /><stop offset="75%" stopColor="#b45309" /><stop offset="100%" stopColor="#451a03" /></radialGradient>
-        <pattern id="braid-p" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)"><rect width="6" height="6" fill="#4b5563" /><path d="M0 3h6M3 0v6" stroke="#9ca3af" strokeWidth="0.7" /></pattern>
+        <pattern id="braid-p" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <rect width="6" height="6" fill="#4b5563" />
+          <path d="M0 3h6M3 0v6" stroke="#9ca3af" strokeWidth="0.7" />
+          <animateTransform attributeName="patternTransform" type="rotate" from="45" to="405" dur="60s" repeatCount="indefinite" />
+        </pattern>
         <radialGradient id="jk-grad" cx="50%" cy="50%"><stop offset="70%" stopColor="#0a0705" /><stop offset="100%" stopColor="#1f1611" /></radialGradient>
       </defs>
       <circle cx={cx} cy={cy} r={r_jk} fill="url(#jk-grad)" stroke="#2a1f15" strokeWidth="1" />
       <circle cx={cx} cy={cy} r={r_sh} fill="url(#braid-p)" stroke="#6b7280" strokeWidth="0.4" />
       <circle cx={cx} cy={cy} r={r_dx} fill="rgba(255,250,235,0.14)" stroke="rgba(217,119,6,0.4)" strokeWidth="0.5" />
-      <circle cx={cx} cy={cy} r={r_in} fill="url(#cu-grad)" />
+
+      {strandData ? (
+        <g transform={`translate(${cx}, ${cy})`}>
+          <g>
+            <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="40s" repeatCount="indefinite" />
+            {strandData.positions.map(([x, y], i) => (
+              <circle key={i} cx={x} cy={y} r={strandData.strandR * 0.92} fill="url(#cu-grad)" stroke="#451a03" strokeWidth="0.3" />
+            ))}
+          </g>
+        </g>
+      ) : (
+        <circle cx={cx} cy={cy} r={r_in} fill="url(#cu-grad)" />
+      )}
+
       {callouts.map(drawCallout)}
     </svg>
   );
+}
+
+function StepIcon({ text }) {
+  const t = (text || "").toLowerCase();
+  let color = "#a8a29e", content = null;
+  if (/draw|strand|bunch|twist|lay/.test(t)) {
+    color = "#fbbf24";
+    content = <g><rect x="2" y="11" width="13" height="2" fill="currentColor" /><polygon points="15,7 21,12 15,17" fill="currentColor" /></g>;
+  } else if (/silver[- ]?plat|tin[- ]?plat|plate|plating/.test(t)) {
+    color = "#d1d5db";
+    content = <g><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="12" cy="12" r="4" fill="currentColor" opacity="0.55" /></g>;
+  } else if (/extrud|foam|ptfe|pe\b|polyeth|dielectric|sinter|co[- ]?extrud/.test(t)) {
+    color = "#fde68a";
+    content = <g><rect x="4" y="9" width="11" height="6" rx="1" fill="currentColor" /><line x1="15" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="2" /><circle cx="20" cy="12" r="1.8" fill="currentColor" /></g>;
+  } else if (/braid|coverage|weave/.test(t)) {
+    color = "#9ca3af";
+    content = <g><path d="M2,8 C6,8 6,16 10,16 C14,16 14,8 18,8 C22,8 22,16 26,16" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M2,16 C6,16 6,8 10,8 C14,8 14,16 18,16 C22,16 22,8 26,8" fill="none" stroke="currentColor" strokeWidth="1.6" /></g>;
+  } else if (/foil|tape|bond|duobond|al[- ]?polymer/.test(t)) {
+    color = "#cbd5e1";
+    content = <rect x="2" y="9" width="20" height="6" rx="1" fill="currentColor" opacity="0.75" />;
+  } else if (/jacket/.test(t)) {
+    color = "#a8a29e";
+    content = <g><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="3" /><circle cx="12" cy="12" r="3" fill="currentColor" /></g>;
+  } else if (/tube|corrugat|seam[- ]?weld|heliax|rigid/.test(t)) {
+    color = "#9ca3af";
+    content = <g><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2.5" strokeDasharray="2,1.5" /></g>;
+  } else if (/test|sweep|capacit|vswr|tdr|impulse|hi[- ]?pot|measure|qc|voltage/.test(t)) {
+    color = "#34d399";
+    content = <polyline points="2,12 6,12 8,6 12,18 14,6 18,18 20,12 22,12" fill="none" stroke="currentColor" strokeWidth="2" />;
+  } else {
+    content = <circle cx="12" cy="12" r="3" fill="currentColor" />;
+  }
+  return <svg width="26" height="26" viewBox="0 0 24 24" style={{ color, flexShrink: 0 }}>{content}</svg>;
 }
 
 function MiniCrossSection({ c }) {
@@ -1294,7 +1377,7 @@ const S = {
   layerDot: { width: 20, height: 20, flexShrink: 0, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: "#0a0705", fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 10 },
   layerName: { fontSize: 10, color: "#fef3c7", fontWeight: 500, marginBottom: 2 },
   layerDesc: { fontSize: 10, color: "#a89d8e", lineHeight: 1.5 },
-  procStep: { display: "flex", gap: 10, padding: "6px 0", borderBottom: "1px dashed #2a1f15" },
+  procStep: { display: "flex", gap: 10, padding: "8px 0", borderBottom: "1px dashed #2a1f15", alignItems: "center" },
   procNum: { width: 18, height: 18, flexShrink: 0, background: "#d97706", color: "#0a0705", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700 },
   procText: { fontSize: 10, color: "#d6cfc4", lineHeight: 1.5, paddingTop: 1 },
   emptyState: { padding: 40, textAlign: "center", fontSize: 11, color: "#78716c", fontStyle: "italic", background: "rgba(20,14,9,0.4)", border: "1px dashed #2a1f15", borderRadius: 3 },
