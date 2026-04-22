@@ -1030,6 +1030,10 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
             <button onClick={onDesign} style={S.actionBtn}>→ Load into Designer</button>
             <button onClick={onAsk} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>Ask Agent about this</button>
           </div>
+          <div style={{ padding: "14px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 }}>
+            <div style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#a8a29e", marginBottom: 6, textTransform: "uppercase" }}>Cross-Section · Scaled to OD</div>
+            <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} />
+          </div>
           <div style={S.detailsGrid}>
             <div>
               <DS title="Electrical">
@@ -1088,25 +1092,54 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
 // SHARED COMPONENTS
 // ═══════════════════════════════════════════════════════════════
 function CrossSection({ d, D, shield, jacket, units }) {
-  const size = 200, cx = size / 2, cy = size / 2, maxR = size * 0.42;
+  const size = 300, cx = size / 2, cy = size / 2, maxR = size * 0.26;
   const scale = maxR / (jacket / 2);
   const r_in = (d / 2) * scale, r_dx = (D / 2) * scale, r_sh = (shield / 2) * scale, r_jk = (jacket / 2) * scale;
-  const dLabel = units === "imperial" ? `d=${(d / 25.4).toFixed(3)}"` : `d=${fmt(d, 2)}mm`;
-  const DLabel = units === "imperial" ? `D=${(D / 25.4).toFixed(3)}"` : `D=${fmt(D, 2)}mm`;
+
+  const compact = (mm) => {
+    const inch = (mm / 25.4).toFixed(3);
+    if (units === "imperial") return `${inch}"`;
+    if (units === "both") return `${fmt(mm, 2)}mm · ${inch}"`;
+    return `${fmt(mm, 2)}mm`;
+  };
+
+  const callouts = [
+    { angle: -140, r: r_in, name: "Conductor", value: compact(d), color: "#fbbf24" },
+    { angle: -40,  r: r_dx, name: "Dielectric", value: compact(D), color: "#fde68a" },
+    { angle:  40,  r: r_sh, name: "Shield",    value: compact(shield), color: "#9ca3af" },
+    { angle: 140,  r: r_jk, name: "Jacket",    value: compact(jacket), color: "#a8a29e" },
+  ];
+
+  const drawCallout = ({ angle, r, name, value, color }, i) => {
+    const rad = angle * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const x1 = cx + cos * r, y1 = cy + sin * r;
+    const elbowR = maxR + 18;
+    const x2 = cx + cos * elbowR, y2 = cy + sin * elbowR;
+    const textX = cos < 0 ? x2 - 6 : x2 + 6;
+    const anchor = cos < 0 ? "end" : "start";
+    return (
+      <g key={i}>
+        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth="0.7" strokeDasharray="2,2" opacity="0.7" />
+        <circle cx={x1} cy={y1} r="1.6" fill={color} />
+        <text x={textX} y={y2 - 3} fill={color} fontSize="10" fontFamily="JetBrains Mono, monospace" textAnchor={anchor} fontWeight="600" letterSpacing="0.5">{name.toUpperCase()}</text>
+        <text x={textX} y={y2 + 9} fill={color} fontSize="9" fontFamily="JetBrains Mono, monospace" textAnchor={anchor} opacity="0.85">{value}</text>
+      </g>
+    );
+  };
+
   return (
-    <svg width={size} height={size} style={{ display: "block", margin: "0 auto" }}>
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block", margin: "0 auto" }}>
       <defs>
-        <radialGradient id="cu-grad" cx="35%" cy="35%"><stop offset="0%" stopColor="#fbbf24" /><stop offset="60%" stopColor="#b45309" /><stop offset="100%" stopColor="#451a03" /></radialGradient>
+        <radialGradient id="cu-grad" cx="35%" cy="35%"><stop offset="0%" stopColor="#fde68a" /><stop offset="35%" stopColor="#fbbf24" /><stop offset="75%" stopColor="#b45309" /><stop offset="100%" stopColor="#451a03" /></radialGradient>
         <pattern id="braid-p" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)"><rect width="6" height="6" fill="#4b5563" /><path d="M0 3h6M3 0v6" stroke="#9ca3af" strokeWidth="0.7" /></pattern>
+        <radialGradient id="jk-grad" cx="50%" cy="50%"><stop offset="70%" stopColor="#0a0705" /><stop offset="100%" stopColor="#1f1611" /></radialGradient>
       </defs>
-      <circle cx={cx} cy={cy} r={r_jk} fill="#0a0705" stroke="#1f1611" />
-      <circle cx={cx} cy={cy} r={r_sh} fill="url(#braid-p)" />
-      <circle cx={cx} cy={cy} r={r_dx} fill="rgba(255,250,235,0.12)" stroke="rgba(217,119,6,0.35)" strokeWidth="0.5" />
+      <circle cx={cx} cy={cy} r={r_jk} fill="url(#jk-grad)" stroke="#2a1f15" strokeWidth="1" />
+      <circle cx={cx} cy={cy} r={r_sh} fill="url(#braid-p)" stroke="#6b7280" strokeWidth="0.4" />
+      <circle cx={cx} cy={cy} r={r_dx} fill="rgba(255,250,235,0.14)" stroke="rgba(217,119,6,0.4)" strokeWidth="0.5" />
       <circle cx={cx} cy={cy} r={r_in} fill="url(#cu-grad)" />
-      <line x1={cx} y1={cy} x2={cx + r_in} y2={cy} stroke="#fbbf24" strokeWidth="0.6" strokeDasharray="2,2" />
-      <line x1={cx} y1={cy} x2={cx} y2={cy - r_dx} stroke="#fde68a" strokeWidth="0.6" strokeDasharray="2,2" />
-      <text x={cx + r_in / 2 + 3} y={cy - 3} fill="#fbbf24" fontSize="9" fontFamily="JetBrains Mono">{dLabel}</text>
-      <text x={cx + 3} y={cy - r_dx / 2} fill="#fde68a" fontSize="9" fontFamily="JetBrains Mono">{DLabel}</text>
+      {callouts.map(drawCallout)}
     </svg>
   );
 }
