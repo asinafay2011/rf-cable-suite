@@ -1486,14 +1486,15 @@ const DB_REFS = [
 ];
 
 function DbmRuler({ txPower, rxPower }) {
-  const W = 720, H = 90;
+  const W = 720, H = 130;
   const minDb = -150, maxDb = 60;
   const padL = 24, padR = 24;
-  const rulerY = 40;
+  const rulerY = 48;
   const rulerX1 = padL, rulerX2 = W - padR;
   const pos = (db) => rulerX1 + (db - minDb) / (maxDb - minDb) * (rulerX2 - rulerX1);
-  const txX = pos(Math.max(minDb, Math.min(maxDb, txPower)));
-  const rxX = pos(Math.max(minDb, Math.min(maxDb, rxPower)));
+  const clamp = (v) => Math.max(minDb, Math.min(maxDb, v));
+  const txX = pos(clamp(txPower));
+  const rxX = pos(clamp(rxPower));
   const rxClamped = rxPower < minDb;
   return (
     <div style={{ marginTop: 14, padding: "10px 0 0", borderTop: "1px dashed rgba(217,119,6,0.15)" }}>
@@ -1507,29 +1508,36 @@ function DbmRuler({ txPower, rxPower }) {
             <stop offset="100%" stopColor="#dc2626" />
           </linearGradient>
         </defs>
+
+        <g>
+          <text x={txX} y={10} fontSize="9" fill="#fbbf24" textAnchor="middle" fontWeight="700" fontFamily="JetBrains Mono, monospace">TX {txPower.toFixed(0)} dBm</text>
+          <line x1={txX} y1={14} x2={txX} y2={rulerY - 4} stroke="#fbbf24" strokeWidth="1.2" strokeDasharray="2,2" opacity="0.7" />
+          <circle cx={txX} cy={rulerY} r="5.5" fill="#fbbf24" stroke="#d97706" strokeWidth="1.5" />
+        </g>
+
         <line x1={rulerX1} y1={rulerY} x2={rulerX2} y2={rulerY} stroke="url(#dbm-grad)" strokeWidth="5" strokeLinecap="round" />
         {[-150, -120, -90, -60, -30, 0, 30, 60].map((v, i) => (
           <g key={i}>
             <line x1={pos(v)} y1={rulerY - 4} x2={pos(v)} y2={rulerY + 4} stroke="#78716c" strokeWidth="0.8" />
-            <text x={pos(v)} y={rulerY + 14} fontSize="8" fill="#78716c" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{v}</text>
+            <text x={pos(v)} y={rulerY + 14} fontSize="7.5" fill="#78716c" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{v}</text>
           </g>
         ))}
-        {DB_REFS.map((r, i) => (
-          <g key={i}>
-            <circle cx={pos(r.db)} cy={rulerY} r="2.5" fill="#d6cfc4" />
-            <text x={pos(r.db)} y={rulerY + 28} fontSize="7.5" fill="#a8a29e" textAnchor="middle" transform={`rotate(-28, ${pos(r.db)}, ${rulerY + 28})`}>{r.label}</text>
-          </g>
-        ))}
-        <g>
-          <line x1={txX} y1={rulerY - 22} x2={txX} y2={rulerY - 3} stroke="#fbbf24" strokeWidth="1.5" />
-          <circle cx={txX} cy={rulerY - 24} r="5" fill="#fbbf24" stroke="#d97706" strokeWidth="1.5" />
-          <text x={txX} y={rulerY - 31} fontSize="9" fill="#fbbf24" textAnchor="middle" fontWeight="700" fontFamily="JetBrains Mono, monospace">TX</text>
-        </g>
+
+        {DB_REFS.map((r, i) => {
+          const yOff = (i % 2) * 10;
+          return (
+            <g key={i}>
+              <circle cx={pos(r.db)} cy={rulerY} r="2" fill="#d6cfc4" opacity="0.65" />
+              <text x={pos(r.db)} y={rulerY + 26 + yOff} fontSize="7" fill="#a8a29e" textAnchor="middle">{r.label}</text>
+            </g>
+          );
+        })}
+
         {!rxClamped && (
           <g>
-            <line x1={rxX} y1={rulerY + 5} x2={rxX} y2={rulerY + 22} stroke="#34d399" strokeWidth="1.5" />
-            <circle cx={rxX} cy={rulerY + 24} r="5" fill="#34d399" stroke="#10b981" strokeWidth="1.5" />
-            <text x={rxX} y={rulerY + 42} fontSize="9" fill="#34d399" textAnchor="middle" fontWeight="700" fontFamily="JetBrains Mono, monospace">RX</text>
+            <circle cx={rxX} cy={rulerY} r="5.5" fill="#34d399" stroke="#10b981" strokeWidth="1.5" />
+            <line x1={rxX} y1={rulerY + 6} x2={rxX} y2={H - 16} stroke="#34d399" strokeWidth="1.2" strokeDasharray="2,2" opacity="0.7" />
+            <text x={rxX} y={H - 4} fontSize="9" fill="#34d399" textAnchor="middle" fontWeight="700" fontFamily="JetBrains Mono, monospace">RX {rxPower.toFixed(1)} dBm</text>
           </g>
         )}
       </svg>
