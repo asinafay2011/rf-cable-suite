@@ -2337,7 +2337,53 @@ function LinkView({ openInLibrary }) {
       </div>
 
       <div style={{ fontSize: 10, color: "#78716c", marginTop: 12, padding: "10px 12px", background: "rgba(15,10,5,0.3)", borderRadius: 3, lineHeight: 1.6 }}>
-        💡 <strong style={{ color: "#a8a29e" }}>Tip:</strong> Click <strong style={{ color: "#fbbf24" }}>+</strong> between segments to insert a cable. Use the type dropdown inside each card to change component (cable ↔ connector ↔ amp ↔ splitter). Frequency slider affects all cables + connectors in the chain. Splitter loss includes insertion loss on top of ideal −10·log(N).
+        💡 <strong style={{ color: "#a8a29e" }}>Tip:</strong> Click <strong style={{ color: "#fbbf24" }}>+</strong> between segments to insert a cable. Click icon buttons at the bottom of each card (━ ◎ ▲ ▼ ⌂) to insert other component types. Frequency slider affects all cables + connectors in the chain.
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 8 }}>Component guide — what each does + example</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 10 }}>
+          {[
+            { icon: "━", color: "#fbbf24", name: "Cable",
+              what: "RF transmission line carrying signal from source to load. Loss rises with length, frequency, and skin effect; drops with larger conductor + lower-εr dielectric.",
+              example: "LMR-400 at 2.4 GHz, 10 m → 1.26 dB loss. Doubling length doubles dB. Going from 1 GHz → 5 GHz ≈ 2.2× more loss." },
+            { icon: "◎", color: "#38bdf8", name: "Connector",
+              what: "Mechanical interface between two cables (or cable-to-device). Adds small fixed insertion loss (0.1–0.3 dB typical) plus potential impedance bump and PIM. Every joint = one more loss point.",
+              example: "N-type male/female mate → 0.15 dB IL. 5 connectors in a chain → 0.75 dB total — not free even though each seems small." },
+            { icon: "▲", color: "#34d399", name: "Amplifier (amp)",
+              what: "Active device that ADDS RF power (gain in positive dB). Uses DC power to boost signal. Placed near RX antenna (LNA) to raise weak signal above noise floor, or near TX (PA) for transmit power.",
+              example: "LNA with +20 dB gain: input -75 dBm → output -55 dBm. Compensates for a 20 dB cable loss at TX end, keeping RX SNR intact." },
+            { icon: "▼", color: "#f97316", name: "Attenuator (pad)",
+              what: "Passive fixed-loss pad that INTENTIONALLY reduces signal. Uses: protect sensitive RX from overload, isolate reflections, impedance matching, test-setup calibration.",
+              example: "Spectrum analyzer with +30 dBm TX nearby → insert 20 dB attenuator to bring signal down to +10 dBm (safe for analyzer's -10 dBm max input)." },
+            { icon: "⌂", color: "#c084fc", name: "Splitter / divider",
+              what: "Divides input signal into N equal outputs. Each output receives 1/N of input power (ideal), plus 0.5–1 dB extra insertion loss. Resistive splitters simplest; Wilkinson / hybrid have better isolation.",
+              example: "2-way splitter: -3.5 dB per port (ideal 3.0 + 0.5 loss). 4-way: -6.5 dB. 8-way: -9.5 dB. Used in DAS to feed multiple antennas from one TX." },
+            { icon: "◆", color: "#a8a29e", name: "Custom",
+              what: "Any other component with user-defined fixed loss or gain. Use for filters, circulators, isolators, switches, bias tees, couplers, or unknown passive devices.",
+              example: "Bandpass filter in passband → 1 dB IL. Circulator → 0.4 dB IL per port. 10-dB directional coupler's through path → 0.5 dB IL." },
+          ].map((c) => (
+            <div key={c.name} style={{ padding: "10px 12px", background: "rgba(15,10,5,0.5)", border: `1px solid ${c.color}44`, borderRadius: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                <div style={{ width: 24, height: 24, borderRadius: 3, background: `${c.color}22`, border: `1px solid ${c.color}`, color: c.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{c.icon}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: c.color, letterSpacing: 0.5 }}>{c.name}</div>
+              </div>
+              <div style={{ fontSize: 10, color: "#d6cfc4", lineHeight: 1.55, marginBottom: 6 }}>{c.what}</div>
+              <div style={{ fontSize: 10, color: "#a8a29e", lineHeight: 1.55, paddingLeft: 8, borderLeft: `2px solid ${c.color}55`, fontStyle: "italic" }}><strong style={{ color: c.color, fontStyle: "normal" }}>Example:</strong> {c.example}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: 10, padding: "10px 12px", background: "rgba(15,10,5,0.5)", border: "1px solid #2a1f15", borderRadius: 4 }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 6 }}>Common real-world chains</div>
+          <div style={{ fontSize: 10.5, color: "#d6cfc4", lineHeight: 1.7, fontFamily: "JetBrains Mono, monospace" }}>
+            <div>📡 <strong style={{ color: "#fbbf24" }}>Cellular macro (LTE 2600 MHz, 20W TX):</strong> TX 43 dBm → LDF4-50A 40m → 4.3-10 → splitter 2-way → LDF4 5m → antenna. Margin ~8-12 dB typical.</div>
+            <div>📶 <strong style={{ color: "#fbbf24" }}>Outdoor Wi-Fi bridge (5.8 GHz, 20 dBm):</strong> router → LMR-400 15m → N → antenna. Loss ~5 dB, margin depends on RX −74 dBm sens + antenna gain.</div>
+            <div>🛰️ <strong style={{ color: "#fbbf24" }}>GPS receiver (1.57 GHz):</strong> GPS antenna (gain +3 dBi) → LNA +25 dB gain → LMR-240 20m → GPS receiver. LNA near antenna = critical (no cable before it).</div>
+            <div>🔬 <strong style={{ color: "#fbbf24" }}>VNA test (up to 18 GHz):</strong> VNA port (0 dBm) → SUCOFLEX 104 1.5m → SMA → DUT. Need low phase drift cable.</div>
+            <div>📺 <strong style={{ color: "#fbbf24" }}>Broadcast FM (100 MHz, 10 kW):</strong> TX +70 dBm → LDF7-50A 80m → 7/16 DIN → antenna. Large cable mandatory for kW-class power + low loss.</div>
+          </div>
+        </div>
       </div>
     </div>
   );
