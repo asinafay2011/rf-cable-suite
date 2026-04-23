@@ -3276,6 +3276,104 @@ function TDRTool() {
 // ═══════════════════════════════════════════════════════════════
 // MULTI-SEGMENT LINK BUDGET
 // ═══════════════════════════════════════════════════════════════
+function BOMPanel({ segments, freq }) {
+  const bom = useMemo(() => {
+    const cables = {}, connectors = {};
+    let amps = 0, attens = 0, splitters = [];
+    const items = [];
+    segments.forEach(s => {
+      if (s.type === "cable") {
+        const c = CABLES[s.cableId];
+        if (!c) return;
+        if (!cables[s.cableId]) cables[s.cableId] = { cable: c, totalLength: 0, qty: 0 };
+        cables[s.cableId].totalLength += s.lengthM || 0;
+        cables[s.cableId].qty += 1;
+      } else if (s.type === "connector") {
+        const c = CONNECTORS[s.connectorId];
+        if (!c) return;
+        if (!connectors[s.connectorId]) connectors[s.connectorId] = { connector: c, qty: 0 };
+        connectors[s.connectorId].qty += 1;
+      } else if (s.type === "amp") { amps++; }
+      else if (s.type === "atten") { attens++; }
+      else if (s.type === "splitter") { splitters.push(s.nWay); }
+    });
+    Object.values(cables).forEach(c => items.push({ category: "Cable", item: c.cable.name, spec: `${c.cable.z} Ω, OD ${c.cable.OD.toFixed(2)} mm`, qty: `${c.totalLength} m total`, maker: c.cable.makers }));
+    Object.values(connectors).forEach(c => items.push({ category: "Connector", item: c.connector.name, spec: `${c.connector.z} Ω, ${c.connector.fMax} GHz`, qty: `${c.qty} pcs`, maker: "various (Amphenol, Huber+Suhner, Radiall, etc.)" }));
+    if (amps) items.push({ category: "Active", item: "Amplifier", spec: "application-specific (LNA/PA)", qty: `${amps} pcs`, maker: "Mini-Circuits, Qorvo, RFMD, etc." });
+    if (attens) items.push({ category: "Passive", item: "Attenuator pad", spec: "50 Ω fixed-value", qty: `${attens} pcs`, maker: "Mini-Circuits, Pasternack, etc." });
+    splitters.forEach(n => items.push({ category: "Passive", item: `${n}-way splitter / divider`, spec: `Wilkinson or resistive, ${SPLITTER_LOSS[n]} dB loss`, qty: "1 pc", maker: "Mini-Circuits, Marki, Pasternack, etc." }));
+    return items;
+  }, [segments]);
+
+  const csv = useMemo(() => {
+    const header = "Category,Item,Spec,Qty,Typical maker\n";
+    const rows = bom.map(b => [b.category, b.item, b.spec, b.qty, b.maker].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    return header + rows;
+  }, [bom]);
+
+  const markdown = useMemo(() => {
+    const header = "| Category | Item | Spec | Qty | Maker |\n|---|---|---|---|---|\n";
+    const rows = bom.map(b => `| ${b.category} | ${b.item} | ${b.spec} | ${b.qty} | ${b.maker} |`).join("\n");
+    return `# RF Link Budget BOM (@ ${freq} MHz)\n\n${header}${rows}\n`;
+  }, [bom, freq]);
+
+  const [copied, setCopied] = useState(null);
+  const copy = async (what, text) => {
+    try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(null), 2000); } catch {}
+  };
+  const downloadCSV = () => {
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `rf-link-bom-${freq}mhz.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div style={{ marginBottom: 16, padding: 14, background: "rgba(15,10,5,0.5)", border: "1px solid #d97706", borderRadius: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
+        <div style={{ fontSize: 11, color: "#fbbf24", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>📋 Bill of Materials</div>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          <button onClick={() => copy("csv", csv)} style={bomBtn(copied === "csv")}>{copied === "csv" ? "✓ Copied" : "Copy CSV"}</button>
+          <button onClick={() => copy("md", markdown)} style={bomBtn(copied === "md")}>{copied === "md" ? "✓ Copied" : "Copy Markdown"}</button>
+          <button onClick={downloadCSV} style={bomBtn(false)}>⬇ Download CSV</button>
+        </div>
+      </div>
+      {bom.length === 0 ? (
+        <div style={{ fontSize: 10, color: "#78716c", textAlign: "center", padding: 10 }}>No parts in chain yet. Add some cables / connectors.</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5, fontFamily: "JetBrains Mono, monospace" }}>
+            <thead>
+              <tr>
+                <th style={bomTh}>CATEGORY</th><th style={bomTh}>ITEM</th><th style={bomTh}>SPEC</th><th style={bomTh}>QTY</th><th style={bomTh}>TYPICAL MAKER</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bom.map((b, i) => (
+                <tr key={i} style={{ background: i % 2 === 0 ? "rgba(15,10,5,0.25)" : "transparent" }}>
+                  <td style={bomTd}><span style={{ color: b.category === "Cable" ? "#fbbf24" : b.category === "Connector" ? "#38bdf8" : b.category === "Active" ? "#34d399" : "#c084fc" }}>{b.category}</span></td>
+                  <td style={{ ...bomTd, color: "#e7e5e4", fontWeight: 600 }}>{b.item}</td>
+                  <td style={bomTd}>{b.spec}</td>
+                  <td style={{ ...bomTd, color: "#fbbf24" }}>{b.qty}</td>
+                  <td style={{ ...bomTd, color: "#78716c", fontSize: 10 }}>{b.maker}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div style={{ fontSize: 9, color: "#78716c", marginTop: 8, lineHeight: 1.5 }}>
+        💡 BOM auto-generated from your current chain. Use Copy CSV / Markdown to paste into spreadsheet or report. Quantities for cables are total meters; for connectors/amps/splitters are counts.
+      </div>
+    </div>
+  );
+}
+const bomBtn = (active) => ({ background: active ? "rgba(52,211,153,0.2)" : "rgba(15,10,5,0.4)", color: active ? "#34d399" : "#a8a29e", border: `1px solid ${active ? "#10b981" : "#57534e"}`, padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 2 });
+const bomTh = { padding: "6px 10px", textAlign: "left", color: "#a8a29e", borderBottom: "1px solid #2a1f15", fontSize: 9, letterSpacing: 1 };
+const bomTd = { padding: "5px 10px", color: "#d6cfc4" };
+
 function defaultSegment(type) {
   const id = "s" + Math.random().toString(36).slice(2, 9);
   if (type === "cable")     return { id, type, cableId: "lmr400", lengthM: 5 };
@@ -3300,6 +3398,15 @@ const SEGMENT_TYPES = [
 function LinkView({ openInLibrary }) {
   const [freq, setFreq] = useState(900);
   const [segments, setSegments] = useState(() => {
+    // URL-shared link takes priority over localStorage
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const linkData = params.get("link");
+      if (linkData) {
+        const decoded = JSON.parse(decodeURIComponent(atob(linkData.replace(/-/g, "+").replace(/_/g, "/"))));
+        if (decoded.segments) { if (decoded.freq) setTimeout(() => setFreq(decoded.freq), 0); return decoded.segments; }
+      }
+    } catch {}
     try { const s = localStorage.getItem("rf-link-chain"); if (s) return JSON.parse(s); } catch {}
     return [
       { id: "tx", type: "tx", power: 30 },
@@ -3311,6 +3418,27 @@ function LinkView({ openInLibrary }) {
     ];
   });
   useEffect(() => { try { localStorage.setItem("rf-link-chain", JSON.stringify(segments)); } catch {} }, [segments]);
+
+  const [shareState, setShareState] = useState(null); // "copied" | "error" | null
+  const [showBOM, setShowBOM] = useState(false);
+
+  const shareLink = async () => {
+    try {
+      const payload = JSON.stringify({ segments, freq });
+      const encoded = btoa(encodeURIComponent(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      const url = `${window.location.origin}${window.location.pathname}?link=${encoded}#link`;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+        setShareState("copied");
+      } else {
+        window.prompt("Copy this URL:", url);
+      }
+      setTimeout(() => setShareState(null), 2500);
+    } catch (e) {
+      setShareState("error");
+      setTimeout(() => setShareState(null), 2500);
+    }
+  };
 
   const stages = useMemo(() => {
     const out = [];
@@ -3385,8 +3513,14 @@ function LinkView({ openInLibrary }) {
         <div style={{ flex: 1, minWidth: 250 }}>
           <strong style={S.viewIntroStrong}>Link Budget.</strong> Chain components (TX → cable → connector → amp/atten/splitter → RX). Edit each stage to see live running power + total loss + margin.
         </div>
-        <button onClick={reset} style={{ background: "transparent", color: "#a8a29e", border: "1px solid #57534e", padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 1, textTransform: "uppercase" }}>↺ Reset</button>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button onClick={shareLink} style={{ background: shareState === "copied" ? "rgba(52,211,153,0.2)" : "rgba(96,165,250,0.15)", color: shareState === "copied" ? "#34d399" : "#60a5fa", border: `1px solid ${shareState === "copied" ? "#10b981" : "#2563eb"}`, padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 1, textTransform: "uppercase", fontWeight: 600 }}>{shareState === "copied" ? "✓ Link copied" : shareState === "error" ? "⚠ Error" : "🔗 Share"}</button>
+          <button onClick={() => setShowBOM(!showBOM)} style={{ background: showBOM ? "rgba(217,119,6,0.2)" : "transparent", color: showBOM ? "#fbbf24" : "#a8a29e", border: `1px solid ${showBOM ? "#d97706" : "#57534e"}`, padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 1, textTransform: "uppercase", fontWeight: 600 }}>📋 BOM {showBOM ? "▲" : "▼"}</button>
+          <button onClick={reset} style={{ background: "transparent", color: "#a8a29e", border: "1px solid #57534e", padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 1, textTransform: "uppercase" }}>↺ Reset</button>
+        </div>
       </div>
+
+      {showBOM && <BOMPanel segments={segments} freq={freq} />}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 14, alignItems: "center", marginBottom: 18, padding: 14, background: "rgba(15,10,5,0.4)", borderRadius: 4, border: "1px solid #2a1f15" }}>
         <div>
