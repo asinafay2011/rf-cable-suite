@@ -1318,6 +1318,7 @@ export default function RFCableSuite() {
           @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
           @keyframes slideIn { from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:translateY(0)} }
           @keyframes slideDown { from{opacity:0; transform:translateY(-10px); max-height:0} to{opacity:1; transform:translateY(0); max-height:200px} }
+          @keyframes blink { 0%,50%{opacity:1} 51%,100%{opacity:0} }
           .msg-anim { animation: slideIn 0.25s ease-out; }
           .settings-anim { animation: slideDown 0.2s ease-out; }
           .dots span { animation: pulse 1.4s infinite; }
@@ -1589,40 +1590,92 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
     setPendingImage(null);
     setLoading(true);
     const freshUser = { role: "user", content: userContent };
-    const callApi = async (messagesPayload) => {
+    const callApiStream = async (messagesPayload, onBlocksUpdate) => {
       const res = await fetch("/api/claude", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, max_tokens: 8000, system: SYSTEM_PROMPT, messages: messagesPayload, tools: TOOLS }),
+        body: JSON.stringify({ model, max_tokens: 8000, system: SYSTEM_PROMPT, messages: messagesPayload, tools: TOOLS, stream: true }),
       });
       if (!res.ok) {
         let detail = "";
         try { const body = await res.json(); detail = body?.error?.message || body?.error || JSON.stringify(body); }
         catch { try { detail = await res.text(); } catch {} }
         const err = new Error(`API error ${res.status}: ${detail}`.trim());
-        err.status = res.status;
-        err.payload = messagesPayload;
-        throw err;
+        err.status = res.status; err.payload = messagesPayload; throw err;
       }
-      return res.json();
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const blocks = [];
+      let stopReason = "end_turn";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+        for (const chunk of events) {
+          for (const line of chunk.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+            try {
+              const ev = JSON.parse(jsonStr);
+              if (ev.type === "content_block_start") {
+                const b = { ...ev.content_block };
+                if (b.type === "text") b.text = "";
+                else if (b.type === "tool_use") { b.input_json = ""; b.input = {}; }
+                blocks[ev.index] = b;
+                if (onBlocksUpdate) onBlocksUpdate(blocks.map(x => ({ ...x })));
+              } else if (ev.type === "content_block_delta") {
+                const b = blocks[ev.index];
+                if (!b) continue;
+                if (ev.delta.type === "text_delta") {
+                  b.text = (b.text || "") + ev.delta.text;
+                  if (onBlocksUpdate) onBlocksUpdate(blocks.map(x => ({ ...x })));
+                } else if (ev.delta.type === "input_json_delta") {
+                  b.input_json = (b.input_json || "") + ev.delta.partial_json;
+                }
+              } else if (ev.type === "content_block_stop") {
+                const b = blocks[ev.index];
+                if (b && b.type === "tool_use" && b.input_json) {
+                  try { b.input = JSON.parse(b.input_json); } catch {}
+                  delete b.input_json;
+                }
+              } else if (ev.type === "message_delta" && ev.delta?.stop_reason) {
+                stopReason = ev.delta.stop_reason;
+              }
+            } catch {}
+          }
+        }
+      }
+      return { content: blocks.filter(Boolean), stop_reason: stopReason };
     };
+
     try {
       let api = sanitizeHistory(newMessages);
       let recoveredFromBadHistory = false;
       for (let i = 0; i < 10; i++) {
+        setMessages(prev => [...prev.filter(m => !m.streaming), { role: "assistant", content: [], streaming: true }]);
+        const onDelta = (currentBlocks) => {
+          setMessages(prev => {
+            const noStream = prev.filter(m => !m.streaming);
+            return [...noStream, { role: "assistant", content: currentBlocks, streaming: true }];
+          });
+        };
         let data;
         try {
-          data = await callApi(api);
+          data = await callApiStream(api, onDelta);
         } catch (e) {
           if (e.status === 400 && !recoveredFromBadHistory && i === 0) {
             console.warn("[chat] 400 on first turn — retrying with cleared history:", e.message, e.payload);
             recoveredFromBadHistory = true;
             api = [freshUser];
-            setMessages([freshUser]);
-            data = await callApi(api);
-          } else { throw e; }
+            setMessages([freshUser, { role: "assistant", content: [], streaming: true }]);
+            data = await callApiStream(api, onDelta);
+          } else { setMessages(prev => prev.filter(m => !m.streaming)); throw e; }
         }
         api.push({ role: "assistant", content: data.content });
-        setMessages(prev => [...prev.filter(m => m.role !== "assistant_pending"), { role: "assistant", content: data.content }]);
+        setMessages(prev => [...prev.filter(m => !m.streaming), { role: "assistant", content: data.content }]);
         if (data.stop_reason !== "tool_use") break;
         const results = data.content.filter(b => b.type === "tool_use").map(b => ({ type: "tool_result", tool_use_id: b.id, content: JSON.stringify(executeTool(b.name, b.input)) }));
         api.push({ role: "user", content: results });
@@ -1729,9 +1782,10 @@ function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign }) {
         if (block.type === "text") {
           const mentioned = CABLE_IDS.filter(id => block.text.toLowerCase().includes(CABLES[id].name.toLowerCase()) || block.text.toLowerCase().includes(`'${id}'`));
           const uniqueMentioned = [...new Set(mentioned)];
+          const isLastTextBlock = i === m.content.length - 1 || !m.content.slice(i + 1).some(b => b.type === "text");
           return (
             <div key={i}>
-              <div style={S.assistantText}>{block.text}</div>
+              <div style={S.assistantText}>{block.text}{m.streaming && isLastTextBlock && <span className="streaming-cursor" style={{ display: "inline-block", width: 8, height: 14, background: "#fbbf24", marginLeft: 2, verticalAlign: "text-bottom", animation: "blink 1s steps(2) infinite" }}></span>}</div>
               {uniqueMentioned.length > 0 && uniqueMentioned.length <= 5 && (
                 <div style={S.quickChipsRow}>
                   {uniqueMentioned.map(id => (
