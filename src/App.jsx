@@ -1293,13 +1293,16 @@ export default function RFCableSuite() {
   const toggleCompare = (id) => setComparedCables(prev => prev.includes(id) ? prev.filter(x => x !== id) : prev.length < 4 ? [...prev, id] : prev);
 
   const [printing, setPrinting] = useState(null);
+  const [printSetup, setPrintSetup] = useState(null);
   useEffect(() => {
     if (!printing) return;
+    const prevTitle = document.title;
+    document.title = printing.meta?.docTitle || prevTitle;
     document.body.setAttribute("data-printing", "1");
-    const done = () => { setPrinting(null); document.body.removeAttribute("data-printing"); };
+    const done = () => { setPrinting(null); document.body.removeAttribute("data-printing"); document.title = prevTitle; };
     window.addEventListener("afterprint", done);
     const t = setTimeout(() => window.print(), 120);
-    return () => { clearTimeout(t); window.removeEventListener("afterprint", done); document.body.removeAttribute("data-printing"); };
+    return () => { clearTimeout(t); window.removeEventListener("afterprint", done); document.body.removeAttribute("data-printing"); document.title = prevTitle; };
   }, [printing]);
   const [ttsEnabled, setTtsEnabled] = useState(() => {
     try { return localStorage.getItem("rf-tts") === "1"; } catch { return false; }
@@ -1331,22 +1334,30 @@ export default function RFCableSuite() {
           @keyframes blink { 0%,50%{opacity:1} 51%,100%{opacity:0} }
           .print-only { display: none; }
           @media print {
-            @page { size: A4; margin: 14mm; }
-            body { background: white !important; color: #111 !important; }
+            @page {
+              size: A4;
+              margin: 16mm 14mm 18mm 14mm;
+              @bottom-right { content: counter(page) " / " counter(pages); font-size: 8pt; color: #888; font-family: 'Inter', -apple-system, Segoe UI, sans-serif; }
+              @bottom-left { content: "RF Cable Suite"; font-size: 8pt; color: #888; font-family: 'Inter', -apple-system, Segoe UI, sans-serif; }
+            }
+            html, body { background: white !important; color: #111 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
             body > *:not(#root):not(.print-only) { display: none !important; }
             #root > *:not(.print-only) { display: none !important; }
-            .print-only { display: block !important; position: static !important; background: white !important; color: #111 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; }
-            .print-only * { color: #111 !important; background: transparent !important; border-color: #999 !important; }
+            .print-only { display: block !important; position: static !important; background: white !important; color: #111 !important; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif !important; font-size: 10pt !important; }
+            .print-only * { color: #111; border-color: #bbb; }
             .print-only .print-accent { color: #b45309 !important; }
             .print-only .print-muted { color: #555 !important; }
-            .print-only table { border-collapse: collapse !important; width: 100% !important; font-size: 10pt !important; }
-            .print-only th, .print-only td { border: 1px solid #ccc !important; padding: 4pt 6pt !important; text-align: left !important; }
-            .print-only th { background: #f0f0f0 !important; font-weight: 700 !important; }
-            .print-only h1 { font-size: 18pt !important; margin: 0 0 4pt 0 !important; color: #111 !important; }
-            .print-only h2 { font-size: 13pt !important; margin: 14pt 0 6pt 0 !important; color: #b45309 !important; border-bottom: 1px solid #ccc !important; padding-bottom: 2pt !important; }
-            .print-only svg circle, .print-only svg path, .print-only svg line, .print-only svg rect, .print-only svg text {
-              fill: attr(fill) !important; stroke: attr(stroke) !important;
-            }
+            .print-only table { border-collapse: collapse !important; width: 100% !important; font-size: 9.5pt !important; margin: 0 !important; }
+            .print-only th, .print-only td { border: 1px solid #d0d0d0 !important; padding: 4pt 6pt !important; text-align: left !important; vertical-align: top !important; }
+            .print-only th { background: #efe9e0 !important; font-weight: 700 !important; font-size: 8.5pt !important; text-transform: uppercase; letter-spacing: 0.5px; color: #4a3520 !important; }
+            .print-only table.zebra tbody tr:nth-child(even) td { background: #faf7f2 !important; }
+            .print-only h1 { font-size: 20pt !important; margin: 0 0 3pt 0 !important; color: #111 !important; font-weight: 700 !important; letter-spacing: -0.3px; }
+            .print-only h2 { font-size: 11pt !important; margin: 14pt 0 5pt 0 !important; color: #b45309 !important; border-bottom: 1px solid #d97706 !important; padding-bottom: 2pt !important; text-transform: uppercase; letter-spacing: 1px; page-break-after: avoid !important; break-after: avoid !important; }
+            .print-only .avoid-break { page-break-inside: avoid !important; break-inside: avoid !important; }
+            .print-only table, .print-only tr, .print-only td, .print-only th { page-break-inside: avoid !important; break-inside: avoid !important; }
+            .print-only ol, .print-only ul { page-break-inside: avoid !important; break-inside: avoid !important; }
+            .print-only svg { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            .print-only .print-meta { background: #faf7f2 !important; }
           }
           .msg-anim { animation: slideIn 0.25s ease-out; }
           .settings-anim { animation: slideDown 0.2s ease-out; }
@@ -1433,42 +1444,158 @@ export default function RFCableSuite() {
         <main style={S.main}>
           {tab === "ask" && <AskView queuedPrompt={queuedPrompt} clearQueued={() => setQueuedPrompt(null)} openInLibrary={openInLibrary} loadIntoDesign={loadCableIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} />}
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
-          {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} onPrint={(id) => setPrinting({ type: "cable", id })} />}
+          {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} onPrint={(id) => setPrintSetup({ type: "cable", id })} />}
           {tab === "connectors" && <ConnectorView />}
-          {tab === "link" && <LinkView openInLibrary={openInLibrary} onPrint={() => setPrinting({ type: "link" })} />}
+          {tab === "link" && <LinkView openInLibrary={openInLibrary} onPrint={() => setPrintSetup({ type: "link" })} />}
           {tab === "tools" && <ToolsView />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
           {tab === "cheat" && <CheatSheetView />}
           {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}
         </main>
       </div>
-      {printing?.type === "cable" && <PrintableCableSpec id={printing.id} units={units} />}
-      {printing?.type === "link" && <PrintableLinkReport />}
+      {printSetup && <PrintSetupModal type={printSetup.type} subjectId={printSetup.id} onCancel={() => setPrintSetup(null)} onConfirm={(meta) => { setPrinting({ ...printSetup, meta }); setPrintSetup(null); }} />}
+      {printing?.type === "cable" && <PrintableCableSpec id={printing.id} units={units} meta={printing.meta || {}} />}
+      {printing?.type === "link" && <PrintableLinkReport meta={printing.meta || {}} />}
     </SettingsContext.Provider>
   );
 }
 
-function PrintableCableSpec({ id, units }) {
+function PrintSetupModal({ type, subjectId, onCancel, onConfirm }) {
+  const savedDefaults = (() => { try { return JSON.parse(localStorage.getItem("rf-print-meta") || "{}"); } catch { return {}; } })();
+  const today = new Date().toISOString().slice(0, 10);
+  const [project, setProject] = useState(savedDefaults.project || "");
+  const [engineer, setEngineer] = useState(savedDefaults.engineer || "");
+  const [client, setClient] = useState(savedDefaults.client || "");
+  const [revision, setRevision] = useState("A");
+  const [date, setDate] = useState(today);
+  const [notes, setNotes] = useState("");
+  const [freqMHz, setFreqMHz] = useState(() => {
+    if (type !== "link") return 900;
+    try { const f = localStorage.getItem("rf-link-freq"); if (f) return Number(f) || 900; } catch {}
+    return 900;
+  });
+
+  const subjectName = type === "cable" && subjectId && CABLES[subjectId] ? CABLES[subjectId].name : null;
+  const docTitle = type === "cable"
+    ? `RF Cable Spec${subjectName ? ` - ${subjectName}` : ""}${project ? ` - ${project}` : ""}`
+    : `RF Link Budget Report${project ? ` - ${project}` : ""}`;
+  const docId = `RF-${type === "cable" ? "SPEC" : "LINK"}-${date.replace(/-/g, "")}-${revision || "A"}`;
+
+  const confirm = () => {
+    const meta = { project, engineer, client, revision, date, notes, docTitle, docId };
+    if (type === "link") meta.freq = Number(freqMHz) || 900;
+    try { localStorage.setItem("rf-print-meta", JSON.stringify({ engineer, client, project: "" })); } catch {}
+    onConfirm(meta);
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === "Escape") onCancel();
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) confirm();
+  };
+
+  const overlay = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 };
+  const panel = { background: "#110a05", border: "1px solid #3a2e1f", borderRadius: 4, width: "min(560px, 100%)", maxHeight: "90vh", overflowY: "auto", fontFamily: "'JetBrains Mono', monospace", color: "#e7e2dc" };
+  const header = { padding: "14px 18px", borderBottom: "1px solid #2a1f15", display: "flex", alignItems: "center", justifyContent: "space-between" };
+  const body = { padding: 18, display: "grid", gap: 10 };
+  const row = { display: "grid", gridTemplateColumns: "130px 1fr", gap: 10, alignItems: "center" };
+  const label = { fontSize: 10, color: "#a8a29e", textTransform: "uppercase", letterSpacing: 1 };
+  const input = { background: "#0a0705", border: "1px solid #3a2e1f", color: "#e7e2dc", padding: "7px 9px", fontFamily: "inherit", fontSize: 12, borderRadius: 2, outline: "none" };
+  const footer = { padding: "12px 18px", borderTop: "1px solid #2a1f15", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 };
+  const btnBase = { padding: "7px 14px", fontFamily: "inherit", fontSize: 11, letterSpacing: 1, textTransform: "uppercase", fontWeight: 600, border: "1px solid", borderRadius: 2, cursor: "pointer" };
+
+  return (
+    <div style={overlay} onClick={onCancel} onKeyDown={onKeyDown}>
+      <div style={panel} onClick={(e) => e.stopPropagation()}>
+        <div style={header}>
+          <div>
+            <div style={{ fontSize: 10, color: "#a8a29e", letterSpacing: 1.5, textTransform: "uppercase" }}>Print Setup</div>
+            <div style={{ fontSize: 14, color: "#fbbf24", fontWeight: 700, marginTop: 2 }}>{type === "cable" ? `Cable Spec Sheet${subjectName ? ` · ${subjectName}` : ""}` : "Link Budget Report"}</div>
+          </div>
+          <button onClick={onCancel} style={{ background: "transparent", border: "none", color: "#a8a29e", fontSize: 18, cursor: "pointer" }} title="Cancel (Esc)">×</button>
+        </div>
+
+        <div style={body}>
+          <div style={{ fontSize: 10.5, color: "#a8a29e", lineHeight: 1.5, padding: "8px 10px", background: "rgba(217,119,6,0.07)", border: "1px solid rgba(217,119,6,0.3)", borderRadius: 2 }}>
+            💡 Bỏ trống bất kỳ field nào → PDF sẽ hiện dấu gạch để điền tay. Engineer/Client được lưu cho lần in sau.
+          </div>
+
+          <div style={row}><div style={label}>Project</div><input autoFocus value={project} onChange={(e) => setProject(e.target.value)} placeholder="(blank)" style={input} /></div>
+          <div style={row}><div style={label}>Prepared by</div><input value={engineer} onChange={(e) => setEngineer(e.target.value)} placeholder="(blank)" style={input} /></div>
+          <div style={row}><div style={label}>Client</div><input value={client} onChange={(e) => setClient(e.target.value)} placeholder="(blank)" style={input} /></div>
+          <div style={row}><div style={label}>Revision</div><input value={revision} onChange={(e) => setRevision(e.target.value)} placeholder="A" style={{ ...input, maxWidth: 100 }} /></div>
+          <div style={row}><div style={label}>Date</div><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...input, maxWidth: 180, colorScheme: "dark" }} /></div>
+          {type === "link" && (
+            <div style={row}><div style={label}>Frequency (MHz)</div><input type="number" value={freqMHz} onChange={(e) => setFreqMHz(e.target.value)} min={1} max={50000} style={{ ...input, maxWidth: 140 }} /></div>
+          )}
+          <div style={row}><div style={label}>Notes</div><textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="(blank)" rows={2} style={{ ...input, resize: "vertical", fontFamily: "inherit" }} /></div>
+
+          <div style={{ marginTop: 4, padding: "8px 10px", background: "rgba(15,10,5,0.5)", border: "1px solid #2a1f15", borderRadius: 2 }}>
+            <div style={{ fontSize: 9, color: "#a8a29e", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Document ID (auto)</div>
+            <div style={{ fontSize: 11, color: "#fbbf24", fontFamily: "'JetBrains Mono', monospace" }}>{docId}</div>
+          </div>
+        </div>
+
+        <div style={footer}>
+          <div style={{ fontSize: 9, color: "#6b5a45" }}>Ctrl/⌘ + Enter to print · Esc to cancel</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onCancel} style={{ ...btnBase, background: "transparent", borderColor: "#3a2e1f", color: "#a8a29e" }}>Cancel</button>
+            <button onClick={confirm} style={{ ...btnBase, background: "#d97706", borderColor: "#d97706", color: "#1a1410" }}>🖨 Print / PDF</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PrintMetaBlock({ meta = {}, docId }) {
+  const blank = <span style={{ display: "inline-block", minWidth: 80, borderBottom: "1px solid #999", height: "1em", verticalAlign: "bottom" }}>&nbsp;</span>;
+  const rowStyle = { display: "contents" };
+  const lblStyle = { fontSize: "8pt", color: "#555", textTransform: "uppercase", letterSpacing: 0.8, paddingTop: 2 };
+  const valStyle = { fontSize: "10pt", color: "#111", fontWeight: 500, paddingBottom: 4, borderBottom: "1px dotted #ddd" };
+  const field = (label, value) => (
+    <div style={rowStyle}>
+      <div style={lblStyle}>{label}</div>
+      <div style={valStyle}>{value && String(value).trim() ? value : blank}</div>
+    </div>
+  );
+  return (
+    <div className="print-meta avoid-break" style={{ border: "1px solid #ccc", padding: "10pt 12pt", margin: "10pt 0 14pt", display: "grid", gridTemplateColumns: "auto 1fr auto 1fr auto 1fr", gap: "2pt 10pt", fontFamily: "inherit" }}>
+      {field("Project", meta.project)}
+      {field("Client", meta.client)}
+      {field("Doc ID", docId || meta.docId)}
+      {field("Prepared by", meta.engineer)}
+      {field("Date", meta.date)}
+      {field("Revision", meta.revision)}
+    </div>
+  );
+}
+
+function PrintableCableSpec({ id, units, meta = {} }) {
   const c = CABLES[id];
   if (!c) return null;
   const cat = CATEGORIES[c.cat];
   const now = new Date();
+  // Cross-section ratios against jacket OD
+  const rJacket = 80, rShield = (c.shield / c.OD) * 80, rDiel = (c.D / c.OD) * 80, rInner = (c.d / c.OD) * 80;
   return (
-    <div className="print-only" style={{ padding: 20, fontFamily: "sans-serif", color: "#111", background: "white", lineHeight: 1.4 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderBottom: "2px solid #b45309", paddingBottom: 8, marginBottom: 12 }}>
+    <div className="print-only" style={{ padding: 0, color: "#111", background: "white", lineHeight: 1.4 }}>
+      <div className="avoid-break" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderBottom: "2px solid #b45309", paddingBottom: 8, marginBottom: 10 }}>
         <div>
           <div className="print-muted" style={{ fontSize: "9pt", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 2 }}>RF Cable Specification Sheet</div>
           <h1>{c.name}</h1>
           <div className="print-muted" style={{ fontSize: "10pt" }}>{cat.label} · {c.alias}</div>
         </div>
         <div style={{ textAlign: "right", fontSize: "9pt" }} className="print-muted">
+          <div style={{ fontWeight: 700, color: "#111" }}>{meta.docId || ""}</div>
           <div>Generated {now.toISOString().slice(0, 10)}</div>
           <div>RF Cable Suite</div>
         </div>
       </div>
 
+      <PrintMetaBlock meta={meta} docId={meta.docId} />
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <div>
+        <div className="avoid-break">
           <h2>Electrical</h2>
           <table><tbody>
             <tr><th style={{ width: "40%" }}>Impedance</th><td>{c.z} Ω</td></tr>
@@ -1491,13 +1618,26 @@ function PrintableCableSpec({ id, units }) {
           </tbody></table>
         </div>
 
-        <div>
+        <div className="avoid-break">
           <h2>Cross-section</h2>
-          <svg width="200" height="200" viewBox="0 0 200 200" style={{ display: "block", margin: "0 auto" }}>
-            <circle cx="100" cy="100" r={(c.OD / c.OD) * 80} fill="#222" stroke="#555" strokeWidth="1" />
-            <circle cx="100" cy="100" r={(c.shield / c.OD) * 80} fill="#999" />
-            <circle cx="100" cy="100" r={(c.D / c.OD) * 80} fill="#f5e6a8" />
-            <circle cx="100" cy="100" r={(c.d / c.OD) * 80} fill="#b45309" />
+          <svg width="100%" viewBox="0 0 340 220" preserveAspectRatio="xMidYMid meet" style={{ display: "block", margin: "0 auto", maxWidth: 340, overflow: "visible" }}>
+            {/* layers (centered at 100,110) */}
+            <circle cx="100" cy="110" r={rJacket} fill="#3a2b1a" stroke="#1a0e05" strokeWidth="0.8" />
+            <circle cx="100" cy="110" r={rShield} fill="#c0c4ca" stroke="#888" strokeWidth="0.3" />
+            <circle cx="100" cy="110" r={rDiel} fill="#f5e6a8" stroke="#d4c080" strokeWidth="0.3" />
+            <circle cx="100" cy="110" r={rInner} fill="#cd7f32" stroke="#8b4513" strokeWidth="0.3" />
+            {/* leader lines from each layer midpoint outward to right-side labels */}
+            <line x1={100 + rInner * 0.4} y1="110" x2="195" y2="70"  stroke="#555" strokeWidth="0.4" />
+            <line x1={100 + (rInner + rDiel) / 2 * 0.8} y1="110" x2="195" y2="95"  stroke="#555" strokeWidth="0.4" />
+            <line x1={100 + (rDiel + rShield) / 2 * 0.85} y1="110" x2="195" y2="125" stroke="#555" strokeWidth="0.4" />
+            <line x1={100 + (rShield + rJacket) / 2 * 0.9} y1="110" x2="195" y2="150" stroke="#555" strokeWidth="0.4" />
+            {/* labels */}
+            <text x="200" y="73"  fontSize="8" fill="#111">Inner · {fmtLen(c.d, units)}</text>
+            <text x="200" y="98"  fontSize="8" fill="#111">Dielectric · {fmtLen(c.D, units)}</text>
+            <text x="200" y="128" fontSize="8" fill="#111">Shield · {fmtLen(c.shield, units)}</text>
+            <text x="200" y="153" fontSize="8" fill="#111">Jacket · {fmtLen(c.OD, units)}</text>
+            {/* caption */}
+            <text x="170" y="210" fontSize="7.5" fill="#555" textAnchor="middle" fontStyle="italic">Figure 1 — Cross-section, not to absolute scale</text>
           </svg>
 
           <h2>Construction</h2>
@@ -1511,41 +1651,74 @@ function PrintableCableSpec({ id, units }) {
       </div>
 
       <h2>Attenuation</h2>
-      <table>
-        <thead><tr><th>Frequency</th><th>dB/100m</th><th>dB/100ft</th><th>dB/25ft</th></tr></thead>
+      <table className="zebra avoid-break">
+        <thead><tr><th>Frequency</th><th style={{ textAlign: "right" }}>dB/100m</th><th style={{ textAlign: "right" }}>dB/100ft</th><th style={{ textAlign: "right" }}>dB/25ft</th></tr></thead>
         <tbody>
           {c.atten.map(([f, a], i) => (
             <tr key={i}>
               <td>{f < 1000 ? `${f} MHz` : `${(f / 1000).toFixed(1)} GHz`}</td>
-              <td>{a.toFixed(2)}</td>
-              <td>{(a * 0.3048).toFixed(2)}</td>
-              <td>{(a * 0.0762).toFixed(3)}</td>
+              <td style={{ textAlign: "right", fontFamily: "monospace" }}>{a.toFixed(2)}</td>
+              <td style={{ textAlign: "right", fontFamily: "monospace" }}>{(a * 0.3048).toFixed(2)}</td>
+              <td style={{ textAlign: "right", fontFamily: "monospace" }}>{(a * 0.0762).toFixed(3)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      <div className="print-muted" style={{ fontSize: "7.5pt", marginTop: 3, marginBottom: 8, fontStyle: "italic" }}>
+        Attenuation values are manufacturer-typical at 20 °C, matched impedance. 100 ft ≈ 30.48 m · 25 ft ≈ 7.62 m (common jumper length).
+      </div>
 
-      <h2>Manufacturing process</h2>
-      <ol style={{ fontSize: "10pt", paddingLeft: 20 }}>
-        {c.proc.map((s, i) => <li key={i} style={{ marginBottom: 3 }}>{s}</li>)}
-      </ol>
+      <div className="avoid-break">
+        <h2>Manufacturing process</h2>
+        <ol style={{ fontSize: "10pt", paddingLeft: 20, margin: 0 }}>
+          {c.proc.map((s, i) => <li key={i} style={{ marginBottom: 3 }}>{s}</li>)}
+        </ol>
+      </div>
 
-      <h2>Applications & suppliers</h2>
-      <div style={{ fontSize: "10pt", marginBottom: 6 }}><strong>Applications:</strong> {c.apps}</div>
-      <div style={{ fontSize: "10pt" }}><strong>Typical makers:</strong> {c.makers}</div>
+      <div className="avoid-break">
+        <h2>Applications &amp; suppliers</h2>
+        <div style={{ fontSize: "10pt", marginBottom: 6 }}><strong>Applications:</strong> {c.apps}</div>
+        <div style={{ fontSize: "10pt" }}><strong>Typical makers:</strong> {c.makers}</div>
+      </div>
 
-      <div style={{ marginTop: 20, paddingTop: 10, borderTop: "1px solid #ccc", fontSize: "8pt", color: "#888", textAlign: "center" }}>
-        Generated by RF Cable Suite · {now.toLocaleString()} · rf-cable-suite.vercel.app
+      {(meta.notes && meta.notes.trim()) ? (
+        <div className="avoid-break">
+          <h2>Notes</h2>
+          <div style={{ fontSize: "10pt", whiteSpace: "pre-wrap", padding: "6pt 8pt", border: "1px solid #ddd", background: "#fafafa" }}>{meta.notes}</div>
+        </div>
+      ) : null}
+
+      <div className="avoid-break">
+        <h2>Sign-off</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginTop: 6 }}>
+          <div>
+            <div style={{ borderBottom: "1px solid #999", height: 36 }}></div>
+            <div style={{ fontSize: "8pt", color: "#555", marginTop: 2 }}>Prepared by{meta.engineer ? ` · ${meta.engineer}` : ""}</div>
+          </div>
+          <div>
+            <div style={{ borderBottom: "1px solid #999", height: 36 }}></div>
+            <div style={{ fontSize: "8pt", color: "#555", marginTop: 2 }}>Reviewed / approved</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16, paddingTop: 8, borderTop: "1px solid #ccc", fontSize: "8pt", color: "#888", display: "flex", justifyContent: "space-between" }}>
+        <span>{meta.docId || ""} · Rev {meta.revision || "A"}</span>
+        <span>Generated by RF Cable Suite · {now.toLocaleString()}</span>
       </div>
     </div>
   );
 }
 
-function PrintableLinkReport() {
-  let segments = [], freq = 900;
+function PrintableLinkReport({ meta = {} }) {
+  let segments = [], freq = Number(meta.freq) || 900;
   try {
     const s = localStorage.getItem("rf-link-chain");
     if (s) segments = JSON.parse(s);
+    if (!meta.freq) {
+      const f = localStorage.getItem("rf-link-freq");
+      if (f) freq = Number(f) || freq;
+    }
   } catch {}
   // Compute stages same way as LinkView
   const stages = [];
@@ -1595,64 +1768,133 @@ function PrintableLinkReport() {
     else if (s.type === "splitter") splitters.push(s.nWay);
   });
 
+  // Verdict → light-bg callout colors
+  const calloutColors = (() => {
+    if (margin < 0) return { bg: "#fef2f2", border: "#dc2626", title: "#991b1b" };
+    if (margin < 10) return { bg: "#fffbeb", border: "#d97706", title: "#92400e" };
+    return { bg: "#f0fdf4", border: "#16a34a", title: "#14532d" };
+  })();
+  const chainComponentCount = Math.max(0, segments.length - 2);
+  const freqLabel = freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`;
+
   return (
-    <div className="print-only" style={{ padding: 20, fontFamily: "sans-serif", color: "#111", background: "white", lineHeight: 1.4 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderBottom: "2px solid #b45309", paddingBottom: 8, marginBottom: 12 }}>
+    <div className="print-only" style={{ padding: 0, color: "#111", background: "white", lineHeight: 1.4 }}>
+      <div className="avoid-break" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderBottom: "2px solid #b45309", paddingBottom: 8, marginBottom: 10 }}>
         <div>
           <div className="print-muted" style={{ fontSize: "9pt", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 2 }}>RF Link Budget Report</div>
-          <h1>{segments.length - 2} component chain at {freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}</h1>
+          <h1>{chainComponentCount} component chain · {freqLabel}</h1>
+          <div className="print-muted" style={{ fontSize: "10pt" }}>TX {txPwr} dBm → RX {rxPwr.toFixed(2)} dBm · sens {rxSens} dBm</div>
         </div>
         <div style={{ textAlign: "right", fontSize: "9pt" }} className="print-muted">
+          <div style={{ fontWeight: 700, color: "#111" }}>{meta.docId || ""}</div>
           <div>Generated {now.toISOString().slice(0, 10)}</div>
           <div>RF Cable Suite</div>
         </div>
       </div>
 
-      <h2>Summary</h2>
-      <table><tbody>
-        <tr><th style={{ width: "30%" }}>Transmit power</th><td>{txPwr} dBm ({dbmToPower(txPwr)})</td></tr>
-        <tr><th>Total chain loss</th><td>{totalLoss.toFixed(2)} dB</td></tr>
-        <tr><th>Received power</th><td>{rxPwr.toFixed(2)} dBm ({dbmToPower(rxPwr)})</td></tr>
-        <tr><th>RX sensitivity</th><td>{rxSens} dBm</td></tr>
-        <tr><th>Link margin</th><td style={{ fontWeight: 700 }} className="print-accent">{margin > 0 ? "+" : ""}{margin.toFixed(2)} dB ({verdict.title})</td></tr>
-      </tbody></table>
+      <PrintMetaBlock meta={meta} docId={meta.docId} />
+
+      {/* Verdict callout */}
+      <div className="avoid-break" style={{ border: `1.5px solid ${calloutColors.border}`, background: calloutColors.bg, borderLeft: `6px solid ${calloutColors.border}`, padding: "10pt 14pt", marginBottom: 12, display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: "8.5pt", textTransform: "uppercase", letterSpacing: 1.2, color: calloutColors.title, fontWeight: 700 }}>Link margin</div>
+          <div style={{ fontSize: "10pt", color: "#333", marginTop: 4, lineHeight: 1.4 }}>{verdict.desc}</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: "26pt", fontWeight: 700, color: calloutColors.title, lineHeight: 1, fontFamily: "monospace" }}>{margin > 0 ? "+" : ""}{margin.toFixed(2)}<span style={{ fontSize: "14pt" }}> dB</span></div>
+          <div style={{ fontSize: "10pt", fontWeight: 700, color: calloutColors.title, marginTop: 4, letterSpacing: 1 }}>{verdict.title}</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div className="avoid-break">
+          <h2>Summary</h2>
+          <table><tbody>
+            <tr><th style={{ width: "48%" }}>Transmit power</th><td>{txPwr} dBm ({dbmToPower(txPwr)})</td></tr>
+            <tr><th>Total chain loss</th><td>{totalLoss.toFixed(2)} dB</td></tr>
+            <tr><th>Received power</th><td>{rxPwr.toFixed(2)} dBm ({dbmToPower(rxPwr)})</td></tr>
+            <tr><th>RX sensitivity</th><td>{rxSens} dBm</td></tr>
+            <tr><th>Frequency</th><td>{freqLabel}</td></tr>
+          </tbody></table>
+        </div>
+        <div className="avoid-break">
+          <h2>Chain overview</h2>
+          <table><tbody>
+            <tr><th style={{ width: "48%" }}>Components</th><td>{chainComponentCount}</td></tr>
+            <tr><th>Cable runs</th><td>{Object.values(cables).length} type(s), {Object.values(cables).reduce((s, c) => s + c.totalLength, 0).toFixed(1)} m total</td></tr>
+            <tr><th>Connectors</th><td>{Object.values(connectors).reduce((s, c) => s + c.qty, 0)} pcs, {Object.values(connectors).length} type(s)</td></tr>
+            <tr><th>Active stages</th><td>{amps} amp(s)</td></tr>
+            <tr><th>Passive stages</th><td>{attens} atten · {splitters.length} splitter</td></tr>
+          </tbody></table>
+        </div>
+      </div>
 
       <h2>Stage-by-stage analysis</h2>
-      <table>
-        <thead><tr><th>#</th><th>Component</th><th>Detail</th><th style={{ textAlign: "right" }}>Loss/Gain</th><th style={{ textAlign: "right" }}>Power out</th></tr></thead>
+      <table className="zebra avoid-break">
+        <thead><tr><th style={{ width: 28 }}>#</th><th>Component</th><th>Detail</th><th style={{ textAlign: "right" }}>Loss / Gain</th><th style={{ textAlign: "right" }}>Power out</th></tr></thead>
         <tbody>
           {stages.map((st, i) => (
             <tr key={i}>
-              <td>{i + 1}</td>
+              <td style={{ fontFamily: "monospace" }}>{i + 1}</td>
               <td>{st.label}</td>
-              <td>{st.sub}</td>
-              <td style={{ textAlign: "right" }}>{st.type === "tx" || st.type === "rx" ? "—" : `${st.loss > 0 ? "-" : st.loss < 0 ? "+" : ""}${Math.abs(st.loss).toFixed(2)} dB`}</td>
-              <td style={{ textAlign: "right" }}>{st.type === "tx" ? `${st.power} dBm` : `${st.pwrOut.toFixed(2)} dBm`}</td>
+              <td className="print-muted" style={{ fontSize: "9pt" }}>{st.sub}</td>
+              <td style={{ textAlign: "right", fontFamily: "monospace" }}>{st.type === "tx" || st.type === "rx" ? "—" : `${st.loss > 0 ? "−" : st.loss < 0 ? "+" : ""}${Math.abs(st.loss).toFixed(2)} dB`}</td>
+              <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{st.type === "tx" ? `${st.power} dBm` : `${st.pwrOut.toFixed(2)} dBm`}</td>
             </tr>
           ))}
+          <tr style={{ borderTop: "2px solid #b45309" }}>
+            <td colSpan="3" style={{ fontWeight: 700, textAlign: "right" }}>Total cascade loss</td>
+            <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>−{totalLoss.toFixed(2)} dB</td>
+            <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{rxPwr.toFixed(2)} dBm</td>
+          </tr>
         </tbody>
       </table>
+      <div className="print-muted" style={{ fontSize: "7.5pt", marginTop: 3, marginBottom: 8, fontStyle: "italic" }}>
+        Loss values computed at {freqLabel}. Cable attenuation interpolated from manufacturer data; connector loss is typical insertion loss.
+      </div>
 
       <h2>Bill of materials</h2>
-      <table>
-        <thead><tr><th>Category</th><th>Item</th><th>Spec</th><th>Qty</th></tr></thead>
+      <table className="zebra avoid-break">
+        <thead><tr><th style={{ width: "14%" }}>Category</th><th>Item</th><th>Spec</th><th style={{ textAlign: "right", width: "18%" }}>Quantity</th></tr></thead>
         <tbody>
           {Object.values(cables).map((c, i) => (
-            <tr key={`c${i}`}><td>Cable</td><td>{c.cable.name}</td><td>{c.cable.z} Ω, OD {c.cable.OD.toFixed(2)} mm</td><td>{c.totalLength} m total</td></tr>
+            <tr key={`c${i}`}><td>Cable</td><td>{c.cable.name}</td><td className="print-muted" style={{ fontSize: "9pt" }}>{c.cable.z} Ω · OD {c.cable.OD.toFixed(2)} mm · {c.cable.cons.dielectric}</td><td style={{ textAlign: "right", fontFamily: "monospace" }}>{c.totalLength} m</td></tr>
           ))}
           {Object.values(connectors).map((c, i) => (
-            <tr key={`n${i}`}><td>Connector</td><td>{c.connector.name}</td><td>{c.connector.z} Ω, {c.connector.fMax} GHz</td><td>{c.qty} pcs</td></tr>
+            <tr key={`n${i}`}><td>Connector</td><td>{c.connector.name}</td><td className="print-muted" style={{ fontSize: "9pt" }}>{c.connector.z} Ω · DC–{c.connector.fMax} GHz</td><td style={{ textAlign: "right", fontFamily: "monospace" }}>{c.qty} pcs</td></tr>
           ))}
-          {amps > 0 && <tr><td>Active</td><td>Amplifier</td><td>application-specific</td><td>{amps} pcs</td></tr>}
-          {attens > 0 && <tr><td>Passive</td><td>Attenuator pad</td><td>50 Ω fixed</td><td>{attens} pcs</td></tr>}
+          {amps > 0 && <tr><td>Active</td><td>Amplifier</td><td className="print-muted" style={{ fontSize: "9pt" }}>application-specific gain / NF</td><td style={{ textAlign: "right", fontFamily: "monospace" }}>{amps} pcs</td></tr>}
+          {attens > 0 && <tr><td>Passive</td><td>Attenuator pad</td><td className="print-muted" style={{ fontSize: "9pt" }}>50 Ω fixed</td><td style={{ textAlign: "right", fontFamily: "monospace" }}>{attens} pcs</td></tr>}
           {splitters.map((n, i) => (
-            <tr key={`s${i}`}><td>Passive</td><td>{n}-way splitter</td><td>{SPLITTER_LOSS[n]} dB insertion loss</td><td>1 pc</td></tr>
+            <tr key={`s${i}`}><td>Passive</td><td>{n}-way splitter</td><td className="print-muted" style={{ fontSize: "9pt" }}>{SPLITTER_LOSS[n]} dB insertion loss</td><td style={{ textAlign: "right", fontFamily: "monospace" }}>1 pc</td></tr>
           ))}
         </tbody>
       </table>
 
-      <div style={{ marginTop: 20, paddingTop: 10, borderTop: "1px solid #ccc", fontSize: "8pt", color: "#888", textAlign: "center" }}>
-        Generated by RF Cable Suite · {now.toLocaleString()} · rf-cable-suite.vercel.app
+      {(meta.notes && meta.notes.trim()) ? (
+        <div className="avoid-break">
+          <h2>Notes</h2>
+          <div style={{ fontSize: "10pt", whiteSpace: "pre-wrap", padding: "6pt 8pt", border: "1px solid #ddd", background: "#fafafa" }}>{meta.notes}</div>
+        </div>
+      ) : null}
+
+      <div className="avoid-break">
+        <h2>Sign-off</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginTop: 6 }}>
+          <div>
+            <div style={{ borderBottom: "1px solid #999", height: 36 }}></div>
+            <div style={{ fontSize: "8pt", color: "#555", marginTop: 2 }}>Prepared by{meta.engineer ? ` · ${meta.engineer}` : ""}</div>
+          </div>
+          <div>
+            <div style={{ borderBottom: "1px solid #999", height: 36 }}></div>
+            <div style={{ fontSize: "8pt", color: "#555", marginTop: 2 }}>Reviewed / approved</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16, paddingTop: 8, borderTop: "1px solid #ccc", fontSize: "8pt", color: "#888", display: "flex", justifyContent: "space-between" }}>
+        <span>{meta.docId || ""} · Rev {meta.revision || "A"}</span>
+        <span>Generated by RF Cable Suite · {now.toLocaleString()}</span>
       </div>
     </div>
   );
@@ -3639,7 +3881,11 @@ const SEGMENT_TYPES = [
 ];
 
 function LinkView({ openInLibrary, onPrint }) {
-  const [freq, setFreq] = useState(900);
+  const [freq, setFreq] = useState(() => {
+    try { const s = localStorage.getItem("rf-link-freq"); if (s) return Number(s) || 900; } catch {}
+    return 900;
+  });
+  useEffect(() => { try { localStorage.setItem("rf-link-freq", String(freq)); } catch {} }, [freq]);
   const [segments, setSegments] = useState(() => {
     // URL-shared link takes priority over localStorage
     try {
