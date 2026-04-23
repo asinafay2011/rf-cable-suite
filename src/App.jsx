@@ -1333,7 +1333,8 @@ export default function RFCableSuite() {
           @media print {
             @page { size: A4; margin: 14mm; }
             body { background: white !important; color: #111 !important; }
-            body > *:not(.print-only) { display: none !important; }
+            body > *:not(#root):not(.print-only) { display: none !important; }
+            #root > *:not(.print-only) { display: none !important; }
             .print-only { display: block !important; position: static !important; background: white !important; color: #111 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; }
             .print-only * { color: #111 !important; background: transparent !important; border-color: #999 !important; }
             .print-only .print-accent { color: #b45309 !important; }
