@@ -1703,16 +1703,26 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared
               </DS>
               <DS title="Attenuation">
                 <table style={S.attenTable}>
-                  <thead><tr><th style={S.attenTh}>Freq</th><th style={S.attenTh}>{units === "imperial" ? "dB/100ft" : units === "both" ? "dB/100m (dB/100ft)" : "dB/100m"}</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th style={S.attenTh}>Freq</th>
+                      {units !== "imperial" && <th style={S.attenTh}>dB/100m</th>}
+                      {units !== "metric" && <th style={S.attenTh}>dB/100ft</th>}
+                      {units !== "metric" && <th style={S.attenTh}>dB/25ft</th>}
+                    </tr>
+                  </thead>
                   <tbody>
                     {c.atten.map(([f, a], i) => (
                       <tr key={i}>
                         <td style={S.attenTd}>{f < 1000 ? `${f} MHz` : `${(f / 1000).toFixed(1)} GHz`}</td>
-                        <td style={{ ...S.attenTd, color: "#fbbf24" }}>{units === "imperial" ? (a * 0.3048).toFixed(1) : units === "both" ? `${a.toFixed(1)} (${(a * 0.3048).toFixed(1)})` : a.toFixed(1)}</td>
+                        {units !== "imperial" && <td style={{ ...S.attenTd, color: "#fbbf24" }}>{a.toFixed(2)}</td>}
+                        {units !== "metric" && <td style={{ ...S.attenTd, color: "#fbbf24" }}>{(a * 0.3048).toFixed(2)}</td>}
+                        {units !== "metric" && <td style={{ ...S.attenTd, color: "#fbbf24" }}>{(a * 0.0762).toFixed(3)}</td>}
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <div style={{ fontSize: 9, color: "#78716c", marginTop: 6, lineHeight: 1.5 }}>25 ft ≈ 7.62 m — typical RG jumper / patch length. For arbitrary lengths: loss = (dB/100m) × (length in m / 100).</div>
               </DS>
             </div>
             <div>
