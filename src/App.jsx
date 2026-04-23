@@ -930,6 +930,11 @@ export default function RFCableSuite() {
   const [units, setUnits] = useState("both");
   const [showTools, setShowTools] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [comparedCables, setComparedCables] = useState(() => {
+    try { const s = localStorage.getItem("rf-compared"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
+  useEffect(() => { try { localStorage.setItem("rf-compared", JSON.stringify(comparedCables)); } catch {} }, [comparedCables]);
+  const toggleCompare = (id) => setComparedCables(prev => prev.includes(id) ? prev.filter(x => x !== id) : prev.length < 4 ? [...prev, id] : prev);
   const [ttsEnabled, setTtsEnabled] = useState(() => {
     try { return localStorage.getItem("rf-tts") === "1"; } catch { return false; }
   });
@@ -977,8 +982,8 @@ export default function RFCableSuite() {
           </div>
           <div style={S.headerRight}>
             <nav style={S.nav}>
-              {[["ask", "Ask"], ["design", "Design"], ["library", "Library"]].map(([k, label]) => (
-                <button key={k} onClick={() => setTab(k)} style={{ ...S.navBtn, ...(tab === k ? S.navBtnActive : {}) }}>{label}</button>
+              {[["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["wizard", "Wizard"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]].map(([k, label]) => (
+                <button key={k} onClick={() => setTab(k)} style={{ ...S.navBtn, ...(tab === k ? S.navBtnActive : {}), ...(k === "compare" && comparedCables.length > 0 ? { borderColor: "#d97706", color: "#fbbf24" } : {}) }}>{label}</button>
               ))}
             </nav>
             <button onClick={() => setSettingsOpen(!settingsOpen)} style={{ ...S.settingsBtn, ...(settingsOpen ? S.settingsBtnActive : {}) }} title="Settings">
@@ -1042,7 +1047,9 @@ export default function RFCableSuite() {
         <main style={S.main}>
           {tab === "ask" && <AskView queuedPrompt={queuedPrompt} clearQueued={() => setQueuedPrompt(null)} openInLibrary={openInLibrary} loadIntoDesign={loadCableIntoDesign} />}
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
-          {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} />}
+          {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} />}
+          {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
+          {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}
         </main>
       </div>
     </SettingsContext.Provider>
@@ -1546,7 +1553,7 @@ function DesignView({ activeCable, clearCable, openLibrary }) {
 // ═══════════════════════════════════════════════════════════════
 // LIBRARY VIEW
 // ═══════════════════════════════════════════════════════════════
-function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCable }) {
+function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCable, comparedCables, toggleCompare }) {
   const [search, setSearch] = useState("");
   const [filterZ, setFilterZ] = useState("all");
   const [filterCat, setFilterCat] = useState("all");
@@ -1600,7 +1607,8 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
         {filtered.map(([id, c]) => (
           <CableCard key={id} id={id} cable={c} expanded={expanded === id}
             onToggle={() => { setExpanded(expanded === id ? null : id); setActiveCable(id); }}
-            onDesign={() => loadIntoDesign(id)} onAsk={() => askAboutCable(id)} />
+            onDesign={() => loadIntoDesign(id)} onAsk={() => askAboutCable(id)}
+            compared={comparedCables?.includes(id)} toggleCompare={toggleCompare} />
         ))}
         {filtered.length === 0 && <div style={S.emptyState}>No cables match filters. Try relaxing criteria.</div>}
       </div>
@@ -1608,7 +1616,7 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
   );
 }
 
-function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
+function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared, toggleCompare }) {
   const { units } = useContext(SettingsContext);
   const cat = CATEGORIES[c.cat];
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity];
@@ -1661,6 +1669,7 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
           <div style={S.actionRow}>
             <button onClick={onDesign} style={S.actionBtn}>→ Load into Designer</button>
             <button onClick={onAsk} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>Ask Agent about this</button>
+            {toggleCompare && <button onClick={(e) => { e.stopPropagation(); toggleCompare(id); }} style={{ ...S.actionBtn, ...(compared ? { background: "rgba(52,211,153,0.15)", color: "#34d399", borderColor: "#10b981" } : S.actionBtnSecondary) }}>{compared ? "✓ In compare" : "+ Add to compare"}</button>}
           </div>
           <div style={{ padding: "14px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
@@ -1739,6 +1748,359 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk }) {
               <DS title="Suppliers"><DR label="Typical makers" v={wrapTerms(c.makers)} /></DS>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FREQUENCY SWEEP CHART (log-log loss plot)
+// ═══════════════════════════════════════════════════════════════
+const COMPARE_COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#c084fc", "#f97316", "#ec4899"];
+
+function FreqSweep({ cables, height = 340 }) {
+  if (!cables || cables.length === 0) return null;
+  const W = 720, H = height;
+  const padL = 54, padR = 16, padT = 20, padB = 44;
+  const fMin = 10, fMax = 70000;  // 10 MHz → 70 GHz
+  const lMin = 0.1, lMax = 1000;  // dB/100m
+  const xf = (f) => padL + (Math.log10(f) - Math.log10(fMin)) / (Math.log10(fMax) - Math.log10(fMin)) * (W - padL - padR);
+  const yl = (l) => padT + (1 - (Math.log10(l) - Math.log10(lMin)) / (Math.log10(lMax) - Math.log10(lMin))) * (H - padT - padB);
+
+  const fTicks = [10, 30, 100, 300, 1000, 3000, 10000, 30000, 70000];
+  const lTicks = [0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000];
+  const fmtFreq = (f) => f >= 1000 ? `${(f / 1000).toFixed(f >= 10000 ? 0 : 0)} GHz` : `${f} MHz`;
+
+  const pathForCable = (c) => {
+    if (!c?.atten || c.atten.length === 0) return "";
+    const pts = c.atten.filter(([f]) => f >= fMin && f <= fMax);
+    if (pts.length === 0) return "";
+    // Dense interpolation for smooth curve
+    const all = [];
+    const fFirst = Math.max(fMin, pts[0][0]);
+    const fLast = Math.min(fMax, pts[pts.length - 1][0]);
+    const steps = 80;
+    for (let i = 0; i <= steps; i++) {
+      const f = Math.pow(10, Math.log10(fFirst) + i / steps * (Math.log10(fLast) - Math.log10(fFirst)));
+      const l = interpAtten(pts, f);
+      if (l >= lMin && l <= lMax) all.push([f, l]);
+    }
+    return all.map(([f, l], i) => `${i === 0 ? "M" : "L"} ${xf(f).toFixed(1)} ${yl(l).toFixed(1)}`).join(" ");
+  };
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", background: "rgba(15,10,5,0.45)", borderRadius: 4 }}>
+      {lTicks.map((l, i) => (
+        <g key={`ly${i}`}>
+          <line x1={padL} y1={yl(l)} x2={W - padR} y2={yl(l)} stroke="#2a1f15" strokeWidth="0.5" strokeDasharray={l === 1 || l === 10 || l === 100 ? "" : "2,3"} />
+          <text x={padL - 6} y={yl(l) + 3} fontSize="9" fill="#78716c" textAnchor="end" fontFamily="JetBrains Mono, monospace">{l}</text>
+        </g>
+      ))}
+      {fTicks.map((f, i) => (
+        <g key={`fx${i}`}>
+          <line x1={xf(f)} y1={padT} x2={xf(f)} y2={H - padB} stroke="#2a1f15" strokeWidth="0.5" strokeDasharray="2,3" />
+          <text x={xf(f)} y={H - padB + 13} fontSize="8.5" fill="#78716c" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{fmtFreq(f)}</text>
+        </g>
+      ))}
+      <text x={padL - 42} y={padT + (H - padT - padB) / 2} fontSize="9" fill="#a8a29e" textAnchor="middle" transform={`rotate(-90, ${padL - 42}, ${padT + (H - padT - padB) / 2})`} letterSpacing="1">Loss (dB/100m)</text>
+      <text x={padL + (W - padL - padR) / 2} y={H - 6} fontSize="9" fill="#a8a29e" textAnchor="middle" letterSpacing="1">Frequency</text>
+
+      {cables.map((c, i) => {
+        const color = COMPARE_COLORS[i % COMPARE_COLORS.length];
+        const d = pathForCable(c);
+        return (
+          <g key={i}>
+            <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />
+            {(c.atten || []).filter(([f]) => f >= fMin && f <= fMax).map(([f, l], j) => (
+              l >= lMin && l <= lMax ? <circle key={j} cx={xf(f)} cy={yl(l)} r="2.5" fill={color} stroke="#0a0705" strokeWidth="0.5" /> : null
+            ))}
+          </g>
+        );
+      })}
+
+      <g transform={`translate(${padL + 8}, ${padT + 8})`}>
+        {cables.map((c, i) => (
+          <g key={i} transform={`translate(0, ${i * 14})`}>
+            <line x1={0} y1={5} x2={14} y2={5} stroke={COMPARE_COLORS[i % COMPARE_COLORS.length]} strokeWidth="2.5" />
+            <text x={18} y={8} fontSize="9.5" fill="#e7e5e4" fontFamily="JetBrains Mono, monospace" fontWeight="600">{c.name}</text>
+          </g>
+        ))}
+      </g>
+    </svg>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// COMPARE VIEW (side-by-side)
+// ═══════════════════════════════════════════════════════════════
+function CompareView({ comparedCables, setComparedCables, openInLibrary }) {
+  const { units } = useContext(SettingsContext);
+  const cables = comparedCables.map(id => ({ id, ...CABLES[id] })).filter(x => x.name);
+  const remove = (id) => setComparedCables(prev => prev.filter(x => x !== id));
+
+  if (cables.length === 0) {
+    return (
+      <div style={S.viewInner}>
+        <div style={S.viewIntro}>
+          <strong style={S.viewIntroStrong}>Compare mode.</strong> Add cables from the Library tab (each cable card has a "+ Add to compare" button when expanded). Up to 4 cables at once.
+        </div>
+        <div style={{ textAlign: "center", padding: "80px 20px", color: "#78716c" }}>
+          <div style={{ fontSize: 48, marginBottom: 10, opacity: 0.3 }}>⚖️</div>
+          <div style={{ fontSize: 13, color: "#a8a29e" }}>No cables pinned for compare yet.</div>
+          <div style={{ fontSize: 11, marginTop: 8 }}>Go to Library → expand a cable → click "+ Add to compare"</div>
+        </div>
+      </div>
+    );
+  }
+
+  const rows = [
+    { label: "Impedance", fn: c => `${c.z} Ω` },
+    { label: "Velocity factor", fn: c => `${c.vp}%` },
+    { label: "Capacitance", fn: c => fmtCap(c.cap, units, 1) },
+    { label: "Max frequency", fn: c => `${c.fMax} GHz` },
+    { label: "Max voltage", fn: c => `${c.vMax} V RMS` },
+    { label: "Inner conductor d", fn: c => fmtLen(c.d, units) },
+    { label: "Dielectric OD", fn: c => fmtLen(c.D, units) },
+    { label: "Shield OD", fn: c => fmtLen(c.shield, units) },
+    { label: "Jacket OD", fn: c => fmtLen(c.OD, units) },
+    { label: "Mass", fn: c => fmtMass(c.mass, units, 1) },
+    { label: "Flexibility", fn: c => c.flex },
+    { label: "Outdoor-rated", fn: c => c.outdoor ? "✓ Yes" : "— No" },
+    { label: "Power class", fn: c => c.power },
+    { label: "Complexity", fn: c => c.complexity },
+  ];
+
+  const keyFreqs = [100, 900, 2400, 5800];
+  keyFreqs.forEach(f => {
+    rows.push({ label: `Loss @ ${f < 1000 ? `${f} MHz` : `${(f / 1000).toFixed(1)} GHz`}`, fn: c => {
+      const a = interpAtten(c.atten, f);
+      return a && f <= c.fMax * 1000 ? fmtLoss(a, units, 2) : "— (above fMax)";
+    }});
+  });
+
+  rows.push({ label: "Conductor", fn: c => c.cons.conductor });
+  rows.push({ label: "Dielectric", fn: c => c.cons.dielectric });
+  rows.push({ label: "Shield", fn: c => c.cons.shield });
+  rows.push({ label: "Jacket", fn: c => c.cons.jacket });
+  rows.push({ label: "Applications", fn: c => c.apps });
+  rows.push({ label: "Makers", fn: c => c.makers });
+
+  return (
+    <div style={S.viewInner}>
+      <div style={{ ...S.viewIntro, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <strong style={S.viewIntroStrong}>Compare mode.</strong> {cables.length} of 4 cables pinned. Shows specs table + cross-sections + loss curves side-by-side.
+        </div>
+        <button onClick={() => setComparedCables([])} style={{ background: "transparent", color: "#a8a29e", border: "1px solid #57534e", padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 1, textTransform: "uppercase" }}>Clear all</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        {cables.map((c, i) => {
+          const color = COMPARE_COLORS[i % COMPARE_COLORS.length];
+          const cat = CATEGORIES[c.cat];
+          return (
+            <div key={c.id} style={{ flex: "1 1 200px", minWidth: 200, padding: 12, background: "rgba(15,10,5,0.4)", border: `1px solid ${color}55`, borderRadius: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
+                  <button onClick={() => openInLibrary(c.id)} style={{ background: "transparent", border: "none", color: "#fbbf24", fontWeight: 700, fontSize: 12, cursor: "pointer", padding: 0, textAlign: "left" }}>{c.name}</button>
+                </div>
+                <button onClick={() => remove(c.id)} style={{ background: "none", border: "none", color: "#a8a29e", cursor: "pointer", fontSize: 14, padding: 0 }}>✕</button>
+              </div>
+              <div style={{ fontSize: 9, color: cat.color, marginBottom: 6, letterSpacing: 0.5 }}>{cat.label}</div>
+              <div style={{ display: "flex", justifyContent: "center" }}>
+                <svg width={120} height={120} viewBox="0 0 120 120">
+                  <circle cx={60} cy={60} r={(c.OD / 2) * (50 / (c.OD / 2))} fill="#0a0705" stroke="#2a1f15" strokeWidth="1" />
+                  <circle cx={60} cy={60} r={(c.shield / c.OD) * 50} fill="#4b5563" />
+                  <circle cx={60} cy={60} r={(c.D / c.OD) * 50} fill="rgba(255,250,235,0.12)" />
+                  <circle cx={60} cy={60} r={(c.d / c.OD) * 50} fill="#b45309" />
+                </svg>
+              </div>
+              <div style={{ fontSize: 9.5, color: "#a8a29e", textAlign: "center", marginTop: 4, fontFamily: "JetBrains Mono, monospace" }}>{c.z}Ω · {fmtLen(c.OD, "metric")} OD</div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 6, textAlign: "center" }}>Attenuation curves · log-log</div>
+        <FreqSweep cables={cables} />
+      </div>
+
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: "JetBrains Mono, monospace" }}>
+          <thead>
+            <tr>
+              <th style={{ padding: "8px 10px", textAlign: "left", color: "#a8a29e", borderBottom: "1px solid #2a1f15", fontSize: 10, letterSpacing: 1 }}>PROPERTY</th>
+              {cables.map((c, i) => (
+                <th key={c.id} style={{ padding: "8px 10px", textAlign: "left", color: COMPARE_COLORS[i % COMPARE_COLORS.length], borderBottom: "1px solid #2a1f15", fontSize: 10.5, letterSpacing: 0.5, minWidth: 130 }}>{c.name}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} style={{ background: i % 2 === 0 ? "rgba(15,10,5,0.25)" : "transparent" }}>
+                <td style={{ padding: "6px 10px", color: "#78716c", fontSize: 10 }}>{r.label}</td>
+                {cables.map(c => (
+                  <td key={c.id} style={{ padding: "6px 10px", color: "#d6cfc4", fontSize: 10.5 }}>{r.fn(c)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RECOMMENDATION WIZARD
+// ═══════════════════════════════════════════════════════════════
+function WizardView({ openInLibrary, toggleCompare, comparedCables }) {
+  const { units } = useContext(SettingsContext);
+  const [freq, setFreq] = useState(900);
+  const [length, setLength] = useState(20);
+  const [outdoor, setOutdoor] = useState(true);
+  const [flexNeed, setFlexNeed] = useState("any");
+  const [powerNeed, setPowerNeed] = useState("medium");
+  const [impedance, setImpedance] = useState(50);
+  const [priority, setPriority] = useState("loss");
+
+  const results = useMemo(() => {
+    const scored = Object.entries(CABLES).map(([id, c]) => {
+      const reasons = [];
+      const warnings = [];
+      let score = 100;
+
+      // Hard filter: impedance
+      if (c.z !== impedance) return null;
+
+      // Hard filter: freq must be below fMax
+      if (freq > c.fMax * 1000) return null;
+
+      // Outdoor requirement
+      if (outdoor && !c.outdoor) { score -= 30; warnings.push("not rated for outdoor"); }
+      else if (outdoor && c.outdoor) reasons.push("outdoor-rated");
+
+      // Flex preference
+      const flexOrder = { low: 1, medium: 2, high: 3 };
+      if (flexNeed !== "any") {
+        const want = flexOrder[flexNeed], got = flexOrder[c.flex];
+        if (got < want) { score -= 15 * (want - got); warnings.push(`less flex than requested`); }
+        else if (got === want) { reasons.push(`${flexNeed}-flex match`); }
+        else { reasons.push(`more flex than required`); }
+      }
+
+      // Power requirement
+      const powerOrder = { low: 1, medium: 2, high: 3 };
+      if (powerOrder[c.power] < powerOrder[powerNeed]) { score -= 20; warnings.push("power class below request"); }
+
+      // Loss at freq
+      const lossPerHundred = interpAtten(c.atten, freq);
+      const totalLoss = lossPerHundred * length / 100;
+
+      // Priority scoring
+      if (priority === "loss") score -= totalLoss * 2;
+      else if (priority === "cost") {
+        const costProxy = { low: 0, medium: 10, high: 25 }[c.complexity] || 0;
+        score -= costProxy;
+        if (c.complexity === "low") reasons.push("simple / low cost");
+      } else if (priority === "size") {
+        score -= c.OD * 0.8;
+        if (c.OD < 6) reasons.push("compact OD");
+      }
+
+      // Bonus reasons
+      if (totalLoss < 1) reasons.push(`only ${totalLoss.toFixed(2)} dB loss over ${length} m`);
+      else if (totalLoss < 3) reasons.push(`low loss (${totalLoss.toFixed(2)} dB) over the run`);
+
+      if (freq > c.fMax * 1000 * 0.7) warnings.push("near cable fMax");
+
+      return { id, cable: c, score, totalLoss, lossPerHundred, reasons, warnings };
+    }).filter(x => x).sort((a, b) => b.score - a.score).slice(0, 5);
+    return scored;
+  }, [freq, length, outdoor, flexNeed, powerNeed, impedance, priority]);
+
+  const Input = ({ label, children }) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <label style={{ fontSize: 10, color: "#a8a29e", letterSpacing: 1, textTransform: "uppercase" }}>{label}</label>
+      {children}
+    </div>
+  );
+  const Seg = ({ value, onChange, options }) => (
+    <div style={{ display: "flex", gap: 2, background: "rgba(15,10,5,0.4)", padding: 2, borderRadius: 3, border: "1px solid #2a1f15" }}>
+      {options.map(([v, l]) => (
+        <button key={v} onClick={() => onChange(v)} style={{ flex: 1, padding: "6px 8px", fontSize: 10.5, background: value === v ? "#d97706" : "transparent", color: value === v ? "#0a0705" : "#a8a29e", border: "none", cursor: "pointer", borderRadius: 2, fontWeight: value === v ? 700 : 400, fontFamily: "inherit" }}>{l}</button>
+      ))}
+    </div>
+  );
+
+  return (
+    <div style={S.viewInner}>
+      <div style={S.viewIntro}>
+        <strong style={S.viewIntroStrong}>Wizard mode.</strong> Answer 5 questions → top 5 cable recommendations with reasoning. Scores 83 cables against your requirements.
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 24, padding: 16, background: "rgba(15,10,5,0.4)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+        <Input label={`Frequency: ${freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}`}>
+          <input type="range" min={10} max={40000} step={10} value={freq} onChange={e => setFreq(Number(e.target.value))} style={{ accentColor: "#d97706" }} />
+        </Input>
+        <Input label={`Length: ${length} m (${(length * 3.28).toFixed(0)} ft)`}>
+          <input type="range" min={1} max={200} step={1} value={length} onChange={e => setLength(Number(e.target.value))} style={{ accentColor: "#d97706" }} />
+        </Input>
+        <Input label="Impedance">
+          <Seg value={impedance} onChange={setImpedance} options={[[50, "50 Ω"], [75, "75 Ω"], [93, "93 Ω"]]} />
+        </Input>
+        <Input label="Location">
+          <Seg value={outdoor} onChange={setOutdoor} options={[[false, "Indoor"], [true, "Outdoor"]]} />
+        </Input>
+        <Input label="Flex needed">
+          <Seg value={flexNeed} onChange={setFlexNeed} options={[["any", "Any"], ["low", "Rigid"], ["medium", "Normal"], ["high", "Flex"]]} />
+        </Input>
+        <Input label="Power class">
+          <Seg value={powerNeed} onChange={setPowerNeed} options={[["low", "<100W"], ["medium", "<1kW"], ["high", ">1kW"]]} />
+        </Input>
+        <Input label="Optimize for">
+          <Seg value={priority} onChange={setPriority} options={[["loss", "Low loss"], ["cost", "Low cost"], ["size", "Compact"]]} />
+        </Input>
+      </div>
+
+      <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 10 }}>Top {results.length} matches</div>
+
+      {results.length === 0 ? (
+        <div style={{ padding: "60px 20px", textAlign: "center", color: "#a8a29e" }}>
+          <div style={{ fontSize: 30, opacity: 0.4, marginBottom: 10 }}>🔍</div>
+          No cables match these constraints. Try relaxing impedance / frequency / outdoor.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {results.map((r, i) => {
+            const rank = i + 1;
+            const color = rank === 1 ? "#fbbf24" : rank === 2 ? "#9ca3af" : rank === 3 ? "#a16207" : "#57534e";
+            return (
+              <div key={r.id} style={{ display: "flex", gap: 14, padding: 14, background: "rgba(15,10,5,0.45)", border: `1px solid ${color}55`, borderRadius: 4, alignItems: "flex-start" }}>
+                <div style={{ width: 30, height: 30, borderRadius: "50%", background: color, color: "#0a0705", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, flexShrink: 0 }}>{rank}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 14, color: "#fbbf24", fontWeight: 700 }}>{r.cable.name}</div>
+                    <div style={{ fontSize: 10, color: CATEGORIES[r.cable.cat].color, letterSpacing: 0.5 }}>{CATEGORIES[r.cable.cat].label}</div>
+                    <div style={{ fontSize: 10, color: "#a8a29e", fontFamily: "JetBrains Mono, monospace", marginLeft: "auto" }}>Score: {r.score.toFixed(0)}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#d6cfc4", marginBottom: 6, fontFamily: "JetBrains Mono, monospace" }}>
+                    Loss over {length} m @ {freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(1)} GHz`}: <strong style={{ color: r.totalLoss < 3 ? "#34d399" : r.totalLoss < 10 ? "#fbbf24" : "#ef4444" }}>{r.totalLoss.toFixed(2)} dB</strong> ({r.lossPerHundred.toFixed(2)} dB/100m) · OD {fmtLen(r.cable.OD, units)} · {r.cable.flex} flex
+                  </div>
+                  {r.reasons.length > 0 && <div style={{ fontSize: 10.5, color: "#34d399", marginBottom: 3 }}>✓ {r.reasons.join(" · ")}</div>}
+                  {r.warnings.length > 0 && <div style={{ fontSize: 10.5, color: "#f97316" }}>⚠ {r.warnings.join(" · ")}</div>}
+                  <div style={{ fontSize: 10, color: "#a8a29e", marginTop: 6, lineHeight: 1.5 }}>{r.cable.apps}</div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                    <button onClick={() => openInLibrary(r.id)} style={{ background: "rgba(217,119,6,0.15)", color: "#fbbf24", border: "1px solid #d97706", padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 0.5 }}>Open in Library</button>
+                    <button onClick={() => toggleCompare(r.id)} style={{ background: comparedCables.includes(r.id) ? "rgba(52,211,153,0.15)" : "transparent", color: comparedCables.includes(r.id) ? "#34d399" : "#a8a29e", border: `1px solid ${comparedCables.includes(r.id) ? "#10b981" : "#57534e"}`, padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 0.5 }}>{comparedCables.includes(r.id) ? "✓ In compare" : "+ Compare"}</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
