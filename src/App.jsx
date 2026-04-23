@@ -1339,7 +1339,7 @@ export default function RFCableSuite() {
           </div>
           <div style={S.headerRight}>
             <nav style={S.nav}>
-              {[["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["tools", "Tools"], ["wizard", "Wizard"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]].map(([k, label]) => (
+              {[["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["tools", "Tools"], ["wizard", "Wizard"], ["cheat", "Cheat Sheet"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]].map(([k, label]) => (
                 <button key={k} onClick={() => setTab(k)} style={{ ...S.navBtn, ...(tab === k ? S.navBtnActive : {}), ...(k === "compare" && comparedCables.length > 0 ? { borderColor: "#d97706", color: "#fbbf24" } : {}) }}>{label}</button>
               ))}
             </nav>
@@ -1409,6 +1409,7 @@ export default function RFCableSuite() {
           {tab === "link" && <LinkView openInLibrary={openInLibrary} />}
           {tab === "tools" && <ToolsView />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
+          {tab === "cheat" && <CheatSheetView />}
           {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}
         </main>
       </div>
@@ -2412,6 +2413,132 @@ function CompareView({ comparedCables, setComparedCables, openInLibrary }) {
 // ═══════════════════════════════════════════════════════════════
 // RECOMMENDATION WIZARD
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// RF CHEAT SHEET
+// ═══════════════════════════════════════════════════════════════
+const CHEAT_CATEGORIES = {
+  impedance: { label: "Impedance & Geometry", color: "#fbbf24", icon: "Z" },
+  loss:      { label: "Loss & Attenuation",   color: "#f97316", icon: "α" },
+  vswr:      { label: "VSWR & Reflection",    color: "#ef4444", icon: "Γ" },
+  path:      { label: "Path Loss & Antenna",  color: "#60a5fa", icon: "⟶" },
+  noise:     { label: "Noise & Sensitivity",  color: "#34d399", icon: "N" },
+  distortion: { label: "Distortion (IP3 etc)", color: "#c084fc", icon: "3f" },
+  matching:  { label: "Matching Networks",    color: "#d97706", icon: "L-C" },
+  units:     { label: "Unit Conversions",     color: "#a8a29e", icon: "=" },
+};
+
+const FORMULAS = [
+  // IMPEDANCE
+  { cat: "impedance", name: "Coax characteristic impedance", f: "Z₀ = (138 / √εr) · log₁₀(D/d)", vars: "D = dielectric OD (mm), d = inner conductor OD (mm), εr = dielectric constant", ex: "D=2.95, d=0.91, εr=2.3 → Z₀ = 50.0 Ω", units: "Ω" },
+  { cat: "impedance", name: "Coax cutoff frequency", f: "fc = 1 / [π · (D + d) · √εr] · c", vars: "c = 3·10⁸ m/s. Below fc, coax is single-mode (TEM only).", ex: "D=7.24mm, d=2.17mm → fc ≈ 11.3 GHz for PE dielectric", units: "GHz" },
+  { cat: "impedance", name: "Velocity of propagation (VP)", f: "VP = 1 / √εr × 100%", vars: "εr = relative dielectric constant. Air εr=1 (VP=100%), solid PE εr=2.3 (VP=66%), foam PE εr=1.45 (VP=83%).", ex: "PTFE εr=2.1 → VP = 69%", units: "%" },
+  { cat: "impedance", name: "Capacitance per length", f: "C = 2π·εr·ε₀ / ln(D/d)", vars: "ε₀ = 8.854·10⁻¹² F/m. Standard 50Ω coax: ~100 pF/m solid PE, ~80 pF/m foam PE.", ex: "RG-58: 101 pF/m", units: "pF/m" },
+  { cat: "impedance", name: "Inductance per length", f: "L = (μ₀ / 2π) · ln(D/d)", vars: "μ₀ = 4π·10⁻⁷ H/m. For 50Ω coax, L ≈ 250 nH/m.", ex: "RG-213: ~260 nH/m", units: "nH/m" },
+
+  // LOSS
+  { cat: "loss", name: "Total cable loss", f: "L_total = α(f) · length / 100", vars: "α(f) in dB/100m at operating frequency, length in meters. Loss scales with √f for conductor, with f for dielectric.", ex: "LMR-400 @ 2.4 GHz = 12.6 dB/100m · 20 m / 100 = 2.52 dB", units: "dB" },
+  { cat: "loss", name: "Loss frequency scaling (approx)", f: "α(f) ≈ α(f₀) · √(f/f₀)", vars: "Approximation for conductor-loss dominated region. At high freq, dielectric loss adds linear term.", ex: "RG-58: 14 dB/100m @ 100 MHz → ~48 dB/100m @ 1 GHz (√10 ≈ 3.16)", units: "dB/100m" },
+  { cat: "loss", name: "dB ↔ ratio", f: "dB = 10 · log₁₀(P_out/P_in)", vars: "+3 dB = 2× power, +10 dB = 10×, +20 dB = 100×. Voltage: ×√2 = +3 dB.", ex: "Loss 6 dB = output is 25% of input (−6 dB in power)", units: "dB" },
+  { cat: "loss", name: "Power kept after loss", f: "P_out / P_in = 10^(−L/10)", vars: "L in dB. 1 dB loss → 79% of input, 3 dB → 50%, 10 dB → 10%, 30 dB → 0.1%.", ex: "Cable eats 5 dB → 31.6% of TX power reaches RX", units: "ratio" },
+
+  // VSWR
+  { cat: "vswr", name: "Reflection coefficient Γ", f: "Γ = (Z_L − Z₀) / (Z_L + Z₀)", vars: "Z_L = load impedance, Z₀ = line impedance (50 or 75 Ω). |Γ|=0 → perfect match; |Γ|=1 → total reflection.", ex: "Z_L=75, Z₀=50 → Γ = 0.20", units: "unitless" },
+  { cat: "vswr", name: "VSWR from Γ", f: "VSWR = (1 + |Γ|) / (1 − |Γ|)", vars: "VSWR=1 is perfect, typical spec <1.5. VSWR=2 means 11% reflected.", ex: "|Γ|=0.2 → VSWR = 1.5", units: "unitless" },
+  { cat: "vswr", name: "Return loss", f: "RL = −20 · log₁₀(|Γ|)", vars: "Higher dB = better match. RL > 15 dB good, > 20 dB excellent.", ex: "|Γ|=0.1 → RL = 20 dB (VSWR = 1.22)", units: "dB" },
+  { cat: "vswr", name: "Mismatch loss", f: "ML = −10 · log₁₀(1 − |Γ|²)", vars: "Power reflected back to source (not delivered to load). Separate from conductor/dielectric loss.", ex: "VSWR=2 → |Γ|=0.33 → ML = 0.51 dB", units: "dB" },
+  { cat: "vswr", name: "VSWR → Γ (inverse)", f: "|Γ| = (VSWR − 1) / (VSWR + 1)", vars: "For converting spec back to reflection magnitude.", ex: "VSWR=1.5 → |Γ| = 0.20", units: "unitless" },
+
+  // PATH LOSS
+  { cat: "path", name: "Free-space path loss (Friis)", f: "FSPL = 32.45 + 20·log(f_MHz) + 20·log(d_km)", vars: "Each 2× distance → +6 dB. Each 2× frequency → +6 dB. Assumes clear LoS.", ex: "2.4 GHz, 1 km → FSPL = 100 dB", units: "dB" },
+  { cat: "path", name: "EIRP (effective radiated power)", f: "EIRP = Pt + Gt − Lt", vars: "Pt = TX power (dBm), Gt = antenna gain (dBi), Lt = TX cable+connector loss (dB).", ex: "30 dBm TX + 15 dBi antenna − 2 dB cable = 43 dBm EIRP = 20 W ERP", units: "dBm" },
+  { cat: "path", name: "Received power", f: "Pr = EIRP − FSPL + Gr − Lr", vars: "Gr = RX antenna gain, Lr = RX cable loss. Margin = Pr − RX sensitivity.", ex: "EIRP 43 dBm − 100 FSPL + 15 dBi − 1 dB = −43 dBm", units: "dBm" },
+  { cat: "path", name: "Fresnel zone 1 radius", f: "F₁ = 17.3 · √(d₁·d₂ / [f · (d₁+d₂)])", vars: "d₁, d₂ in km from each end, f in GHz. Clear 60% of F₁ along path for near-FSPL performance.", ex: "1 km path, 2.4 GHz, midpoint → F₁ = 5.6 m", units: "m" },
+  { cat: "path", name: "Antenna gain (dipole ↔ isotropic)", f: "G_dBi = G_dBd + 2.15", vars: "Reference antenna: isotropic (dBi) vs half-wave dipole (dBd). Always check which is used.", ex: "Yagi 10 dBd = 12.15 dBi", units: "dB" },
+
+  // NOISE
+  { cat: "noise", name: "Thermal noise power", f: "P_n = k·T·B = −174 + 10·log(B) [dBm/Hz → dBm]", vars: "k = 1.38·10⁻²³ J/K, T = 290 K (room). −174 dBm/Hz at 290 K. Add 10·log(bandwidth in Hz).", ex: "1 MHz BW → −174 + 60 = −114 dBm noise floor", units: "dBm" },
+  { cat: "noise", name: "Noise factor F (linear)", f: "F = 1 + Te/290", vars: "Te = equivalent noise temperature (K). NF_dB = 10·log(F).", ex: "F = 1.26 → NF = 1 dB", units: "unitless" },
+  { cat: "noise", name: "Friis cascaded noise factor", f: "F_total = F₁ + (F₂−1)/G₁ + (F₃−1)/(G₁G₂) + ...", vars: "First stage dominates. High-G low-NF LNA first = best. Cable BEFORE LNA = NF hit equals cable loss.", ex: "3dB cable before 1dB NF LNA = total NF ≈ 4 dB", units: "unitless" },
+  { cat: "noise", name: "MDS / receiver sensitivity", f: "MDS = kTB + NF + SNR_required", vars: "Minimum detectable signal. Typical WiFi: −174 + 10·log(20MHz) + 10 + 10 ≈ −81 dBm.", ex: "2 MHz BW, 4 dB NF, 10 dB SNR → −174 + 63 + 4 + 10 = −97 dBm", units: "dBm" },
+
+  // DISTORTION
+  { cat: "distortion", name: "Output vs input IP3", f: "OIP3 = IIP3 + Gain", vars: "OIP3, IIP3, and Gain all in dB/dBm. Specifying OIP3 is conventional for PA; IIP3 for LNA/mixer.", ex: "IIP3 = 15 dBm + Gain 20 dB → OIP3 = 35 dBm", units: "dBm" },
+  { cat: "distortion", name: "IM3 output power", f: "P_IM3 = 3·Pout − 2·OIP3", vars: "IM3 grows 3× fundamental. If Pout rises 1 dB, IM3 rises 3 dB → spacing shrinks 2 dB per dB of input.", ex: "Pout=0 dBm, OIP3=30 → P_IM3 = −60 dBm (60 dBc below fund)", units: "dBm" },
+  { cat: "distortion", name: "P1dB rule of thumb", f: "P1dB ≈ OIP3 − 10 to 15 dB", vars: "Rough relationship — real amplifiers vary. P1dB is where gain drops 1 dB from linear.", ex: "OIP3=30 dBm → P1dB ≈ 15-20 dBm", units: "dBm" },
+  { cat: "distortion", name: "Cascaded IIP3 (linear)", f: "1/IIP3_total = Σ Gcum_i / IIP3_i", vars: "Convert IIP3 to linear (mW): IIP3_lin = 10^((IIP3−30)/10). Last stages hurt most if high-gain chain.", ex: "Final mixer with 0 dBm IIP3 after 30 dB gain = system IIP3 ≈ −30 dBm", units: "linear" },
+  { cat: "distortion", name: "Intermod product frequencies", f: "IM3: 2f₁−f₂ and 2f₂−f₁. IM5: 3f₁−2f₂, etc.", vars: "Close-in spurs around the two carriers. In-band IM products corrupt the channel you want.", ex: "f₁=1000, f₂=1010 MHz → IM3 at 990 + 1020 MHz", units: "Hz" },
+
+  // MATCHING
+  { cat: "matching", name: "L-network Q factor", f: "Q = √(R_high/R_low − 1)", vars: "R_high = larger resistance side, R_low = smaller. Q determines bandwidth (narrower = higher Q).", ex: "50 ↔ 100 Ω: Q = 1. 50 ↔ 1000 Ω: Q = 4.4", units: "unitless" },
+  { cat: "matching", name: "L-network series reactance", f: "X_series = Q · R_low", vars: "Place in series with R_low side. Sign determines L or C: +X → inductor, −X → capacitor.", ex: "Q=1, R_low=50 → |X_series| = 50 Ω. At 1 GHz → L = 8 nH or C = 3.2 pF", units: "Ω" },
+  { cat: "matching", name: "L-network shunt reactance", f: "X_shunt = R_high / Q", vars: "Place in parallel on R_high side. Opposite sign to X_series for matching.", ex: "Q=1, R_high=100 → |X_shunt| = 100 Ω → L=16 nH or C=1.6 pF @ 1 GHz", units: "Ω" },
+  { cat: "matching", name: "Component values from reactance", f: "L = X/(2πf), C = 1/(2πf·X)", vars: "f in Hz. X in Ω. Quick form at 1 GHz: L(nH) = X/6.28, C(pF) = 159/X.", ex: "X=50 Ω @ 2 GHz → L = 4 nH or C = 1.6 pF", units: "H or F" },
+  { cat: "matching", name: "Skin depth", f: "δ = 1 / √(π · f · μ₀ · σ)", vars: "f in Hz, σ in S/m. Cu at 1 GHz: δ ≈ 2.1 µm. At 10 GHz: 0.66 µm. Current flows in δ near surface.", ex: "Cu @ 100 MHz → δ ≈ 6.6 µm (why thin Cu plating works at RF)", units: "m" },
+
+  // UNITS
+  { cat: "units", name: "Length: inch ↔ mm", f: "1 inch = 25.4 mm", vars: "Exact conversion. Divide by 25.4 for in → mm. US RF cables spec in inches; IEC in mm.", ex: "5/8 in = 15.875 mm · 0.141 in = 3.58 mm", units: "length" },
+  { cat: "units", name: "Length: ft ↔ m", f: "1 ft = 0.3048 m (exact)", vars: "100 ft ≈ 30.48 m. Loss specs: 1 dB/100ft ≈ 3.28 dB/100m.", ex: "100 m = 328.08 ft", units: "length" },
+  { cat: "units", name: "dBm ↔ Watts", f: "P_W = 10^((dBm − 30)/10)", vars: "0 dBm = 1 mW. +30 dBm = 1 W. +60 dBm = 1 kW. −30 dBm = 1 µW.", ex: "43 dBm = 20 W, −85 dBm = 3.2 pW", units: "W" },
+  { cat: "units", name: "dB quick table", f: "+3 ≈ 2×, +10 = 10×, −3 ≈ ½, −10 = 1/10", vars: "Mental math shortcuts. +6 ≈ 4×, +20 = 100×, +30 = 1000×. Voltage gets ×/÷√2 per 3 dB.", ex: "27 dB = 10^2.7 ≈ 500×", units: "ratio" },
+  { cat: "units", name: "Temp: °C ↔ °F ↔ K", f: "°F = °C·1.8 + 32; K = °C + 273.15", vars: "Room 20°C = 68°F = 293 K. Cable limits: PVC −20 to +75°C, PE −55 to +80, PTFE −55 to +260.", ex: "−40°C = −40°F (crossover), 125°C = 257°F", units: "temperature" },
+];
+
+function CheatSheetView() {
+  const [search, setSearch] = useState("");
+  const [filterCat, setFilterCat] = useState("all");
+
+  const filtered = useMemo(() => {
+    return FORMULAS.filter(f => {
+      if (filterCat !== "all" && f.cat !== filterCat) return false;
+      if (search) { const q = search.toLowerCase(); if (!(f.name + " " + f.f + " " + f.vars + " " + f.ex).toLowerCase().includes(q)) return false; }
+      return true;
+    });
+  }, [search, filterCat]);
+
+  return (
+    <div style={S.viewInner}>
+      <div style={S.viewIntro}>
+        <strong style={S.viewIntroStrong}>RF Cheat Sheet.</strong> {FORMULAS.length} formulas across {Object.keys(CHEAT_CATEGORIES).length} categories. Search or filter by topic. Each card shows formula + variables + worked example.
+      </div>
+
+      <div style={S.filterGrid}>
+        <div style={{ gridColumn: "span 2" }}>
+          <label style={S.filterLabel}>Search formulas</label>
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. impedance, VSWR, IP3, path loss..." style={S.searchInput} />
+        </div>
+      </div>
+
+      <div style={S.catChips}>
+        <button onClick={() => setFilterCat("all")} className="hover-pill" style={{ ...S.catChip, ...(filterCat === "all" ? S.catChipActive : {}) }}>All ({FORMULAS.length})</button>
+        {Object.entries(CHEAT_CATEGORIES).map(([k, v]) => {
+          const count = FORMULAS.filter(f => f.cat === k).length;
+          return (
+            <button key={k} onClick={() => setFilterCat(k)} className="hover-pill" style={{ ...S.catChip, ...(filterCat === k ? { ...S.catChipActive, borderColor: v.color, color: v.color } : {}), borderLeftColor: v.color, borderLeftWidth: 3 }}>{v.icon} {v.label} ({count})</button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 10 }}>
+        {filtered.map((f, i) => {
+          const cat = CHEAT_CATEGORIES[f.cat];
+          return (
+            <div key={i} style={{ padding: "12px 14px", background: "rgba(15,10,5,0.5)", border: `1px solid ${cat.color}44`, borderRadius: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ width: 28, height: 28, borderRadius: 3, background: `${cat.color}22`, border: `1px solid ${cat.color}`, color: cat.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, fontFamily: "JetBrains Mono, monospace", flexShrink: 0 }}>{cat.icon}</div>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: "#e7e5e4" }}>{f.name}</div>
+              </div>
+              <div style={{ fontSize: 12.5, color: cat.color, fontFamily: "JetBrains Mono, monospace", fontWeight: 600, padding: "6px 10px", background: "rgba(15,10,5,0.6)", border: `1px solid ${cat.color}33`, borderRadius: 3, marginBottom: 6 }}>{f.f}</div>
+              <div style={{ fontSize: 10.5, color: "#d6cfc4", lineHeight: 1.55, marginBottom: 6 }}>{wrapTerms(f.vars)}</div>
+              <div style={{ fontSize: 10.5, color: "#a8a29e", lineHeight: 1.55, paddingLeft: 8, borderLeft: `2px solid ${cat.color}55`, fontStyle: "italic" }}><strong style={{ color: cat.color, fontStyle: "normal" }}>Example:</strong> {wrapTerms(f.ex)}</div>
+            </div>
+          );
+        })}
+      </div>
+      {filtered.length === 0 && <div style={S.emptyState}>No formulas match. Try a broader search.</div>}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // RF TOOLS (Smith Chart + TDR Viewer)
 // ═══════════════════════════════════════════════════════════════
