@@ -2490,12 +2490,14 @@ function ChatMessage({ message: m, messageIndex, allMessages, showTools, openInL
                 const dot = (on) => on ? <span style={{ color: "#fbbf24", marginLeft: 4 }}>•</span> : null;
                 return (
                   <div style={{ ...S.quickChipsRow, marginTop: 4 }}>
-                    <span style={{ ...S.quickChipName, color: "#a8a29e" }}>Jump to tool{(nfData || ip3Data || pathData || linkData || smithFreq) ? " (• = auto-fill ready)" : ""}:</span>
-                    {suggestLink && <button onClick={() => jumpToTool("link", linkData)} style={{ ...S.quickChip, color: "#fbbf24" }}>🔗 Link Budget{dot(!!linkData)}</button>}
-                    {suggestSmith && <button onClick={() => jumpToTool("smith", smithFreq ? { frequency_mhz: smithFreq } : {})} style={{ ...S.quickChip, color: "#c084fc", borderColor: "#7c3aed" }}>🎯 Smith Chart{dot(!!smithFreq)}</button>}
-                    {suggestNF && <button onClick={() => jumpToTool("nf", nfData)} style={{ ...S.quickChip, color: "#34d399", borderColor: "#10b981" }}>🔊 NF Cascade{dot(!!nfData)}</button>}
-                    {suggestIP3 && <button onClick={() => jumpToTool("ip3", ip3Data)} style={{ ...S.quickChip, color: "#f97316", borderColor: "#c2410c" }}>⚡ IP3 / P1dB{dot(!!ip3Data)}</button>}
-                    {suggestPath && <button onClick={() => jumpToTool("path", pathData)} style={{ ...S.quickChip, color: "#60a5fa", borderColor: "#2563eb" }}>📡 Path Loss{dot(!!pathData)}</button>}
+                    <div style={S.quickChipGroup}>
+                      <span style={{ ...S.quickChipName, color: "#a8a29e" }}>Jump to tool{(nfData || ip3Data || pathData || linkData || smithFreq) ? " (• = auto-fill ready)" : ""}:</span>
+                      {suggestLink && <button onClick={() => jumpToTool("link", linkData)} style={{ ...S.quickChip, color: "#fbbf24" }}>🔗 Link Budget{dot(!!linkData)}</button>}
+                      {suggestSmith && <button onClick={() => jumpToTool("smith", smithFreq ? { frequency_mhz: smithFreq } : {})} style={{ ...S.quickChip, color: "#c084fc", borderColor: "#7c3aed" }}>🎯 Smith Chart{dot(!!smithFreq)}</button>}
+                      {suggestNF && <button onClick={() => jumpToTool("nf", nfData)} style={{ ...S.quickChip, color: "#34d399", borderColor: "#10b981" }}>🔊 NF Cascade{dot(!!nfData)}</button>}
+                      {suggestIP3 && <button onClick={() => jumpToTool("ip3", ip3Data)} style={{ ...S.quickChip, color: "#f97316", borderColor: "#c2410c" }}>⚡ IP3 / P1dB{dot(!!ip3Data)}</button>}
+                      {suggestPath && <button onClick={() => jumpToTool("path", pathData)} style={{ ...S.quickChip, color: "#60a5fa", borderColor: "#2563eb" }}>📡 Path Loss{dot(!!pathData)}</button>}
+                    </div>
                   </div>
                 );
               })()}
