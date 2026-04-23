@@ -1402,7 +1402,7 @@ export default function RFCableSuite() {
         )}
 
         <main style={S.main}>
-          {tab === "ask" && <AskView queuedPrompt={queuedPrompt} clearQueued={() => setQueuedPrompt(null)} openInLibrary={openInLibrary} loadIntoDesign={loadCableIntoDesign} />}
+          {tab === "ask" && <AskView queuedPrompt={queuedPrompt} clearQueued={() => setQueuedPrompt(null)} openInLibrary={openInLibrary} loadIntoDesign={loadCableIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} />}
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
           {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} />}
           {tab === "connectors" && <ConnectorView />}
@@ -1518,7 +1518,7 @@ const CONSTRUCTION_PROMPT = `Estimate the specs of this cable from the visible c
 
 Use the database tools where helpful. Keep under 200 words.`;
 
-function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
+function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign, toggleCompare, comparedCables, setTab }) {
   const { showTools, ttsEnabled, model } = useContext(SettingsContext);
   const [messages, setMessages] = useState(() => {
     try {
@@ -1718,7 +1718,7 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
             </div>
           </div>
         )}
-        {messages.map((m, i) => <ChatMessage key={i} message={m} showTools={showTools} openInLibrary={openInLibrary} loadIntoDesign={loadIntoDesign} />)}
+        {messages.map((m, i) => <ChatMessage key={i} message={m} showTools={showTools} openInLibrary={openInLibrary} loadIntoDesign={loadIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} />)}
         {loading && (
           <div style={S.loadingMsg}>
             <span style={{ fontSize: 11, color: "#a89d8e", letterSpacing: "0.1em" }}>Thinking</span>
@@ -1756,7 +1756,7 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
   );
 }
 
-function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign }) {
+function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign, toggleCompare, comparedCables, setTab }) {
   if (m.role === "user") {
     if (typeof m.content === "string") return <div className="msg-anim" style={S.userMsg}><div style={S.userBubble}>{m.content}</div></div>;
     if (Array.isArray(m.content)) {
@@ -1782,19 +1782,51 @@ function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign }) {
         if (block.type === "text") {
           const mentioned = CABLE_IDS.filter(id => block.text.toLowerCase().includes(CABLES[id].name.toLowerCase()) || block.text.toLowerCase().includes(`'${id}'`));
           const uniqueMentioned = [...new Set(mentioned)];
+          const mentionedConn = CONNECTOR_IDS.filter(id => block.text.toLowerCase().includes(CONNECTORS[id].name.toLowerCase()));
+          const uniqueConn = [...new Set(mentionedConn)];
           const isLastTextBlock = i === m.content.length - 1 || !m.content.slice(i + 1).some(b => b.type === "text");
+          const lowerText = block.text.toLowerCase();
+          const suggestLink = /\b(link\s+budget|chain|tx\s*→|cascade|multi[- ]?segment)\b/.test(lowerText);
+          const suggestSmith = /\b(impedance|smith\s+chart|vswr|matching\s+network|reflection)\b/.test(lowerText);
+          const suggestNF = /\b(noise\s+figure|nf\s+cascade|friis|sensitivity\s+budget)\b/.test(lowerText);
+          const suggestPath = /\b(free[- ]?space|path\s+loss|fspl|fresnel|eirp)\b/.test(lowerText);
+          const suggestIP3 = /\b(ip3|oip3|iip3|p1db|intermod|distortion)\b/.test(lowerText);
           return (
             <div key={i}>
               <div style={S.assistantText}>{block.text}{m.streaming && isLastTextBlock && <span className="streaming-cursor" style={{ display: "inline-block", width: 8, height: 14, background: "#fbbf24", marginLeft: 2, verticalAlign: "text-bottom", animation: "blink 1s steps(2) infinite" }}></span>}</div>
-              {uniqueMentioned.length > 0 && uniqueMentioned.length <= 5 && (
+              {!m.streaming && uniqueMentioned.length > 0 && uniqueMentioned.length <= 5 && (
                 <div style={S.quickChipsRow}>
-                  {uniqueMentioned.map(id => (
+                  {uniqueMentioned.map(id => {
+                    const isCompared = comparedCables?.includes(id);
+                    return (
+                      <div key={id} style={S.quickChipGroup}>
+                        <span style={S.quickChipName}>{CABLES[id].name}:</span>
+                        <button onClick={() => openInLibrary(id)} style={S.quickChip}>📖 View</button>
+                        <button onClick={() => loadIntoDesign(id)} style={S.quickChip}>✏ Design</button>
+                        {toggleCompare && <button onClick={() => toggleCompare(id)} style={{ ...S.quickChip, ...(isCompared ? { background: "rgba(52,211,153,0.15)", color: "#34d399", borderColor: "#10b981" } : {}) }}>{isCompared ? "✓ In compare" : "+ Compare"}</button>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {!m.streaming && uniqueConn.length > 0 && uniqueConn.length <= 4 && setTab && (
+                <div style={S.quickChipsRow}>
+                  {uniqueConn.map(id => (
                     <div key={id} style={S.quickChipGroup}>
-                      <span style={S.quickChipName}>{CABLES[id].name}:</span>
-                      <button onClick={() => openInLibrary(id)} style={S.quickChip}>View</button>
-                      <button onClick={() => loadIntoDesign(id)} style={S.quickChip}>Design</button>
+                      <span style={{ ...S.quickChipName, color: "#38bdf8" }}>{CONNECTORS[id].name}:</span>
+                      <button onClick={() => setTab("connectors")} style={{ ...S.quickChip, color: "#38bdf8", borderColor: "#0284c7" }}>🔌 View connector</button>
                     </div>
                   ))}
+                </div>
+              )}
+              {!m.streaming && setTab && (suggestLink || suggestSmith || suggestNF || suggestPath || suggestIP3) && (
+                <div style={{ ...S.quickChipsRow, marginTop: 4 }}>
+                  <span style={{ ...S.quickChipName, color: "#a8a29e" }}>Jump to tool:</span>
+                  {suggestLink && <button onClick={() => setTab("link")} style={{ ...S.quickChip, color: "#fbbf24" }}>🔗 Link Budget</button>}
+                  {suggestSmith && <button onClick={() => setTab("tools")} style={{ ...S.quickChip, color: "#c084fc", borderColor: "#7c3aed" }}>🎯 Smith Chart</button>}
+                  {suggestNF && <button onClick={() => setTab("tools")} style={{ ...S.quickChip, color: "#34d399", borderColor: "#10b981" }}>🔊 NF Cascade</button>}
+                  {suggestIP3 && <button onClick={() => setTab("tools")} style={{ ...S.quickChip, color: "#f97316", borderColor: "#c2410c" }}>⚡ IP3 / P1dB</button>}
+                  {suggestPath && <button onClick={() => setTab("tools")} style={{ ...S.quickChip, color: "#60a5fa", borderColor: "#2563eb" }}>📡 Path Loss</button>}
                 </div>
               )}
             </div>
