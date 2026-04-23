@@ -604,6 +604,194 @@ const CABLES = {
 
 const CABLE_IDS = Object.keys(CABLES);
 
+// ═══════════════════════════════════════════════════════════════
+// RF CONNECTOR DATABASE
+// ═══════════════════════════════════════════════════════════════
+const CONNECTOR_CATEGORIES = {
+  rugged:     { label: "Threaded Rugged",      color: "#f97316" },
+  din:        { label: "Low-PIM Cellular",     color: "#38bdf8" },
+  bayonet:    { label: "Bayonet Quick",        color: "#fbbf24" },
+  precision:  { label: "Precision mmWave",     color: "#c084fc" },
+  consumer:   { label: "Consumer / CATV",      color: "#9ca3af" },
+  miniature:  { label: "Miniature Board",      color: "#34d399" },
+};
+
+const CONNECTORS = {
+  nType: { name: "N-type", cat: "rugged", alias: "MIL-C-39012, IEC 61169-16",
+    z: 50, fMax: 11, maxPower: 1500, precisionFMax: 18,
+    mate: "threaded", thread: "5/8-24 UNEF-2A", weatherproof: "variant (N-Wp)",
+    sizeMm: 17, lengthMm: 32, massG: 25, cableOD: [5, 13],
+    typicalIL: "<0.15 dB @ 11 GHz", typicalVSWR: "<1.2 @ 6 GHz",
+    apps: "Cellular, broadcast, test, general outdoor 50Ω RF",
+    pros: "Rugged, weatherproof variants, good power, ubiquitous",
+    cons: "Larger than SMA, slow mate vs BNC, unsuitable for mmWave",
+    typicalLoss: 0.15 },
+  nType75: { name: "N-type 75Ω", cat: "rugged", alias: "N 75Ω variant",
+    z: 75, fMax: 1.5, maxPower: 500, precisionFMax: 3,
+    mate: "threaded", thread: "5/8-24 UNEF-2A", weatherproof: "variant",
+    sizeMm: 17, lengthMm: 32, massG: 25, cableOD: [5, 13],
+    typicalIL: "<0.2 dB @ 1 GHz", typicalVSWR: "<1.2 @ 1 GHz",
+    apps: "Broadcast video, CATV trunk, satellite uplink",
+    pros: "Rugged 75Ω option for long-run video",
+    cons: "Mechanically identical to 50Ω N — easy to confuse",
+    typicalLoss: 0.2 },
+  tnc: { name: "TNC", cat: "rugged", alias: "Threaded Neill-Concelman",
+    z: 50, fMax: 11, maxPower: 500,
+    mate: "threaded", thread: "7/16-28 UNEF-2A", weatherproof: "variant",
+    sizeMm: 12, lengthMm: 26, massG: 15, cableOD: [2.5, 6.5],
+    typicalIL: "<0.15 dB @ 11 GHz", typicalVSWR: "<1.3 @ 6 GHz",
+    apps: "GPS antenna, vibration-prone applications, handheld radios",
+    pros: "Vibration-resistant (threaded BNC), smaller than N",
+    cons: "Slower mate than BNC, less common than SMA/N",
+    typicalLoss: 0.15 },
+  sma: { name: "SMA", cat: "precision", alias: "SubMiniature A, MIL-C-39012",
+    z: 50, fMax: 18, maxPower: 100, precisionFMax: 26.5,
+    mate: "threaded", thread: "1/4-36 UNS-2A", weatherproof: "no",
+    sizeMm: 8, lengthMm: 20, massG: 5, cableOD: [2, 7],
+    typicalIL: "<0.2 dB @ 18 GHz", typicalVSWR: "<1.3 @ 18 GHz",
+    apps: "Bench test, RF modules, small boards, GPS receivers",
+    pros: "Compact, widely available, good freq range, precision variants to 26.5 GHz",
+    cons: "Low power (<100W), requires torque wrench for repeatability, wears after ~500 cycles",
+    typicalLoss: 0.2 },
+  smaR: { name: "RP-SMA", cat: "precision", alias: "Reverse Polarity SMA",
+    z: 50, fMax: 18, maxPower: 100,
+    mate: "threaded", thread: "1/4-36 UNS-2A", weatherproof: "no",
+    sizeMm: 8, lengthMm: 20, massG: 5, cableOD: [2, 7],
+    typicalIL: "<0.2 dB @ 18 GHz", typicalVSWR: "<1.3 @ 18 GHz",
+    apps: "Wi-Fi consumer gear (FCC Part 15 anti-swap)",
+    pros: "Mandated for consumer Wi-Fi to prevent high-gain antenna swap",
+    cons: "Gender is reversed (male has socket) — non-interchangeable with SMA",
+    typicalLoss: 0.2 },
+  bnc: { name: "BNC", cat: "bayonet", alias: "Bayonet Neill-Concelman",
+    z: 50, fMax: 4, maxPower: 500,
+    mate: "bayonet", thread: "none (quarter-turn bayonet lock)", weatherproof: "no",
+    sizeMm: 14, lengthMm: 28, massG: 15, cableOD: [3, 7],
+    typicalIL: "<0.2 dB @ 4 GHz", typicalVSWR: "<1.3 @ 1 GHz",
+    apps: "Test / oscilloscope probes, video (75Ω variant), legacy Ethernet (10Base2)",
+    pros: "Fast quarter-turn mate, ubiquitous on lab equipment",
+    cons: "Limited to ~4 GHz, bayonet lock loosens with vibration, both 50Ω and 75Ω exist (confusing)",
+    typicalLoss: 0.2 },
+  bnc75: { name: "BNC 75Ω", cat: "bayonet", alias: "75Ω video BNC",
+    z: 75, fMax: 4, maxPower: 300,
+    mate: "bayonet", thread: "none (bayonet)", weatherproof: "no",
+    sizeMm: 14, lengthMm: 28, massG: 15, cableOD: [3, 7],
+    typicalIL: "<0.2 dB @ 3 GHz", typicalVSWR: "<1.3 @ 1 GHz",
+    apps: "HD-SDI broadcast, precision 75Ω video",
+    pros: "Same mechanical shape as 50Ω BNC but matched to 75Ω",
+    cons: "Visually identical to 50Ω BNC — check impedance marking; mating with wrong impedance → reflections",
+    typicalLoss: 0.2 },
+  fType: { name: "F-type", cat: "consumer", alias: "CATV F connector",
+    z: 75, fMax: 3, maxPower: 100,
+    mate: "threaded", thread: "7/16-28 UNEF-2A", weatherproof: "poor",
+    sizeMm: 10, lengthMm: 18, massG: 5, cableOD: [5, 7.5],
+    typicalIL: "<0.3 dB @ 1 GHz", typicalVSWR: "<1.4 @ 1 GHz",
+    apps: "Cable TV drop, satellite LNB, home consumer RF",
+    pros: "Cheap, uses cable's center conductor as pin — no pin to damage",
+    cons: "Limited freq + power, mediocre weatherproofing, ~1.4 VSWR typical",
+    typicalLoss: 0.3 },
+  uhf: { name: "UHF (PL-259)", cat: "consumer", alias: "SO-239 / PL-259, misnomer",
+    z: 50, fMax: 0.3, maxPower: 2000,
+    mate: "threaded", thread: "5/8-24 UNEF-2A", weatherproof: "poor",
+    sizeMm: 20, lengthMm: 40, massG: 35, cableOD: [5, 12],
+    typicalIL: "<0.2 dB @ 300 MHz", typicalVSWR: "typically >1.5 above 300 MHz",
+    apps: "Ham radio HF/VHF (1.8-300 MHz), CB, marine",
+    pros: "Rugged mechanical, cheap, handles high power",
+    cons: "NOT actually UHF — impedance discontinuity, poor VSWR >300 MHz, name is historical misnomer",
+    typicalLoss: 0.3 },
+  din716: { name: "7/16 DIN", cat: "din", alias: "Low-PIM cellular tower",
+    z: 50, fMax: 7.5, maxPower: 2500,
+    mate: "threaded", thread: "M29 × 1.5", weatherproof: "yes (IP67)",
+    sizeMm: 28, lengthMm: 53, massG: 150, cableOD: [9, 16],
+    typicalIL: "<0.1 dB @ 6 GHz", typicalVSWR: "<1.1 @ 2 GHz", typicalPIM: "-160 dBc (low-PIM)",
+    apps: "Cellular base stations (2G/3G/4G), broadcast, high-power low-PIM",
+    pros: "Excellent low-PIM (<-160 dBc), high power, weatherproof, precision",
+    cons: "Large and heavy, expensive, being replaced by 4.3-10 for new installs",
+    typicalLoss: 0.1 },
+  din43: { name: "4.3-10", cat: "din", alias: "Compact low-PIM",
+    z: 50, fMax: 6, maxPower: 1500,
+    mate: "screw / push-pull / hand-screw", thread: "M13 × 0.75 or push-pull", weatherproof: "yes (IP68)",
+    sizeMm: 13, lengthMm: 28, massG: 40, cableOD: [5, 12],
+    typicalIL: "<0.1 dB @ 4 GHz", typicalVSWR: "<1.15 @ 2 GHz", typicalPIM: "-165 dBc",
+    apps: "New 4G/5G base station deployments, small-cell, replacing 7/16 DIN",
+    pros: "Smaller + lighter than 7/16 DIN, same low-PIM performance, multiple mating options (screw/push-pull)",
+    cons: "Newer ecosystem — less second-source availability than 7/16 DIN",
+    typicalLoss: 0.1 },
+  k292: { name: "2.92mm (K)", cat: "precision", alias: "K-type, Anritsu",
+    z: 50, fMax: 40, maxPower: 40,
+    mate: "threaded", thread: "1/4-36 UNS-2A", weatherproof: "no",
+    sizeMm: 8, lengthMm: 20, massG: 5, cableOD: [2, 5],
+    typicalIL: "<0.3 dB @ 26 GHz", typicalVSWR: "<1.25 @ 26 GHz",
+    apps: "mmWave test (Ka-band), 5G FR2 development, phased-array characterization",
+    pros: "Mates with SMA mechanically (not recommended at high freq), 40 GHz bandwidth",
+    cons: "Precision only — torque critical, easily damaged by over-tightening, expensive",
+    typicalLoss: 0.3 },
+  conn24: { name: "2.4mm", cat: "precision", alias: "50 GHz precision",
+    z: 50, fMax: 50, maxPower: 20,
+    mate: "threaded", thread: "M8 × 0.75", weatherproof: "no",
+    sizeMm: 7, lengthMm: 18, massG: 4, cableOD: [2, 4],
+    typicalIL: "<0.4 dB @ 40 GHz", typicalVSWR: "<1.25 @ 40 GHz",
+    apps: "V-band VNA test, high-end 5G / satellite / radar mmWave",
+    pros: "50 GHz bandwidth, mates with 1.85mm, precision lab-grade",
+    cons: "Very low power, expensive, delicate — only for test / calibration use",
+    typicalLoss: 0.4 },
+  conn185: { name: "1.85mm (V)", cat: "precision", alias: "V-connector, Anritsu",
+    z: 50, fMax: 67, maxPower: 10,
+    mate: "threaded", thread: "M7 × 0.75", weatherproof: "no",
+    sizeMm: 6, lengthMm: 16, massG: 3, cableOD: [2, 3.5],
+    typicalIL: "<0.5 dB @ 50 GHz", typicalVSWR: "<1.3 @ 50 GHz",
+    apps: "W-band VNA test, 67 GHz instrumentation, 5G FR2+ R&D",
+    pros: "67 GHz bandwidth, mates with 2.4mm",
+    cons: "Extremely low power (~10W), very delicate, precision torque required",
+    typicalLoss: 0.5 },
+  conn10: { name: "1.0mm (W)", cat: "precision", alias: "110 GHz precision",
+    z: 50, fMax: 110, maxPower: 5,
+    mate: "threaded", thread: "M3 × 0.25", weatherproof: "no",
+    sizeMm: 4, lengthMm: 10, massG: 2, cableOD: [1, 2.5],
+    typicalIL: "<0.8 dB @ 110 GHz", typicalVSWR: "<1.4 @ 110 GHz",
+    apps: "Ultra-high-freq research, automotive radar 77-81 GHz, 6G / sub-THz",
+    pros: "110 GHz bandwidth — state-of-the-art",
+    cons: "Tiny, fragile, ~$500-1000 per connector, short life (~100 cycles)",
+    typicalLoss: 0.8 },
+  mcx: { name: "MCX", cat: "miniature", alias: "Micro Coax push-on",
+    z: 50, fMax: 6, maxPower: 100,
+    mate: "push-on snap", thread: "none (snap-lock)", weatherproof: "no",
+    sizeMm: 5, lengthMm: 10, massG: 1.5, cableOD: [2, 4],
+    typicalIL: "<0.2 dB @ 6 GHz", typicalVSWR: "<1.3 @ 4 GHz",
+    apps: "GPS modules, compact board-level RF, handheld devices",
+    pros: "Snap-on (no rotation), very small, fast mate",
+    cons: "Limited power, loosens with vibration, not for outdoor",
+    typicalLoss: 0.2 },
+  mmcx: { name: "MMCX", cat: "miniature", alias: "Micro-Miniature Coax",
+    z: 50, fMax: 6, maxPower: 50,
+    mate: "push-on snap", thread: "none", weatherproof: "no",
+    sizeMm: 3.5, lengthMm: 8, massG: 0.8, cableOD: [1.5, 3],
+    typicalIL: "<0.2 dB @ 6 GHz", typicalVSWR: "<1.3 @ 4 GHz",
+    apps: "Very tight spaces, HDD / SSD antennas, wearables, IoT modules",
+    pros: "Tiniest snap connector widely used, 360° rotation after mate",
+    cons: "Very low power, fragile, easy to damage during mate",
+    typicalLoss: 0.2 },
+  smb: { name: "SMB", cat: "miniature", alias: "SubMiniature B",
+    z: 50, fMax: 4, maxPower: 100,
+    mate: "push-on snap", thread: "none", weatherproof: "no",
+    sizeMm: 5, lengthMm: 11, massG: 1.8, cableOD: [2, 4],
+    typicalIL: "<0.3 dB @ 4 GHz", typicalVSWR: "<1.4 @ 2 GHz",
+    apps: "Automotive (pre-FAKRA), industrial, modems",
+    pros: "Push-on snap, cheaper than MCX, reliable mate",
+    cons: "Lower freq ceiling than MCX (4 vs 6 GHz), becoming obsolete",
+    typicalLoss: 0.3 },
+  smp: { name: "SMP (GPO)", cat: "miniature", alias: "Board-level mmWave",
+    z: 50, fMax: 40, maxPower: 50,
+    mate: "blind-mate push-on", thread: "none (snap)", weatherproof: "no",
+    sizeMm: 4, lengthMm: 9, massG: 1, cableOD: [1.5, 3],
+    typicalIL: "<0.3 dB @ 40 GHz", typicalVSWR: "<1.3 @ 26 GHz",
+    apps: "mmWave modules, T/R modules, phased array board-level interconnect",
+    pros: "Blind-mate (PCB-to-PCB), 40 GHz in tiny form factor",
+    cons: "Board-level only, not meant for field mate, mechanical tolerance critical",
+    typicalLoss: 0.3 },
+};
+
+const CONNECTOR_IDS = Object.keys(CONNECTORS);
+
 const MATERIALS = {
   air: { label: "Air", er: 1.00, tanD: 0.0000, Eb: 3.0 },
   pe_solid: { label: "Solid PE", er: 2.30, tanD: 0.0002, Eb: 22.0 },
@@ -982,7 +1170,7 @@ export default function RFCableSuite() {
           </div>
           <div style={S.headerRight}>
             <nav style={S.nav}>
-              {[["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["wizard", "Wizard"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]].map(([k, label]) => (
+              {[["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["wizard", "Wizard"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]].map(([k, label]) => (
                 <button key={k} onClick={() => setTab(k)} style={{ ...S.navBtn, ...(tab === k ? S.navBtnActive : {}), ...(k === "compare" && comparedCables.length > 0 ? { borderColor: "#d97706", color: "#fbbf24" } : {}) }}>{label}</button>
               ))}
             </nav>
@@ -1048,6 +1236,7 @@ export default function RFCableSuite() {
           {tab === "ask" && <AskView queuedPrompt={queuedPrompt} clearQueued={() => setQueuedPrompt(null)} openInLibrary={openInLibrary} loadIntoDesign={loadCableIntoDesign} />}
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
           {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} />}
+          {tab === "connectors" && <ConnectorView />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
           {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}
         </main>
@@ -1967,6 +2156,137 @@ function CompareView({ comparedCables, setComparedCables, openInLibrary }) {
 // ═══════════════════════════════════════════════════════════════
 // RECOMMENDATION WIZARD
 // ═══════════════════════════════════════════════════════════════
+function ConnectorView() {
+  const { units } = useContext(SettingsContext);
+  const [search, setSearch] = useState("");
+  const [filterCat, setFilterCat] = useState("all");
+  const [filterZ, setFilterZ] = useState("all");
+  const [minFreq, setMinFreq] = useState(0);
+  const [expanded, setExpanded] = useState(null);
+
+  const filtered = useMemo(() => {
+    return Object.entries(CONNECTORS).filter(([id, c]) => {
+      if (filterCat !== "all" && c.cat !== filterCat) return false;
+      if (filterZ !== "all" && c.z !== Number(filterZ)) return false;
+      if (c.fMax < minFreq) return false;
+      if (search) { const q = search.toLowerCase(); if (!(c.name + " " + c.alias + " " + c.apps).toLowerCase().includes(q)) return false; }
+      return true;
+    }).sort((a, b) => a[1].fMax - b[1].fMax);
+  }, [search, filterCat, filterZ, minFreq]);
+
+  return (
+    <div style={S.viewInner}>
+      <div style={S.viewIntro}>
+        <strong style={S.viewIntroStrong}>Connectors.</strong> {Object.keys(CONNECTORS).length} RF connectors with freq range, power, mating, cable-OD compatibility.
+      </div>
+
+      <div style={S.filterGrid}>
+        <div style={{ gridColumn: "span 2" }}>
+          <label style={S.filterLabel}>Search</label>
+          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, alias, application..." style={S.searchInput} />
+        </div>
+        <div><label style={S.filterLabel}>Impedance</label><select value={filterZ} onChange={(e) => setFilterZ(e.target.value)} style={S.select}><option value="all">All</option><option value="50">50 Ω</option><option value="75">75 Ω</option></select></div>
+        <div><label style={S.filterLabel}>Min freq: {minFreq} GHz</label><input type="range" min={0} max={100} step={1} value={minFreq} onChange={(e) => setMinFreq(Number(e.target.value))} style={{ width: "100%", accentColor: "#d97706" }} /></div>
+      </div>
+
+      <div style={S.catChips}>
+        <button onClick={() => setFilterCat("all")} className="hover-pill" style={{ ...S.catChip, ...(filterCat === "all" ? S.catChipActive : {}) }}>All</button>
+        {Object.entries(CONNECTOR_CATEGORIES).map(([k, v]) => (
+          <button key={k} onClick={() => setFilterCat(k)} className="hover-pill" style={{ ...S.catChip, ...(filterCat === k ? { ...S.catChipActive, borderColor: v.color, color: v.color } : {}), borderLeftColor: v.color, borderLeftWidth: 3 }}>{v.label}</button>
+        ))}
+      </div>
+
+      <div style={S.cableList}>
+        {filtered.map(([id, c]) => {
+          const cat = CONNECTOR_CATEGORIES[c.cat];
+          const isOpen = expanded === id;
+          const freqDesc = c.fMax >= 1 ? `${c.fMax} GHz` : `${(c.fMax * 1000).toFixed(0)} MHz`;
+          return (
+            <div key={id} className="hover-card" style={{ ...S.cableCard, ...(isOpen ? S.cableCardExpanded : {}) }}>
+              <div onClick={() => setExpanded(isOpen ? null : id)} style={S.cableHead}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, flex: 1, minWidth: 0 }}>
+                  <ConnectorIcon cat={c.cat} color={cat.color} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
+                      <span style={S.cableName}>{c.name}</span>
+                      <span style={{ ...S.catBadge, color: cat.color, borderColor: cat.color }}>{cat.label}</span>
+                    </div>
+                    {c.alias && <div style={S.cableAlias}>{wrapTerms(c.alias)}</div>}
+                    <div style={S.cableApps}>{wrapTerms(c.apps)}</div>
+                  </div>
+                </div>
+                <div style={S.quickStats}>
+                  <QS label="Z" v={`${c.z}Ω`} />
+                  <QS label="fMax" v={freqDesc} />
+                  <QS label="P" v={`${c.maxPower}W`} />
+                  <QS label="M" v={c.mate.slice(0, 5)} />
+                  <span style={S.expandIcon}>{isOpen ? "−" : "+"}</span>
+                </div>
+              </div>
+              {isOpen && (
+                <div style={S.cableDetails}>
+                  <div style={S.detailsGrid}>
+                    <div>
+                      <DS title="Electrical">
+                        <DR label="Impedance" v={`${c.z} Ω`} />
+                        <DR label="Max frequency" v={freqDesc} />
+                        {c.precisionFMax && <DR label="Precision fMax" v={`${c.precisionFMax} GHz`} />}
+                        <DR label="Max power (avg)" v={`${c.maxPower} W @ 1 GHz`} />
+                        <DR label="Typical IL" v={c.typicalIL} />
+                        <DR label="Typical VSWR" v={c.typicalVSWR} />
+                        {c.typicalPIM && <DR label="PIM" v={c.typicalPIM} />}
+                      </DS>
+                      <DS title="Mechanical">
+                        <DR label="Mate" v={c.mate} />
+                        <DR label="Thread / lock" v={c.thread} />
+                        <DR label="Weatherproof" v={c.weatherproof} />
+                        <DR label="Body diameter" v={fmtLen(c.sizeMm, units)} />
+                        <DR label="Body length" v={fmtLen(c.lengthMm, units)} />
+                        <DR label="Mass (male)" v={`${c.massG} g`} />
+                        <DR label="Cable OD fit" v={`${fmtLen(c.cableOD[0], units)} – ${fmtLen(c.cableOD[1], units)}`} />
+                      </DS>
+                    </div>
+                    <div>
+                      <DS title="Standards"><DR label="Spec" v={wrapTerms(c.alias)} /></DS>
+                      <DS title="Pros">
+                        <div style={{ fontSize: 10.5, color: "#86efac", lineHeight: 1.55 }}>✓ {wrapTerms(c.pros)}</div>
+                      </DS>
+                      <DS title="Cons">
+                        <div style={{ fontSize: 10.5, color: "#fca5a5", lineHeight: 1.55 }}>⚠ {wrapTerms(c.cons)}</div>
+                      </DS>
+                      <DS title="Compatible cables (by OD)">
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                          {Object.entries(CABLES).filter(([, cable]) => cable.OD >= c.cableOD[0] && cable.OD <= c.cableOD[1] && cable.z === c.z).slice(0, 12).map(([cid, cable]) => (
+                            <span key={cid} style={{ fontSize: 9.5, color: "#fbbf24", padding: "2px 6px", background: "rgba(217,119,6,0.1)", border: "1px solid #57534e", borderRadius: 2 }}>{cable.name}</span>
+                          ))}
+                          {Object.entries(CABLES).filter(([, cable]) => cable.OD >= c.cableOD[0] && cable.OD <= c.cableOD[1] && cable.z === c.z).length === 0 && <span style={{ fontSize: 10, color: "#78716c", fontStyle: "italic" }}>No exact-impedance cables in OD range</span>}
+                        </div>
+                      </DS>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {filtered.length === 0 && <div style={S.emptyState}>No connectors match filters.</div>}
+      </div>
+    </div>
+  );
+}
+
+function ConnectorIcon({ cat, color }) {
+  const icons = {
+    rugged: <g><circle cx="24" cy="24" r="18" fill="none" stroke="currentColor" strokeWidth="2.5" /><circle cx="24" cy="24" r="10" fill="currentColor" opacity="0.3" /><circle cx="24" cy="24" r="4" fill="currentColor" /><path d="M 8 24 L 12 24 M 36 24 L 40 24 M 24 8 L 24 12 M 24 36 L 24 40" stroke="currentColor" strokeWidth="1.5" /></g>,
+    din: <g><circle cx="24" cy="24" r="18" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="24" cy="24" r="13" fill="none" stroke="currentColor" strokeWidth="0.7" opacity="0.5" /><circle cx="24" cy="24" r="5" fill="currentColor" /><circle cx="24" cy="24" r="2" fill="#0a0705" /></g>,
+    bayonet: <g><circle cx="24" cy="24" r="16" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="24" cy="24" r="4" fill="currentColor" /><path d="M 24 8 L 30 14 M 24 40 L 18 34 M 8 24 L 14 18 M 40 24 L 34 30" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></g>,
+    precision: <g><circle cx="24" cy="24" r="12" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="24" cy="24" r="3" fill="currentColor" /><circle cx="24" cy="24" r="18" fill="none" stroke="currentColor" strokeWidth="0.5" strokeDasharray="2,2" /></g>,
+    consumer: <g><circle cx="24" cy="24" r="14" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="24" cy="24" r="3" fill="currentColor" /></g>,
+    miniature: <g><circle cx="24" cy="24" r="8" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="24" cy="24" r="2" fill="currentColor" /></g>,
+  };
+  return <svg width="48" height="48" viewBox="0 0 48 48" style={{ color, flexShrink: 0 }}>{icons[cat] || icons.consumer}</svg>;
+}
+
 function WizardView({ openInLibrary, toggleCompare, comparedCables }) {
   const { units } = useContext(SettingsContext);
   const [freq, setFreq] = useState(900);
