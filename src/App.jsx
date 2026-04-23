@@ -1170,7 +1170,7 @@ export default function RFCableSuite() {
           </div>
           <div style={S.headerRight}>
             <nav style={S.nav}>
-              {[["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["wizard", "Wizard"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]].map(([k, label]) => (
+              {[["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["tools", "Tools"], ["wizard", "Wizard"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]].map(([k, label]) => (
                 <button key={k} onClick={() => setTab(k)} style={{ ...S.navBtn, ...(tab === k ? S.navBtnActive : {}), ...(k === "compare" && comparedCables.length > 0 ? { borderColor: "#d97706", color: "#fbbf24" } : {}) }}>{label}</button>
               ))}
             </nav>
@@ -1238,6 +1238,7 @@ export default function RFCableSuite() {
           {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} />}
           {tab === "connectors" && <ConnectorView />}
           {tab === "link" && <LinkView openInLibrary={openInLibrary} />}
+          {tab === "tools" && <ToolsView />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
           {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}
         </main>
@@ -2157,6 +2158,390 @@ function CompareView({ comparedCables, setComparedCables, openInLibrary }) {
 // ═══════════════════════════════════════════════════════════════
 // RECOMMENDATION WIZARD
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// RF TOOLS (Smith Chart + TDR Viewer)
+// ═══════════════════════════════════════════════════════════════
+function ToolsView() {
+  const [subTool, setSubTool] = useState("smith");
+  return (
+    <div style={S.viewInner}>
+      <div style={S.viewIntro}>
+        <strong style={S.viewIntroStrong}>RF Tools.</strong> Interactive Smith chart for impedance analysis, and Touchstone (.s1p) viewer for measured S-parameter data.
+      </div>
+      <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
+        {[["smith", "🎯 Smith Chart"], ["tdr", "📊 TDR / S-Parameters"]].map(([k, label]) => (
+          <button key={k} onClick={() => setSubTool(k)} style={{ padding: "7px 14px", background: subTool === k ? "#d97706" : "rgba(15,10,5,0.4)", color: subTool === k ? "#0a0705" : "#a8a29e", border: `1px solid ${subTool === k ? "#d97706" : "#2a1f15"}`, borderRadius: 3, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.3 }}>{label}</button>
+        ))}
+      </div>
+      {subTool === "smith" && <SmithChartTool />}
+      {subTool === "tdr" && <TDRTool />}
+    </div>
+  );
+}
+
+function SmithChartTool() {
+  const [gR, setGR] = useState(0.3);
+  const [gI, setGI] = useState(0.2);
+  const [freq, setFreq] = useState(1000);
+  const [dragging, setDragging] = useState(false);
+  const svgRef = useRef(null);
+  const Z0 = 50;
+
+  // Z from Γ
+  const num = { r: 1 + gR, i: gI };
+  const den = { r: 1 - gR, i: -gI };
+  const dm2 = den.r * den.r + den.i * den.i;
+  const zNR = dm2 > 1e-9 ? (num.r * den.r + num.i * den.i) / dm2 : 99;
+  const zNI = dm2 > 1e-9 ? (num.i * den.r - num.r * den.i) / dm2 : 0;
+  const R = zNR * Z0, X = zNI * Z0;
+  const gMag = Math.sqrt(gR * gR + gI * gI);
+  const VSWR = gMag < 0.999 ? (1 + gMag) / (1 - gMag) : 999;
+  const RL = gMag > 0.001 ? -20 * Math.log10(gMag) : 99;
+  const gAngle = Math.atan2(gI, gR) * 180 / Math.PI;
+
+  // L-network matching to 50Ω at freq
+  const omega = 2 * Math.PI * freq * 1e6;
+  let match = null;
+  if (R > 0 && Math.abs(R - Z0) > 0.1) {
+    if (R > Z0) {
+      const Q = Math.sqrt(R / Z0 - 1);
+      const Xs_series = Q * Z0;
+      const Xp_shunt = -R / Q;
+      match = {
+        kind: "Shunt+Series (R>Z₀)",
+        shuntReact: Xp_shunt - X * (R * R + X * X) / ((R - Z0) * Z0 + X * X),
+        seriesReact: Xs_series - X,
+        shuntSimpleRx: Xp_shunt,
+        seriesSimpleRx: Xs_series,
+      };
+    } else {
+      const Q = Math.sqrt(Z0 / R - 1);
+      const Xs_series = Q * R - X;
+      const Xp_shunt = -Z0 / Q;
+      match = {
+        kind: "Series+Shunt (R<Z₀)",
+        seriesReact: Xs_series,
+        shuntReact: Xp_shunt,
+        shuntSimpleRx: Xp_shunt,
+        seriesSimpleRx: Q * R,
+      };
+    }
+  }
+
+  const SZ = 440, CX = SZ / 2, CY = SZ / 2, Rc = SZ * 0.42;
+  const gToSvg = (gr, gi) => ({ x: CX + gr * Rc, y: CY - gi * Rc });
+  const svgToG = (cx, cy) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return { gr: gR, gi: gI };
+    const scale = SZ / rect.width;
+    const gr = ((cx - rect.left) * scale - CX) / Rc;
+    const gi = -(((cy - rect.top) * scale - CY) / Rc);
+    const m = Math.sqrt(gr * gr + gi * gi);
+    return m > 0.999 ? { gr: gr * 0.999 / m, gi: gi * 0.999 / m } : { gr, gi };
+  };
+
+  const pt = gToSvg(gR, gI);
+  const handleMove = (e) => { if (!dragging) return; const { gr, gi } = svgToG(e.clientX, e.clientY); setGR(gr); setGI(gi); };
+  const handleDown = (e) => { setDragging(true); const { gr, gi } = svgToG(e.clientX, e.clientY); setGR(gr); setGI(gi); };
+
+  const setZFromR = (newR) => {
+    const r = newR / Z0, x = zNI;
+    const d2 = (r + 1) * (r + 1) + x * x;
+    setGR(((r - 1) * (r + 1) + x * x) / d2);
+    setGI((2 * x) / d2);
+  };
+  const setZFromX = (newX) => {
+    const r = zNR, x = newX / Z0;
+    const d2 = (r + 1) * (r + 1) + x * x;
+    setGR(((r - 1) * (r + 1) + x * x) / d2);
+    setGI((2 * x) / d2);
+  };
+
+  const presets = [
+    { name: "Matched (50Ω)", gr: 0, gi: 0 },
+    { name: "Short", gr: -1, gi: 0 },
+    { name: "Open", gr: 0.999, gi: 0 },
+    { name: "100Ω load", R: 100, X: 0 },
+    { name: "25Ω load", R: 25, X: 0 },
+    { name: "L=10nH @ 1GHz", R: 0.01, X: 62.8 },
+    { name: "C=10pF @ 1GHz", R: 0.01, X: -15.9 },
+  ];
+
+  const loadPreset = (p) => {
+    if (p.gr !== undefined) { setGR(p.gr); setGI(p.gi); return; }
+    const r = p.R / Z0, x = p.X / Z0;
+    const d2 = (r + 1) * (r + 1) + x * x;
+    setGR(((r - 1) * (r + 1) + x * x) / d2);
+    setGI((2 * x) / d2);
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(350px, 1fr) 280px", gap: 20, alignItems: "flex-start" }}>
+      <div>
+        <svg ref={svgRef} viewBox={`0 0 ${SZ} ${SZ}`} style={{ width: "100%", maxWidth: 520, height: "auto", cursor: dragging ? "grabbing" : "crosshair", background: "rgba(15,10,5,0.5)", borderRadius: 4, userSelect: "none", touchAction: "none" }}
+          onMouseDown={handleDown} onMouseMove={handleMove} onMouseUp={() => setDragging(false)} onMouseLeave={() => setDragging(false)}>
+          <defs>
+            <clipPath id="smith-clip"><circle cx={CX} cy={CY} r={Rc} /></clipPath>
+          </defs>
+          <circle cx={CX} cy={CY} r={Rc} fill="rgba(15,10,5,0.3)" />
+          <g clipPath="url(#smith-clip)">
+            {[0.2, 0.5, 1, 2, 5].map(r => <circle key={`r${r}`} cx={CX + (r / (r + 1)) * Rc} cy={CY} r={(1 / (r + 1)) * Rc} fill="none" stroke={r === 1 ? "#d97706" : "#4b5563"} strokeWidth={r === 1 ? 1.2 : 0.6} opacity={r === 1 ? 0.8 : 0.5} />)}
+            {[-5, -2, -1, -0.5, -0.2, 0.2, 0.5, 1, 2, 5].map(x => <circle key={`x${x}`} cx={CX + Rc} cy={CY - Rc / x} r={Rc / Math.abs(x)} fill="none" stroke={x > 0 ? "#ef444499" : "#3b82f699"} strokeWidth="0.5" opacity="0.5" />)}
+            <line x1={CX - Rc} y1={CY} x2={CX + Rc} y2={CY} stroke="#57534e" strokeWidth="0.8" />
+            {[1.5, 2, 3, 5].map(v => { const m = (v - 1) / (v + 1); return <circle key={`v${v}`} cx={CX} cy={CY} r={m * Rc} fill="none" stroke="#fbbf24" strokeWidth="0.5" strokeDasharray="3,3" opacity="0.35" />; })}
+          </g>
+          <circle cx={CX} cy={CY} r={Rc} fill="none" stroke="#a8a29e" strokeWidth="1.5" />
+
+          {[1.5, 2, 3].map((v, i) => { const m = (v - 1) / (v + 1); return <text key={`vt${v}`} x={CX + m * Rc + 3} y={CY - 3} fontSize="8" fill="#fbbf24" fontFamily="JetBrains Mono, monospace" opacity="0.6">{v}</text>; })}
+
+          <circle cx={CX} cy={CY} r="3.5" fill="#34d399" />
+          <text x={CX} y={CY + 14} fontSize="9" fill="#34d399" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontWeight="700">50Ω</text>
+
+          <text x={CX - Rc + 4} y={CY - 4} fontSize="9" fill="#a8a29e" fontFamily="JetBrains Mono, monospace">← SHORT</text>
+          <text x={CX + Rc - 4} y={CY - 4} fontSize="9" fill="#a8a29e" fontFamily="JetBrains Mono, monospace" textAnchor="end">OPEN →</text>
+          <text x={CX + 4} y={CY - Rc + 12} fontSize="8.5" fill="#ef4444" fontFamily="JetBrains Mono, monospace">+jX (inductive)</text>
+          <text x={CX + 4} y={CY + Rc - 4} fontSize="8.5" fill="#3b82f6" fontFamily="JetBrains Mono, monospace">−jX (capacitive)</text>
+
+          <line x1={CX} y1={CY} x2={pt.x} y2={pt.y} stroke="#fbbf24" strokeWidth="1.5" strokeDasharray="4,3" opacity="0.7" />
+          <circle cx={pt.x} cy={pt.y} r="9" fill="#fbbf24" stroke="#d97706" strokeWidth="2" />
+          <circle cx={pt.x} cy={pt.y} r="3" fill="#0a0705" />
+        </svg>
+        <div style={{ fontSize: 10, color: "#78716c", marginTop: 8, textAlign: "center", lineHeight: 1.6 }}>
+          Drag yellow point. Center = perfect 50Ω match. Red arcs = inductive (+jX), blue = capacitive (−jX). Dashed yellow rings = VSWR levels. Orange circle = r=1 (real=50Ω).
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ padding: 12, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 8 }}>Impedance</div>
+          <div style={{ fontSize: 15, color: "#fbbf24", fontFamily: "JetBrains Mono, monospace", fontWeight: 700, marginBottom: 4 }}>{R.toFixed(1)} {X >= 0 ? "+" : "−"} j{Math.abs(X).toFixed(1)} Ω</div>
+          <div style={{ fontSize: 10, color: "#a8a29e", fontFamily: "JetBrains Mono, monospace" }}>normalized: {zNR.toFixed(2)} {zNI >= 0 ? "+" : "−"} j{Math.abs(zNI).toFixed(2)}</div>
+        </div>
+
+        <div style={{ padding: 12, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 8 }}>Reflection</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontSize: 10.5, color: "#d6cfc4", fontFamily: "JetBrains Mono, monospace" }}>
+            <div>|Γ| = <span style={{ color: "#fbbf24" }}>{gMag.toFixed(3)}</span></div>
+            <div>∠Γ = <span style={{ color: "#fbbf24" }}>{gAngle.toFixed(1)}°</span></div>
+            <div>VSWR = <span style={{ color: VSWR < 1.5 ? "#34d399" : VSWR < 3 ? "#fbbf24" : "#ef4444" }}>{VSWR > 100 ? "∞" : VSWR.toFixed(2)}</span></div>
+            <div>RL = <span style={{ color: RL > 20 ? "#34d399" : RL > 10 ? "#fbbf24" : "#ef4444" }}>{RL > 60 ? "∞" : RL.toFixed(1)} dB</span></div>
+          </div>
+        </div>
+
+        <div style={{ padding: 12, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 8 }}>Set Z manually</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            <div>
+              <div style={{ fontSize: 9, color: "#a8a29e", marginBottom: 2 }}>R (Ω)</div>
+              <input type="number" value={R.toFixed(1)} step="1" onChange={e => setZFromR(Number(e.target.value))} style={{ width: "100%", background: "rgba(15,10,5,0.8)", border: "1px solid #57534e", color: "#fbbf24", padding: "4px 8px", fontSize: 11, fontFamily: "JetBrains Mono, monospace", borderRadius: 2 }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: "#a8a29e", marginBottom: 2 }}>X (Ω)</div>
+              <input type="number" value={X.toFixed(1)} step="1" onChange={e => setZFromX(Number(e.target.value))} style={{ width: "100%", background: "rgba(15,10,5,0.8)", border: "1px solid #57534e", color: "#fbbf24", padding: "4px 8px", fontSize: 11, fontFamily: "JetBrains Mono, monospace", borderRadius: 2 }} />
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding: 12, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 8, display: "flex", justifyContent: "space-between" }}>
+            <span>L-network match</span><span style={{ color: "#fbbf24" }}>{freq} MHz</span>
+          </div>
+          <input type="range" min={1} max={10000} step={1} value={freq} onChange={e => setFreq(Number(e.target.value))} style={{ width: "100%", accentColor: "#d97706", marginBottom: 8 }} />
+          {match ? (
+            <div style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", color: "#d6cfc4", lineHeight: 1.8 }}>
+              <div style={{ color: "#fbbf24", fontWeight: 700, marginBottom: 4 }}>{match.kind}</div>
+              <div>Series: X = <span style={{ color: "#fbbf24" }}>{match.seriesReact.toFixed(1)} Ω</span></div>
+              <div style={{ paddingLeft: 10, fontSize: 9, color: "#a8a29e" }}>→ {match.seriesReact > 0 ? `L = ${(match.seriesReact / omega * 1e9).toFixed(2)} nH` : `C = ${(1 / (-match.seriesReact * omega) * 1e12).toFixed(2)} pF`}</div>
+              <div>Shunt: X = <span style={{ color: "#fbbf24" }}>{match.shuntReact.toFixed(1)} Ω</span></div>
+              <div style={{ paddingLeft: 10, fontSize: 9, color: "#a8a29e" }}>→ {match.shuntReact > 0 ? `L = ${(match.shuntReact / omega * 1e9).toFixed(2)} nH` : `C = ${(1 / (-match.shuntReact * omega) * 1e12).toFixed(2)} pF`}</div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 10, color: "#34d399" }}>{Math.abs(R - Z0) < 0.1 ? "✓ Already matched to 50Ω" : "Out of matchable range"}</div>
+          )}
+        </div>
+
+        <div style={{ padding: 10, background: "rgba(15,10,5,0.4)", borderRadius: 3 }}>
+          <div style={{ fontSize: 9, letterSpacing: 1, color: "#a8a29e", textTransform: "uppercase", marginBottom: 6 }}>Presets</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+            {presets.map((p, i) => (
+              <button key={i} onClick={() => loadPreset(p)} style={{ fontSize: 9, padding: "3px 7px", background: "rgba(217,119,6,0.1)", border: "1px solid #57534e", color: "#a8a29e", borderRadius: 2, cursor: "pointer", fontFamily: "inherit" }}>{p.name}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Parse Touchstone .s1p / .s2p format
+function parseTouchstone(text) {
+  const lines = text.split(/\r?\n/);
+  let unit = "GHZ", format = "MA", z0 = 50;
+  const data = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith("!")) continue;
+    if (line.startsWith("#")) {
+      const t = line.slice(1).trim().split(/\s+/);
+      if (t[0]) unit = t[0].toUpperCase();
+      if (t[2]) format = t[2].toUpperCase();
+      const rIdx = t.findIndex(x => x.toUpperCase() === "R");
+      if (rIdx >= 0 && t[rIdx + 1]) z0 = Number(t[rIdx + 1]);
+      continue;
+    }
+    const tok = line.split(/\s+/).map(Number).filter(x => Number.isFinite(x));
+    if (tok.length < 3) continue;
+    const freqRaw = tok[0];
+    const a = tok[1], b = tok[2];
+    let mag, phase;
+    if (format === "MA") { mag = a; phase = b; }
+    else if (format === "DB") { mag = Math.pow(10, a / 20); phase = b; }
+    else { mag = Math.sqrt(a * a + b * b); phase = Math.atan2(b, a) * 180 / Math.PI; }
+    const freqMHz = freqRaw * ({ "HZ": 1e-6, "KHZ": 1e-3, "MHZ": 1, "GHZ": 1000 }[unit] || 1);
+    data.push({ freqMHz, mag, phase, dB: 20 * Math.log10(Math.max(1e-10, mag)) });
+  }
+  if (data.length === 0) throw new Error("No data rows found. Check format.");
+  return { unit, format, z0, data };
+}
+
+const SAMPLE_TOUCHSTONE = `! Sample S1P — LMR-400 type cable, 10m, with minor connector mismatch at ~2.4 GHz
+# MHz S DB R 50
+10 -35.2 -45
+50 -34.8 -55
+100 -33.5 -70
+200 -32.1 -82
+500 -30.5 -95
+1000 -28.8 -110
+1500 -26.2 -125
+2000 -22.5 -140
+2400 -16.8 -158
+2500 -14.2 -165
+2600 -15.5 -172
+3000 -19.8 175
+4000 -24.3 155
+5000 -27.6 135
+6000 -29.8 115
+`;
+
+function TDRTool() {
+  const [input, setInput] = useState(SAMPLE_TOUCHSTONE);
+  const [parsed, setParsed] = useState(() => { try { return parseTouchstone(SAMPLE_TOUCHSTONE); } catch { return null; } });
+  const [error, setError] = useState(null);
+
+  const doParse = () => {
+    try {
+      const r = parseTouchstone(input);
+      setParsed(r); setError(null);
+    } catch (e) { setError(e.message); setParsed(null); }
+  };
+
+  const handleFile = (f) => {
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => { setInput(reader.result); try { setParsed(parseTouchstone(reader.result)); setError(null); } catch (e) { setError(e.message); } };
+    reader.readAsText(f);
+  };
+
+  const W = 760, H = 340, padL = 58, padR = 18, padT = 20, padB = 50;
+  const freqs = parsed?.data.map(d => d.freqMHz) || [];
+  const fMin = freqs.length ? Math.max(1, Math.min(...freqs)) : 1;
+  const fMax = freqs.length ? Math.max(...freqs) : 10000;
+  const dbs = parsed?.data.map(d => d.dB) || [];
+  const dbMin = dbs.length ? Math.min(-60, Math.min(...dbs) - 5) : -60;
+  const dbMax = dbs.length ? Math.max(0, Math.max(...dbs) + 2) : 0;
+  const xf = f => padL + (Math.log10(f) - Math.log10(fMin)) / (Math.log10(fMax) - Math.log10(fMin)) * (W - padL - padR);
+  const yD = d => padT + (1 - (d - dbMin) / (dbMax - dbMin)) * (H - padT - padB);
+
+  const freqTicks = [1, 10, 100, 1000, 10000, 100000].filter(f => f >= fMin * 0.5 && f <= fMax * 1.5);
+  const dbTicks = [];
+  for (let d = Math.ceil(dbMin / 10) * 10; d <= dbMax; d += 10) dbTicks.push(d);
+
+  const path = parsed ? parsed.data.map((d, i) => `${i === 0 ? "M" : "L"} ${xf(d.freqMHz).toFixed(1)} ${yD(d.dB).toFixed(1)}`).join(" ") : "";
+
+  // Peak detection (worst match / largest S11)
+  const peaks = parsed ? parsed.data.map((d, i) => {
+    const prev = parsed.data[i - 1]?.dB ?? -999;
+    const next = parsed.data[i + 1]?.dB ?? -999;
+    if (d.dB > prev && d.dB > next && d.dB > dbMin + 10) return d;
+    return null;
+  }).filter(Boolean) : [];
+  const worst = parsed ? parsed.data.reduce((acc, d) => d.dB > (acc?.dB ?? -999) ? d : acc, null) : null;
+  const fmtFreq = (f) => f >= 1000 ? `${(f / 1000).toFixed(f >= 10000 ? 1 : 2)} GHz` : `${f.toFixed(0)} MHz`;
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 14, marginBottom: 14 }}>
+        <div style={{ padding: 12, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 8 }}>Input: Touchstone .s1p</div>
+          <textarea value={input} onChange={e => setInput(e.target.value)} rows={9} style={{ width: "100%", background: "rgba(15,10,5,0.8)", border: "1px solid #57534e", color: "#fbbf24", padding: "6px 8px", fontSize: 10, fontFamily: "JetBrains Mono, monospace", borderRadius: 2, resize: "vertical" }} spellCheck={false} />
+          <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+            <button onClick={doParse} style={{ flex: 1, background: "#d97706", color: "#0a0705", border: "none", padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", borderRadius: 2 }}>Parse + Plot</button>
+            <label style={{ background: "rgba(217,119,6,0.15)", border: "1px solid #d97706", color: "#fbbf24", padding: "6px 10px", fontSize: 10, cursor: "pointer", borderRadius: 2 }}>
+              📁 Upload .s1p
+              <input type="file" accept=".s1p,.s2p,.txt,text/plain" onChange={e => handleFile(e.target.files?.[0])} style={{ display: "none" }} />
+            </label>
+            <button onClick={() => { setInput(SAMPLE_TOUCHSTONE); setParsed(parseTouchstone(SAMPLE_TOUCHSTONE)); setError(null); }} style={{ background: "transparent", color: "#a8a29e", border: "1px solid #57534e", padding: "6px 10px", fontSize: 10, cursor: "pointer", borderRadius: 2 }}>Sample</button>
+          </div>
+          {error && <div style={{ marginTop: 6, fontSize: 10, color: "#ef4444" }}>⚠ {error}</div>}
+        </div>
+
+        <div style={{ padding: 12, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15", fontSize: 11, fontFamily: "JetBrains Mono, monospace", color: "#d6cfc4" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 8 }}>Analysis</div>
+          {parsed ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <div>Points: <span style={{ color: "#fbbf24" }}>{parsed.data.length}</span></div>
+              <div>Z₀: <span style={{ color: "#fbbf24" }}>{parsed.z0} Ω</span></div>
+              <div>Freq: <span style={{ color: "#fbbf24" }}>{fmtFreq(fMin)} → {fmtFreq(fMax)}</span></div>
+              <div>Format: <span style={{ color: "#fbbf24" }}>{parsed.format}</span></div>
+              {worst && <div style={{ gridColumn: "span 2" }}>Worst match: <span style={{ color: "#ef4444" }}>{worst.dB.toFixed(1)} dB @ {fmtFreq(worst.freqMHz)}</span> (VSWR {((1 + worst.mag) / (1 - worst.mag)).toFixed(2)})</div>}
+              {peaks.length > 0 && <div style={{ gridColumn: "span 2", fontSize: 10, color: "#a8a29e", marginTop: 4 }}>{peaks.length} local peak{peaks.length !== 1 ? "s" : ""} detected — possible impedance discontinuities</div>}
+            </div>
+          ) : <div style={{ color: "#78716c" }}>Paste Touchstone data and click Parse</div>}
+        </div>
+      </div>
+
+      {parsed && (
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", background: "rgba(15,10,5,0.5)", borderRadius: 4 }}>
+          {dbTicks.map((d, i) => (
+            <g key={`d${i}`}>
+              <line x1={padL} y1={yD(d)} x2={W - padR} y2={yD(d)} stroke="#2a1f15" strokeWidth="0.5" strokeDasharray={d === -10 || d === -20 || d === -30 ? "" : "2,3"} />
+              <text x={padL - 6} y={yD(d) + 3} fontSize="9" fill="#78716c" textAnchor="end" fontFamily="JetBrains Mono, monospace">{d}</text>
+            </g>
+          ))}
+          {freqTicks.map((f, i) => (
+            <g key={`f${i}`}>
+              <line x1={xf(f)} y1={padT} x2={xf(f)} y2={H - padB} stroke="#2a1f15" strokeWidth="0.5" strokeDasharray="2,3" />
+              <text x={xf(f)} y={H - padB + 14} fontSize="9" fill="#78716c" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{fmtFreq(f)}</text>
+            </g>
+          ))}
+          <text x={padL - 44} y={padT + (H - padT - padB) / 2} fontSize="10" fill="#a8a29e" textAnchor="middle" transform={`rotate(-90, ${padL - 44}, ${padT + (H - padT - padB) / 2})`} letterSpacing="1">|S11| dB (return loss)</text>
+          <text x={padL + (W - padL - padR) / 2} y={H - 10} fontSize="10" fill="#a8a29e" textAnchor="middle" letterSpacing="1">Frequency (log)</text>
+
+          <line x1={padL} y1={yD(-10)} x2={W - padR} y2={yD(-10)} stroke="#ef4444" strokeWidth="0.7" opacity="0.4" strokeDasharray="4,4" />
+          <text x={W - padR - 4} y={yD(-10) - 3} fontSize="9" fill="#ef4444" textAnchor="end" opacity="0.7">VSWR=2 (-10 dB)</text>
+          <line x1={padL} y1={yD(-14)} x2={W - padR} y2={yD(-14)} stroke="#fbbf24" strokeWidth="0.7" opacity="0.4" strokeDasharray="4,4" />
+          <text x={W - padR - 4} y={yD(-14) - 3} fontSize="9" fill="#fbbf24" textAnchor="end" opacity="0.7">VSWR=1.5 (-14 dB)</text>
+
+          <path d={path} fill="none" stroke="#fbbf24" strokeWidth="2" />
+          {parsed.data.map((d, i) => <circle key={i} cx={xf(d.freqMHz)} cy={yD(d.dB)} r="2.5" fill="#fbbf24" stroke="#0a0705" strokeWidth="0.5" />)}
+
+          {peaks.map((p, i) => (
+            <g key={`pk${i}`}>
+              <line x1={xf(p.freqMHz)} y1={yD(p.dB)} x2={xf(p.freqMHz)} y2={yD(p.dB) - 18} stroke="#ef4444" strokeWidth="1" />
+              <text x={xf(p.freqMHz)} y={yD(p.dB) - 22} fontSize="9" fill="#ef4444" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{p.dB.toFixed(1)} dB</text>
+              <text x={xf(p.freqMHz)} y={yD(p.dB) - 32} fontSize="8" fill="#ef4444" textAnchor="middle" fontFamily="JetBrains Mono, monospace" opacity="0.7">{fmtFreq(p.freqMHz)}</text>
+            </g>
+          ))}
+        </svg>
+      )}
+
+      <div style={{ marginTop: 12, padding: "10px 12px", background: "rgba(15,10,5,0.4)", borderRadius: 3, fontSize: 10, color: "#a8a29e", lineHeight: 1.6 }}>
+        💡 <strong style={{ color: "#fbbf24" }}>Touchstone .s1p format:</strong> first comment lines start with <code>!</code>. Options line starts with <code>#</code> (e.g. <code># MHz S DB R 50</code>). Data rows: freq, parameter-a, parameter-b. Supported formats: <strong>MA</strong> (magnitude + angle), <strong>DB</strong> (dB + angle), <strong>RI</strong> (real + imaginary). Red dashes show VSWR=2 threshold; peaks above indicate likely impedance discontinuities (bad crimp, damaged shield, water ingress).
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // MULTI-SEGMENT LINK BUDGET
 // ═══════════════════════════════════════════════════════════════
