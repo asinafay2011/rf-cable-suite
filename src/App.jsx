@@ -742,6 +742,41 @@ function sanitizeHistory(msgs) {
   return merged;
 }
 
+const IDENTIFY_PROMPT = `Analyze this cable photograph and identify it. Provide a structured answer:
+
+1. **Type / family** — RG-X, LMR-X, heliax (LDF/FSJ), semi-rigid (UT-XXX), Belden 8XXX, or "unknown / custom" if unclear.
+2. **Visible construction** — jacket color and likely material (PVC/PE/FEP/LSZH), shield type if exposed (braid coverage %, foil, double), dielectric if visible (solid PE, foam PE, PTFE), conductor (solid/stranded, bare Cu/CCS/SPC).
+3. **Estimated outer diameter** — if a size reference (ruler, coin, fingers, known object) is in frame, estimate in mm and inches. Otherwise qualitative (thin/medium/thick).
+4. **Closest database match** — use the recommend_cables and get_cable_details tools to confirm. Mention the canonical name (e.g. "RG-213/U", "LMR-400") so it becomes a clickable chip.
+5. **Confidence** — high / medium / low, with the main uncertainty.
+6. **Use cases** — what this cable is typically used for.
+
+Keep it under 200 words. If the image is unclear or not a cable, say so.`;
+
+const DIAGNOSE_PROMPT = `Diagnose this damaged / suspect cable. Provide a structured analysis:
+
+1. **Visible failure mode(s)** — UV cracking, kink / sharp bend, rodent chew, corrosion, arc / burn / melt, water ingress, abrasion, crush, connector pull-out, plasticizer migration, shield fatigue, etc.
+2. **Affected layer(s)** — jacket / shield / dielectric / conductor (be specific about which).
+3. **Severity** — cosmetic (no impact) / functional (degraded performance) / critical (replace immediately, safety risk).
+4. **Likely root cause** — environmental exposure, install error (tight bend, crush), age / UV, wildlife, moisture, overload / lightning, galvanic corrosion.
+5. **Expected electrical impact** — VSWR bump, impedance shift (magnitude if estimable), extra insertion loss (dB if estimable), intermittent contact, total open or short.
+6. **Recommended action** — monitor / field repair (e.g. re-terminate) / full replacement. Give concrete steps.
+7. **Prevention for future installs** — 1-2 practical tips.
+
+Keep it under 250 words. If cause is ambiguous list top 2 hypotheses.`;
+
+const CONSTRUCTION_PROMPT = `Estimate the specs of this cable from the visible construction. Use what you can see (strand count, braid angle, jacket thickness, dielectric foaming, connector) to infer:
+
+1. **Characteristic impedance (Z₀)** — 50 Ω, 75 Ω, or custom estimate with reasoning.
+2. **Velocity factor (VP)** — based on dielectric type (solid PE ≈ 66%, foam PE ≈ 80-88%, PTFE ≈ 69-70%, air-dielectric ≈ 90%+).
+3. **Typical frequency range** — fMax in GHz.
+4. **Power handling** — low (<100W) / medium (100W-1kW) / high (>1kW).
+5. **Flexibility class** — rigid / semi-rigid / semi-flexible / flexible / super-flexible.
+6. **Attenuation ballpark at 1 GHz** — dB/100m estimate with reasoning.
+7. **Likely standard it matches** — MIL-C-17, IEC 61196, Belden, Times, etc.
+
+Use the database tools where helpful. Keep under 200 words.`;
+
 function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
   const { showTools, ttsEnabled, model } = useContext(SettingsContext);
   const [messages, setMessages] = useState(() => {
@@ -901,10 +936,17 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign }) {
       </div>
 
       {pendingImage && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "rgba(217,119,6,0.08)", border: "1px solid #d97706", borderRadius: 3, marginBottom: 8 }}>
-          <img src={pendingImage.preview} alt="upload preview" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 3 }} />
-          <div style={{ flex: 1, fontSize: 11, color: "#d6cfc4" }}>Image attached. Agent will analyze it with your question (or generic identify if you don't type anything).</div>
-          <button onClick={() => setPendingImage(null)} style={{ background: "none", border: "none", color: "#a8a29e", cursor: "pointer", fontSize: 16 }}>✕</button>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", background: "rgba(217,119,6,0.08)", border: "1px solid #d97706", borderRadius: 3, marginBottom: 8 }}>
+          <img src={pendingImage.preview} alt="upload preview" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 3, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: "#d6cfc4", marginBottom: 6 }}>Image attached. Pick an analysis mode or type a custom question below:</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button onClick={() => sendMessage(IDENTIFY_PROMPT)} disabled={loading} style={{ background: "rgba(217,119,6,0.18)", color: "#fbbf24", border: "1px solid #d97706", padding: "5px 10px", fontSize: 10.5, cursor: "pointer", borderRadius: 3, letterSpacing: 0.3, fontWeight: 600 }}>🔬 Identify cable</button>
+              <button onClick={() => sendMessage(DIAGNOSE_PROMPT)} disabled={loading} style={{ background: "rgba(239,68,68,0.15)", color: "#fca5a5", border: "1px solid #991b1b", padding: "5px 10px", fontSize: 10.5, cursor: "pointer", borderRadius: 3, letterSpacing: 0.3, fontWeight: 600 }}>🏥 Diagnose damage</button>
+              <button onClick={() => sendMessage(CONSTRUCTION_PROMPT)} disabled={loading} style={{ background: "rgba(52,211,153,0.15)", color: "#86efac", border: "1px solid #166534", padding: "5px 10px", fontSize: 10.5, cursor: "pointer", borderRadius: 3, letterSpacing: 0.3, fontWeight: 600 }}>🔎 Estimate specs</button>
+            </div>
+          </div>
+          <button onClick={() => setPendingImage(null)} style={{ background: "none", border: "none", color: "#a8a29e", cursor: "pointer", fontSize: 16, alignSelf: "flex-start" }}>✕</button>
         </div>
       )}
       <div style={S.inputBar}>
