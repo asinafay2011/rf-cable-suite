@@ -1036,6 +1036,156 @@ function toolValidateDesign({ inner_diameter_mm, dielectric_diameter_mm, dielect
   return { impedance_ohm: z.toFixed(2), D_over_d: ratio.toFixed(2), cutoff_ghz: fc.toFixed(2), vp_pct: calcVP(dielectric_constant).toFixed(1), warnings, verdict: warnings.length === 0 ? "Design looks sound" : `${warnings.length} warning(s) to review` };
 }
 
+function toolLookupConnector({ impedance, min_freq_ghz, min_power_w, weatherproof_required, query }) {
+  const matches = Object.entries(CONNECTORS).filter(([id, c]) => {
+    if (impedance !== undefined && c.z !== impedance) return false;
+    if (min_freq_ghz !== undefined && c.fMax < min_freq_ghz) return false;
+    if (min_power_w !== undefined && c.maxPower < min_power_w) return false;
+    if (weatherproof_required && !/^(yes|variant|ip)/i.test(c.weatherproof)) return false;
+    if (query) { const q = query.toLowerCase(); if (!(c.name + " " + c.alias + " " + c.apps).toLowerCase().includes(q)) return false; }
+    return true;
+  }).map(([id, c]) => ({
+    id, name: c.name, category: CONNECTOR_CATEGORIES[c.cat].label,
+    impedance_ohm: c.z, max_freq_ghz: c.fMax, max_power_w: c.maxPower,
+    mate: c.mate, thread: c.thread, weatherproof: c.weatherproof,
+    body_size_mm: c.sizeMm, mass_g: c.massG,
+    cable_od_min_mm: c.cableOD[0], cable_od_max_mm: c.cableOD[1],
+    typical_il_db: c.typicalLoss, typical_il_spec: c.typicalIL, typical_vswr: c.typicalVSWR,
+    applications: c.apps, pros: c.pros, cons: c.cons,
+    pim_spec: c.typicalPIM || "not specified",
+  }));
+  return { count: matches.length, connectors: matches };
+}
+
+function toolAnalyzeLinkChain({ frequency_mhz, stages }) {
+  if (!stages || !stages.length) return { error: "No stages provided" };
+  let pwr = 0;
+  const out = [];
+  for (const seg of stages) {
+    let loss = 0, label = seg.type, detail = "", warn = null;
+    if (seg.type === "tx") {
+      pwr = seg.power_dbm || 0; label = "TX"; detail = `${pwr} dBm transmit`;
+    } else if (seg.type === "cable") {
+      const c = CABLES[seg.cable_id];
+      if (!c) { warn = `Cable '${seg.cable_id}' not in DB`; label = "?"; }
+      else {
+        if (frequency_mhz > c.fMax * 1000) warn = `Above cable fMax ${c.fMax} GHz`;
+        loss = interpAtten(c.atten, frequency_mhz) * (seg.length_m || 0) / 100;
+        label = c.name; detail = `${seg.length_m} m → ${loss.toFixed(2)} dB loss`;
+        pwr -= loss;
+      }
+    } else if (seg.type === "connector") {
+      const c = CONNECTORS[seg.connector_id];
+      if (!c) { loss = 0.15; label = "Connector"; detail = `assumed 0.15 dB IL`; warn = `Connector '${seg.connector_id}' not in DB`; }
+      else { loss = c.typicalLoss; label = c.name; detail = `${loss} dB IL`; if (frequency_mhz > c.fMax * 1000) warn = `Above connector fMax ${c.fMax} GHz`; }
+      pwr -= loss;
+    } else if (seg.type === "amp") { loss = -(seg.gain_db || 0); label = "Amplifier"; detail = `+${seg.gain_db} dB gain`; pwr -= loss; }
+    else if (seg.type === "atten") { loss = seg.loss_db || 0; label = "Attenuator"; detail = `${loss} dB pad`; pwr -= loss; }
+    else if (seg.type === "splitter") { const n = seg.n_way || 2; loss = SPLITTER_LOSS[n] || (10 * Math.log10(n) + 0.5); label = `${n}-way splitter`; detail = `÷${n} ports, ${loss.toFixed(1)} dB`; pwr -= loss; }
+    else if (seg.type === "rx") { label = "RX"; detail = `sensitivity ${seg.sensitivity_dbm} dBm`; }
+    out.push({ type: seg.type, label, loss_db: loss, power_out_dbm: pwr.toFixed(2), detail, warning: warn });
+  }
+  const first = out[0], last = out[out.length - 1];
+  const rxSens = stages[stages.length - 1]?.sensitivity_dbm ?? -85;
+  const txPwr = first?.power_out_dbm !== undefined ? Number(first.power_out_dbm) : 0;
+  const rxPwr = last?.power_out_dbm !== undefined ? Number(last.power_out_dbm) : 0;
+  const totalLoss = txPwr - rxPwr;
+  const margin = rxPwr - rxSens;
+  return {
+    frequency_mhz, stages: out,
+    tx_power_dbm: txPwr, rx_power_dbm: rxPwr, total_loss_db: totalLoss.toFixed(2),
+    rx_sensitivity_dbm: rxSens, link_margin_db: margin.toFixed(2),
+    link_closes: margin > 0,
+    verdict: margin < 0 ? "BROKEN" : margin < 3 ? "MARGINAL" : margin < 10 ? "TIGHT" : margin < 20 ? "GOOD" : margin < 40 ? "EXCELLENT" : "OVERKILL",
+  };
+}
+
+function toolCalcNFCascade({ stages }) {
+  if (!stages || !stages.length) return { error: "No stages" };
+  let F_total = 1, G_cum = 1, G_cum_dB = 0;
+  let iip3_inv = 0;
+  const per = [];
+  stages.forEach((s, i) => {
+    const F = Math.pow(10, s.nf_db / 10);
+    const G = Math.pow(10, s.gain_db / 10);
+    if (i === 0) F_total = F; else F_total += (F - 1) / G_cum;
+    if (s.oip3_dbm !== undefined) {
+      const iip3_lin = Math.pow(10, ((s.oip3_dbm - s.gain_db) - 30) / 10);
+      iip3_inv += G_cum / iip3_lin;
+    }
+    G_cum *= G;
+    G_cum_dB += s.gain_db;
+    per.push({ stage: s.name || `stage ${i + 1}`, gain_db: s.gain_db, nf_db: s.nf_db, cum_nf_db: (10 * Math.log10(F_total)).toFixed(2), cum_gain_db: G_cum_dB.toFixed(1) });
+  });
+  const nf_total = 10 * Math.log10(F_total);
+  const iip3 = iip3_inv > 0 ? 10 * Math.log10(1 / iip3_inv) + 30 : null;
+  return {
+    nf_total_db: nf_total.toFixed(2),
+    total_gain_db: G_cum_dB.toFixed(1),
+    noise_temperature_k: (290 * (F_total - 1)).toFixed(1),
+    iip3_total_dbm: iip3 !== null ? iip3.toFixed(1) : "not provided",
+    oip3_total_dbm: iip3 !== null ? (iip3 + G_cum_dB).toFixed(1) : "not provided",
+    per_stage: per,
+    note: "First stage NF dominates. Put a low-NF LNA early in the chain before any lossy element.",
+  };
+}
+
+function toolCalcDistortion({ pin_per_tone_dbm, gain_db, oip3_dbm, p1db_out_dbm, f1_mhz, f2_mhz }) {
+  const pout = pin_per_tone_dbm + gain_db;
+  const iip3 = oip3_dbm - gain_db;
+  const p1db_in = p1db_out_dbm !== undefined ? p1db_out_dbm - gain_db : null;
+  const pim3_out = 3 * pout - 2 * oip3_dbm;
+  const fund_minus_im3 = pout - pim3_out;
+  const in_compression = p1db_out_dbm !== undefined && pout > p1db_out_dbm;
+  const near_compression = p1db_out_dbm !== undefined && pout > p1db_out_dbm - 5;
+  const kTB = -174 + 10 * Math.log10(1e6); // 1 MHz BW
+  const noise_floor = kTB + 6;
+  const sfdr = (2 / 3) * (iip3 - noise_floor);
+  return {
+    pout_dbm: pout.toFixed(1),
+    iip3_dbm: iip3.toFixed(1),
+    p1db_in_dbm: p1db_in !== null ? p1db_in.toFixed(1) : "not provided",
+    pim3_out_dbm: pim3_out.toFixed(1),
+    pim3_in_dbm: (pim3_out - gain_db).toFixed(1),
+    fundamental_to_im3_dbc: fund_minus_im3.toFixed(1),
+    sfdr_db: sfdr.toFixed(1),
+    in_compression,
+    near_compression,
+    verdict: in_compression ? "AMP IN COMPRESSION — reduce input" : near_compression ? "Within 5 dB of P1dB — nonlinear region" : "Linear operation",
+    im_products: (f1_mhz && f2_mhz) ? {
+      f1_mhz, f2_mhz,
+      im3_low_mhz: 2 * f1_mhz - f2_mhz,
+      im3_high_mhz: 2 * f2_mhz - f1_mhz,
+      im5_low_mhz: 3 * f1_mhz - 2 * f2_mhz,
+      im5_high_mhz: 3 * f2_mhz - 2 * f1_mhz,
+    } : null,
+    note: "Rule of thumb: P1dB ≈ OIP3 - 10 to 15 dB. IM3 grows 3× faster than fundamental.",
+  };
+}
+
+function toolCalcPathLoss({ frequency_mhz, distance_km, tx_power_dbm, tx_antenna_gain_dbi = 0, rx_antenna_gain_dbi = 0, rx_sensitivity_dbm = -85, tx_cable_loss_db = 0, rx_cable_loss_db = 0 }) {
+  const fspl = 32.45 + 20 * Math.log10(frequency_mhz) + 20 * Math.log10(distance_km);
+  const eirp = tx_power_dbm + tx_antenna_gain_dbi - tx_cable_loss_db;
+  const rx_power = eirp - fspl + rx_antenna_gain_dbi - rx_cable_loss_db;
+  const margin = rx_power - rx_sensitivity_dbm;
+  const wavelength_m = 300 / frequency_mhz;
+  const fresnel_m = 0.6 * Math.sqrt(wavelength_m * distance_km * 1000 / 4);
+  const fspl_max = tx_power_dbm + tx_antenna_gain_dbi - tx_cable_loss_db - rx_sensitivity_dbm + rx_antenna_gain_dbi - rx_cable_loss_db;
+  const max_dist_km = Math.pow(10, (fspl_max - 32.45 - 20 * Math.log10(frequency_mhz)) / 20);
+  return {
+    fspl_db: fspl.toFixed(2),
+    eirp_dbm: eirp.toFixed(1),
+    rx_power_dbm: rx_power.toFixed(1),
+    link_margin_db: margin.toFixed(1),
+    link_closes: margin > 0,
+    wavelength_m: wavelength_m.toFixed(3),
+    fresnel_zone_1_radius_m: fresnel_m.toFixed(2),
+    max_theoretical_range_km: max_dist_km.toFixed(2),
+    verdict: margin < 0 ? "BROKEN" : margin < 10 ? "TIGHT (recommend 10+ dB margin)" : margin < 20 ? "GOOD" : "EXCELLENT",
+    note: "FSPL assumes clear line-of-sight. Real links have additional losses: rain, foliage, atmosphere, multipath.",
+  };
+}
+
 const TOOLS = [
   { name: "search_cables", description: "Search cable database by criteria. Returns matching cables.", input_schema: { type: "object", properties: { impedance: { type: "number" }, max_freq_min_ghz: { type: "number" }, category: { type: "string" }, flexibility: { type: "string", enum: ["flexible", "rigid"] }, outdoor_rated: { type: "boolean" }, query: { type: "string" } } } },
   { name: "get_cable_details", description: "Full specs including construction and manufacturing process. Use cable id ('rg58','lmr400',etc).", input_schema: { type: "object", properties: { cable_id: { type: "string" } }, required: ["cable_id"] } },
@@ -1049,6 +1199,11 @@ const TOOLS = [
   { name: "calculate_link_budget", description: "Full signal-chain analysis: TX power through cable, connectors, optional wireless path to RX. Returns stage-by-stage power and margin.", input_schema: { type: "object", properties: { tx_power_dbm: { type: "number" }, frequency_mhz: { type: "number" }, cable_id_or_loss_db_100m: { type: "string", description: "Either cable id like 'lmr400' or numeric loss per 100m" }, cable_length_m: { type: "number" }, n_connectors: { type: "number" }, connector_il_db: { type: "number" }, fspl_enabled: { type: "boolean" }, distance_km: { type: "number" }, tx_antenna_gain_dbi: { type: "number" }, rx_antenna_gain_dbi: { type: "number" }, rx_sensitivity_dbm: { type: "number" } }, required: ["tx_power_dbm", "frequency_mhz", "cable_id_or_loss_db_100m", "cable_length_m"] } },
   { name: "suggest_connectors", description: "Recommend suitable connectors for a cable based on OD, impedance, and operating frequency", input_schema: { type: "object", properties: { cable_id: { type: "string" }, frequency_mhz: { type: "number" }, power_w: { type: "number" } }, required: ["cable_id", "frequency_mhz"] } },
   { name: "validate_custom_design", description: "Review a custom cable geometry for engineering issues — flags anti-patterns and warnings", input_schema: { type: "object", properties: { inner_diameter_mm: { type: "number" }, dielectric_diameter_mm: { type: "number" }, dielectric_constant: { type: "number" }, target_frequency_mhz: { type: "number" }, target_power_w: { type: "number" } }, required: ["inner_diameter_mm", "dielectric_diameter_mm", "dielectric_constant"] } },
+  { name: "lookup_connector", description: "Search the 20-connector RF connector database by impedance, freq, power, or query string. Returns matches with specs (IL, VSWR, mating, weatherproof, cable-OD compat).", input_schema: { type: "object", properties: { impedance: { type: "number", description: "50 or 75 ohm" }, min_freq_ghz: { type: "number" }, min_power_w: { type: "number" }, weatherproof_required: { type: "boolean" }, query: { type: "string", description: "name / family keyword (e.g., 'N', 'SMA', 'DIN')" } } } },
+  { name: "analyze_link_chain", description: "Analyze a multi-segment RF link chain (TX → cable → connector → amp → splitter → RX) with accurate per-segment loss + running power + link margin. Use this when user describes a multi-component system.", input_schema: { type: "object", properties: { frequency_mhz: { type: "number" }, stages: { type: "array", description: "Ordered list of segments. First must be type='tx', last must be type='rx'.", items: { type: "object", properties: { type: { type: "string", enum: ["tx", "cable", "connector", "amp", "atten", "splitter", "rx"] }, power_dbm: { type: "number", description: "for tx" }, sensitivity_dbm: { type: "number", description: "for rx" }, cable_id: { type: "string" }, length_m: { type: "number" }, connector_id: { type: "string" }, gain_db: { type: "number", description: "for amp" }, loss_db: { type: "number", description: "for atten/custom" }, n_way: { type: "number", description: "for splitter: 2,3,4,6,8,16" } } } } }, required: ["frequency_mhz", "stages"] } },
+  { name: "calculate_nf_cascade", description: "Cascaded noise figure + IP3 using Friis formula for a chain of amplifiers, mixers, cables, or lossy elements. Returns total NF, gain, noise temperature, and cascaded IP3.", input_schema: { type: "object", properties: { stages: { type: "array", items: { type: "object", properties: { name: { type: "string" }, gain_db: { type: "number" }, nf_db: { type: "number" }, oip3_dbm: { type: "number", description: "optional, for IP3 cascade" } }, required: ["gain_db", "nf_db"] } } }, required: ["stages"] } },
+  { name: "calculate_distortion", description: "Amplifier distortion: IM3 power, 1-dB compression, SFDR from Pin, Gain, OIP3, and P1dB. Also computes IM product frequencies if f1/f2 provided.", input_schema: { type: "object", properties: { pin_per_tone_dbm: { type: "number" }, gain_db: { type: "number" }, oip3_dbm: { type: "number" }, p1db_out_dbm: { type: "number" }, f1_mhz: { type: "number" }, f2_mhz: { type: "number" } }, required: ["pin_per_tone_dbm", "gain_db", "oip3_dbm"] } },
+  { name: "calculate_path_loss", description: "Free-space path loss (Friis) for a wireless hop: FSPL, EIRP, received power, link margin, Fresnel zone, max theoretical range.", input_schema: { type: "object", properties: { frequency_mhz: { type: "number" }, distance_km: { type: "number" }, tx_power_dbm: { type: "number" }, tx_antenna_gain_dbi: { type: "number" }, rx_antenna_gain_dbi: { type: "number" }, rx_sensitivity_dbm: { type: "number" }, tx_cable_loss_db: { type: "number" }, rx_cable_loss_db: { type: "number" } }, required: ["frequency_mhz", "distance_km", "tx_power_dbm"] } },
 ];
 
 function executeTool(name, input) {
@@ -1066,12 +1221,20 @@ function executeTool(name, input) {
       case "calculate_link_budget": return toolLinkBudget(input);
       case "suggest_connectors": return toolSuggestConnectors(input);
       case "validate_custom_design": return toolValidateDesign(input);
+      case "lookup_connector": return toolLookupConnector(input);
+      case "analyze_link_chain": return toolAnalyzeLinkChain(input);
+      case "calculate_nf_cascade": return toolCalcNFCascade(input);
+      case "calculate_distortion": return toolCalcDistortion(input);
+      case "calculate_path_loss": return toolCalcPathLoss(input);
       default: return { error: `Unknown tool: ${name}` };
     }
   } catch (e) { return { error: e.message }; }
 }
 
-const SYSTEM_PROMPT = `You are a senior RF cable engineer with 15+ years of experience in both design and field troubleshooting. You have access to a ${CABLE_IDS.length}-cable production database and 12 computational tools.
+const SYSTEM_PROMPT = `You are a senior RF cable engineer with 15+ years of experience in both design and field troubleshooting. You have access to:
+- A ${CABLE_IDS.length}-cable production database (RG, LMR, Heliax, semi-rigid, video, phase-stable, Chinese SYV, Russian RK).
+- A ${CONNECTOR_IDS.length}-connector database (N, SMA, TNC, BNC, 7/16 DIN, 4.3-10, F, UHF, 2.92mm, 2.4mm, 1.85mm, 1.0mm, MCX, MMCX, SMB, SMP, RP-SMA).
+- 17 computational tools for lookup, calculation, validation, and system analysis.
 
 CORE PRINCIPLES:
 1. ALWAYS use tools for specific numbers. Never guess impedance, loss, VSWR, or dimensions from memory. Even if you recall a typical value, confirm with tools.
@@ -1084,7 +1247,12 @@ REASONING BEHAVIOR:
 - VALIDATE designs: if the user proposes something questionable (non-standard impedance, frequency above cutoff, power above limits), flag it.
 - Use validate_custom_design whenever the user proposes custom geometry.
 - For selection questions, use recommend_cables first, then get_cable_details on top candidates for detail.
-- For system-level questions (Tx→RX paths), use calculate_link_budget.
+- For single cable + single-hop system questions, use calculate_link_budget.
+- For multi-segment chains (TX → cable → connector → amp → splitter → RX), use analyze_link_chain — it handles the full chain with running power per stage.
+- For wireless hop calculations (free-space), use calculate_path_loss (Friis FSPL, EIRP, margin).
+- For receiver chain / NF analysis, use calculate_nf_cascade (Friis for NF + IP3 cascade).
+- For amplifier linearity (IP3, P1dB, IM3), use calculate_distortion.
+- For connector lookup / matching, use lookup_connector (by impedance, freq, power, or query).
 - For troubleshooting measured loss, always use diagnose_loss_anomaly with the measurement data.
 - For multi-cable comparisons, use compare_cables (one tool call) instead of many get_cable_details calls.
 - When cables are selected, also suggest_connectors if frequency is given.
