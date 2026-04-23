@@ -2341,7 +2341,7 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign, tog
             </div>
           </div>
         )}
-        {messages.map((m, i) => <ChatMessage key={i} message={m} showTools={showTools} openInLibrary={openInLibrary} loadIntoDesign={loadIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} setToolPreset={setToolPreset} />)}
+        {messages.map((m, i) => <ChatMessage key={i} message={m} messageIndex={i} allMessages={messages} showTools={showTools} openInLibrary={openInLibrary} loadIntoDesign={loadIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} setToolPreset={setToolPreset} />)}
         {loading && (
           <div style={S.loadingMsg}>
             <span style={{ fontSize: 11, color: "#a89d8e", letterSpacing: "0.1em" }}>Thinking</span>
@@ -2379,16 +2379,38 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign, tog
   );
 }
 
-function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign, toggleCompare, comparedCables, setTab, setToolPreset }) {
-  // Map tool_name → latest input block from this specific message (for auto-fill chips)
-  const msgToolInputs = (() => {
-    if (!Array.isArray(m?.content)) return {};
+function ChatMessage({ message: m, messageIndex, allMessages, showTools, openInLibrary, loadIntoDesign, toggleCompare, comparedCables, setTab, setToolPreset }) {
+  // Aggregate tool_use inputs across THIS turn (may span multiple assistant rounds
+  // because the agent's tool_use blocks live in prior assistant messages, not the
+  // final text-only reply).
+  const msgToolInputs = useMemo(() => {
     const map = {};
-    for (const b of m.content) {
-      if (b && b.type === "tool_use" && b.name) map[b.name] = b.input || {};
+    const collect = (blocks) => {
+      if (!Array.isArray(blocks)) return;
+      for (const b of blocks) if (b && b.type === "tool_use" && b.name) map[b.name] = b.input || {};
+    };
+    if (!Array.isArray(allMessages) || messageIndex == null) {
+      collect(m?.content);
+      return map;
+    }
+    // Walk backward to find the user-prompt that started this turn (tool_result user
+    // messages do NOT count — they are part of the same turn).
+    let turnStart = 0;
+    for (let i = messageIndex - 1; i >= 0; i--) {
+      const mm = allMessages[i];
+      if (!mm) continue;
+      if (mm.role === "user") {
+        const isToolResult = Array.isArray(mm.content) && mm.content.length > 0 && mm.content.every(b => b?.type === "tool_result");
+        if (!isToolResult) { turnStart = i; break; }
+      }
+    }
+    // Walk forward from turn start through current message, collecting tool_use inputs
+    for (let i = turnStart; i <= messageIndex; i++) {
+      const mm = allMessages[i];
+      if (mm?.role === "assistant") collect(mm.content);
     }
     return map;
-  })();
+  }, [allMessages, messageIndex, m]);
   const jumpToTool = (target, data) => {
     if (setToolPreset) setToolPreset({ target, data: data || {}, ts: Date.now() });
     if (setTab) setTab(target === "link" ? "link" : "tools");
