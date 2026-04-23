@@ -2166,18 +2166,368 @@ function ToolsView() {
   return (
     <div style={S.viewInner}>
       <div style={S.viewIntro}>
-        <strong style={S.viewIntroStrong}>RF Tools.</strong> Interactive Smith chart for impedance analysis, and Touchstone (.s1p) viewer for measured S-parameter data.
+        <strong style={S.viewIntroStrong}>RF Tools.</strong> Smith chart, Touchstone viewer, Noise Figure cascade (Friis), IP3 / distortion, and Free-space path loss calculator.
       </div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
-        {[["smith", "🎯 Smith Chart"], ["tdr", "📊 TDR / S-Parameters"]].map(([k, label]) => (
+      <div style={{ display: "flex", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
+        {[["smith", "🎯 Smith Chart"], ["tdr", "📊 TDR / S-Params"], ["nf", "🔊 NF Cascade"], ["ip3", "⚡ IP3 / P1dB"], ["path", "📡 Path Loss"]].map(([k, label]) => (
           <button key={k} onClick={() => setSubTool(k)} style={{ padding: "7px 14px", background: subTool === k ? "#d97706" : "rgba(15,10,5,0.4)", color: subTool === k ? "#0a0705" : "#a8a29e", border: `1px solid ${subTool === k ? "#d97706" : "#2a1f15"}`, borderRadius: 3, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.3 }}>{label}</button>
         ))}
       </div>
       {subTool === "smith" && <SmithChartTool />}
       {subTool === "tdr" && <TDRTool />}
+      {subTool === "nf" && <NFCascadeTool />}
+      {subTool === "ip3" && <DistortionTool />}
+      {subTool === "path" && <PathLossTool />}
     </div>
   );
 }
+
+function NFCascadeTool() {
+  const [stages, setStages] = useState(() => {
+    try { const s = localStorage.getItem("rf-nf-stages"); if (s) return JSON.parse(s); } catch {}
+    return [
+      { id: "s1", name: "LNA", gain: 15, nf: 1.2, oip3: 30 },
+      { id: "s2", name: "Cable loss", gain: -3, nf: 3.0, oip3: 50 },
+      { id: "s3", name: "Mixer", gain: -7, nf: 7.0, oip3: 15 },
+      { id: "s4", name: "IF Amp", gain: 20, nf: 2.0, oip3: 25 },
+    ];
+  });
+  useEffect(() => { try { localStorage.setItem("rf-nf-stages", JSON.stringify(stages)); } catch {} }, [stages]);
+
+  const result = useMemo(() => {
+    let F_total = 1, G_cum = 1, G_cum_dB = 0;
+    let iip3_inv = 0;
+    const perStage = [];
+    stages.forEach((s, i) => {
+      const F = Math.pow(10, s.nf / 10);
+      const G = Math.pow(10, s.gain / 10);
+      const IIP3_dBm = s.oip3 - s.gain;
+      const IIP3_lin = Math.pow(10, (IIP3_dBm - 30) / 10);
+      const F_contrib = i === 0 ? F : (F - 1) / G_cum;
+      if (i === 0) F_total = F; else F_total += (F - 1) / G_cum;
+      iip3_inv += G_cum / IIP3_lin;
+      G_cum *= G;
+      G_cum_dB += s.gain;
+      perStage.push({ ...s, F_contrib, cumGain: G_cum_dB, cumNF: 10 * Math.log10(F_total), cumF: F_total });
+    });
+    const NF_dB = 10 * Math.log10(F_total);
+    const T_noise = 290 * (F_total - 1);
+    const IIP3_total_dBm = iip3_inv > 0 ? 10 * Math.log10(1 / iip3_inv) + 30 : Infinity;
+    const OIP3_total_dBm = IIP3_total_dBm + G_cum_dB;
+    return { NF_dB, G_cum_dB, F_total, T_noise, IIP3_total_dBm, OIP3_total_dBm, perStage };
+  }, [stages]);
+
+  const update = (i, patch) => setStages(prev => prev.map((s, j) => j === i ? { ...s, ...patch } : s));
+  const add = () => setStages(prev => [...prev, { id: "s" + Math.random().toString(36).slice(2, 7), name: "Stage " + (prev.length + 1), gain: 10, nf: 3, oip3: 20 }]);
+  const remove = (i) => setStages(prev => prev.length > 1 ? prev.filter((_, j) => j !== i) : prev);
+
+  const W = 720, H = 180, padL = 60, padR = 20, padT = 20, padB = 40;
+  const maxContrib = Math.max(...result.perStage.map(p => 10 * Math.log10(1 + p.F_contrib / (result.F_total - 1 || 1e-9))), 0.1);
+  const xStep = (W - padL - padR) / Math.max(1, stages.length - 1);
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 18, marginBottom: 16, alignItems: "flex-start" }}>
+        <div style={{ padding: 14, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15", overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <thead>
+              <tr>
+                <th style={{ padding: "6px 8px", textAlign: "left", color: "#a8a29e", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", borderBottom: "1px solid #2a1f15" }}>#</th>
+                <th style={{ padding: "6px 8px", textAlign: "left", color: "#a8a29e", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", borderBottom: "1px solid #2a1f15" }}>Name</th>
+                <th style={{ padding: "6px 8px", textAlign: "right", color: "#a8a29e", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", borderBottom: "1px solid #2a1f15" }}>Gain (dB)</th>
+                <th style={{ padding: "6px 8px", textAlign: "right", color: "#a8a29e", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", borderBottom: "1px solid #2a1f15" }}>NF (dB)</th>
+                <th style={{ padding: "6px 8px", textAlign: "right", color: "#a8a29e", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", borderBottom: "1px solid #2a1f15" }}>OIP3 (dBm)</th>
+                <th style={{ padding: "6px 8px", textAlign: "right", color: "#a8a29e", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", borderBottom: "1px solid #2a1f15" }}>Cum NF</th>
+                <th style={{ padding: "6px 8px", borderBottom: "1px solid #2a1f15" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.perStage.map((s, i) => (
+                <tr key={s.id} style={{ background: i % 2 === 0 ? "rgba(15,10,5,0.25)" : "transparent" }}>
+                  <td style={{ padding: "4px 8px", color: "#78716c", fontFamily: "JetBrains Mono, monospace" }}>{i + 1}</td>
+                  <td style={{ padding: "4px 8px" }}><input type="text" value={s.name} onChange={e => update(i, { name: e.target.value })} style={calcInputStyle} /></td>
+                  <td style={{ padding: "4px 8px", textAlign: "right" }}><input type="number" step="0.5" value={s.gain} onChange={e => update(i, { gain: Number(e.target.value) })} style={{ ...calcInputStyle, width: 60, textAlign: "right" }} /></td>
+                  <td style={{ padding: "4px 8px", textAlign: "right" }}><input type="number" step="0.1" value={s.nf} onChange={e => update(i, { nf: Number(e.target.value) })} style={{ ...calcInputStyle, width: 60, textAlign: "right" }} /></td>
+                  <td style={{ padding: "4px 8px", textAlign: "right" }}><input type="number" step="1" value={s.oip3} onChange={e => update(i, { oip3: Number(e.target.value) })} style={{ ...calcInputStyle, width: 60, textAlign: "right" }} /></td>
+                  <td style={{ padding: "4px 8px", textAlign: "right", color: "#fbbf24", fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>{s.cumNF.toFixed(2)}</td>
+                  <td style={{ padding: "4px 4px" }}>{stages.length > 1 && <button onClick={() => remove(i)} style={{ background: "none", border: "none", color: "#78716c", cursor: "pointer", fontSize: 12, padding: "2px 6px" }}>✕</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button onClick={add} style={{ marginTop: 8, background: "rgba(217,119,6,0.15)", color: "#fbbf24", border: "1px solid #d97706", padding: "5px 12px", fontSize: 10, cursor: "pointer", borderRadius: 2, fontWeight: 600 }}>+ Add Stage</button>
+        </div>
+
+        <div style={{ padding: 14, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 10 }}>System results</div>
+          <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 11, color: "#d6cfc4", lineHeight: 1.9 }}>
+            <div>NF<sub>total</sub> = <strong style={{ color: "#fbbf24", fontSize: 14 }}>{result.NF_dB.toFixed(2)} dB</strong></div>
+            <div>Gain<sub>cum</sub> = <strong style={{ color: "#fbbf24" }}>{result.G_cum_dB.toFixed(1)} dB</strong></div>
+            <div>T<sub>noise</sub> = <strong style={{ color: "#fbbf24" }}>{result.T_noise.toFixed(1)} K</strong></div>
+            <div style={{ borderTop: "1px dashed #2a1f15", margin: "6px 0", paddingTop: 4 }}>IIP3 = <strong style={{ color: "#fbbf24" }}>{result.IIP3_total_dBm.toFixed(1)} dBm</strong></div>
+            <div>OIP3 = <strong style={{ color: "#fbbf24" }}>{result.OIP3_total_dBm.toFixed(1)} dBm</strong></div>
+          </div>
+          <div style={{ fontSize: 9, color: "#78716c", marginTop: 10, lineHeight: 1.5, paddingTop: 6, borderTop: "1px dashed #2a1f15" }}>
+            <strong style={{ color: "#a8a29e" }}>Friis:</strong> F = F₁ + (F₂−1)/G₁ + (F₃−1)/(G₁G₂) + ...
+            <br /><strong style={{ color: "#a8a29e" }}>IP3 cascade:</strong> 1/IIP3 = Σ Gcum/IIP3ᵢ
+          </div>
+        </div>
+      </div>
+
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", background: "rgba(15,10,5,0.5)", borderRadius: 4, marginBottom: 14 }}>
+        <text x={padL - 42} y={padT + (H - padT - padB) / 2} fontSize="9" fill="#a8a29e" textAnchor="middle" transform={`rotate(-90, ${padL - 42}, ${padT + (H - padT - padB) / 2})`} letterSpacing="1">Cumulative NF (dB)</text>
+        <text x={padL + (W - padL - padR) / 2} y={H - 8} fontSize="9" fill="#a8a29e" textAnchor="middle" letterSpacing="1">Stage</text>
+        <line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="#57534e" strokeWidth="0.8" />
+        <line x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="#57534e" strokeWidth="0.8" />
+        {result.perStage.map((s, i) => {
+          const maxNF = Math.max(...result.perStage.map(p => p.cumNF)) * 1.1 || 1;
+          const x = padL + i * xStep;
+          const y = (H - padB) - (s.cumNF / maxNF) * (H - padT - padB);
+          return (
+            <g key={s.id}>
+              {i > 0 && <line x1={padL + (i - 1) * xStep} y1={(H - padB) - (result.perStage[i - 1].cumNF / maxNF) * (H - padT - padB)} x2={x} y2={y} stroke="#d97706" strokeWidth="2" />}
+              <circle cx={x} cy={y} r="4" fill="#fbbf24" stroke="#d97706" strokeWidth="1.5" />
+              <text x={x} y={H - padB + 14} fontSize="9" fill="#a8a29e" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{s.name.slice(0, 8)}</text>
+              <text x={x} y={y - 8} fontSize="9" fill="#fbbf24" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{s.cumNF.toFixed(2)}</text>
+            </g>
+          );
+        })}
+      </svg>
+
+      <div style={{ fontSize: 10, color: "#a8a29e", padding: "10px 12px", background: "rgba(15,10,5,0.4)", borderRadius: 3, lineHeight: 1.6 }}>
+        💡 <strong style={{ color: "#fbbf24" }}>Friis formula for cascaded NF:</strong> The first stage dominates — its NF and gain are most critical. High-gain low-NF LNA early in the chain minimizes contributions from later stages. <strong style={{ color: "#fbbf24" }}>Rule:</strong> A cable-before-LNA setup degrades NF by exactly the cable loss (3 dB cable → +3 dB NF hit). That's why outdoor antennas need mast-mounted LNAs.
+      </div>
+    </div>
+  );
+}
+
+function DistortionTool() {
+  const [pin, setPin] = useState(-20);     // dBm input
+  const [gain, setGain] = useState(15);
+  const [oip3, setOip3] = useState(30);
+  const [p1dbOut, setP1dbOut] = useState(20);
+  const [f1, setF1] = useState(1000);
+  const [f2, setF2] = useState(1010);
+
+  const pout = pin + gain;
+  const iip3 = oip3 - gain;
+  const p1dbIn = p1dbOut - gain;
+  // IM3 output power: Pim3 = 3*Pout - 2*OIP3
+  const pim3_out = 3 * pout - 2 * oip3;
+  const pim3_in = pim3_out - gain;
+  // SFDR: dynamic range where signal is above noise and IM3 is below noise
+  const kTB_dBm = -174 + 10 * Math.log10(1e6);  // 1 MHz BW
+  const noise_floor = kTB_dBm + 6;  // assume 6 dB NF
+  const sfdr = (2 / 3) * (iip3 - noise_floor);
+
+  // IM products frequencies
+  const im3_low = 2 * f1 - f2;
+  const im3_high = 2 * f2 - f1;
+  const im5_low = 3 * f1 - 2 * f2;
+  const im5_high = 3 * f2 - 2 * f1;
+
+  // Compression zone
+  const compression = pout - (-1); // 1 dB below
+  const inCompression = pout > p1dbOut;
+  const nearCompression = pout > p1dbOut - 5;
+
+  const W = 720, H = 260, padL = 60, padR = 20, padT = 20, padB = 50;
+  // Plot Pout vs Pin, show linear, 1dB compression, OIP3 extrapolation, IM3
+  const pinMin = -50, pinMax = 20;
+  const poutMin = -60, poutMax = 40;
+  const xP = p => padL + (p - pinMin) / (pinMax - pinMin) * (W - padL - padR);
+  const yP = p => padT + (1 - (p - poutMin) / (poutMax - poutMin)) * (H - padT - padB);
+
+  const linearPath = `M ${xP(pinMin).toFixed(1)} ${yP(pinMin + gain).toFixed(1)} L ${xP(pinMax).toFixed(1)} ${yP(pinMax + gain).toFixed(1)}`;
+  const im3Path = `M ${xP(pinMin).toFixed(1)} ${yP(3 * (pinMin + gain) - 2 * oip3).toFixed(1)} L ${xP(pinMax).toFixed(1)} ${yP(3 * (pinMax + gain) - 2 * oip3).toFixed(1)}`;
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 16 }}>
+        <div style={{ padding: 14, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 10 }}>Amplifier specs</div>
+          <CalcField label="Gain (dB)" value={gain} set={setGain} step={0.5} />
+          <CalcField label="OIP3 (dBm)" value={oip3} set={setOip3} step={1} />
+          <CalcField label="P1dB out (dBm)" value={p1dbOut} set={setP1dbOut} step={0.5} />
+          <div style={{ fontSize: 9, color: "#78716c", marginTop: 6, lineHeight: 1.5 }}>IIP3 = OIP3 − Gain = <strong style={{ color: "#fbbf24" }}>{iip3.toFixed(1)} dBm</strong></div>
+          <div style={{ fontSize: 9, color: "#78716c", lineHeight: 1.5 }}>P1dB in = <strong style={{ color: "#fbbf24" }}>{p1dbIn.toFixed(1)} dBm</strong></div>
+        </div>
+
+        <div style={{ padding: 14, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 10 }}>Signal conditions</div>
+          <CalcField label="Pin per tone (dBm)" value={pin} set={setPin} step={1} />
+          <CalcField label="f₁ (MHz)" value={f1} set={setF1} step={1} />
+          <CalcField label="f₂ (MHz)" value={f2} set={setF2} step={1} />
+          <div style={{ fontSize: 9, color: "#78716c", marginTop: 6, lineHeight: 1.5 }}>Pout = Pin + Gain = <strong style={{ color: "#fbbf24" }}>{pout.toFixed(1)} dBm</strong></div>
+        </div>
+
+        <div style={{ padding: 14, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: `1px solid ${inCompression ? "#ef4444" : nearCompression ? "#f97316" : "#34d399"}` }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: inCompression ? "#ef4444" : nearCompression ? "#f97316" : "#34d399", textTransform: "uppercase", marginBottom: 10 }}>IM3 distortion</div>
+          <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 11, color: "#d6cfc4", lineHeight: 1.9 }}>
+            <div>P<sub>IM3 out</sub> = <strong style={{ color: "#ef4444" }}>{pim3_out.toFixed(1)} dBm</strong></div>
+            <div>P<sub>IM3 in</sub> = <strong style={{ color: "#ef4444" }}>{pim3_in.toFixed(1)} dBm</strong></div>
+            <div>Fund − IM3 = <strong style={{ color: pout - pim3_out > 40 ? "#34d399" : pout - pim3_out > 20 ? "#fbbf24" : "#ef4444" }}>{(pout - pim3_out).toFixed(1)} dBc</strong></div>
+            <div style={{ fontSize: 10, color: "#78716c", marginTop: 4 }}>SFDR ≈ <strong style={{ color: "#fbbf24" }}>{sfdr.toFixed(1)} dB</strong> (at 1 MHz BW, 6 dB NF)</div>
+            {inCompression && <div style={{ fontSize: 10, color: "#ef4444", marginTop: 4, fontWeight: 700 }}>⚠ ABOVE P1dB — amp compressed!</div>}
+            {!inCompression && nearCompression && <div style={{ fontSize: 10, color: "#f97316", marginTop: 4 }}>⚠ Within 5 dB of P1dB — nonlinear region</div>}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: 14, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15", marginBottom: 14 }}>
+        <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 10 }}>Intermodulation products</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, fontSize: 10.5, fontFamily: "JetBrains Mono, monospace", color: "#d6cfc4" }}>
+          <div>f₁ fundamental: <span style={{ color: "#fbbf24" }}>{f1} MHz</span></div>
+          <div>f₂ fundamental: <span style={{ color: "#fbbf24" }}>{f2} MHz</span></div>
+          <div>2f₁ − f₂ (IM3 lo): <span style={{ color: "#ef4444" }}>{im3_low} MHz</span></div>
+          <div>2f₂ − f₁ (IM3 hi): <span style={{ color: "#ef4444" }}>{im3_high} MHz</span></div>
+          <div>3f₁ − 2f₂ (IM5 lo): <span style={{ color: "#f97316" }}>{im5_low} MHz</span></div>
+          <div>3f₂ − 2f₁ (IM5 hi): <span style={{ color: "#f97316" }}>{im5_high} MHz</span></div>
+        </div>
+      </div>
+
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", background: "rgba(15,10,5,0.5)", borderRadius: 4 }}>
+        {[-60, -40, -20, 0, 20, 40].map(d => <g key={`py${d}`}><line x1={padL} y1={yP(d)} x2={W - padR} y2={yP(d)} stroke="#2a1f15" strokeWidth="0.5" strokeDasharray="2,3" /><text x={padL - 6} y={yP(d) + 3} fontSize="9" fill="#78716c" textAnchor="end" fontFamily="JetBrains Mono, monospace">{d}</text></g>)}
+        {[-50, -30, -10, 10].map(d => <g key={`px${d}`}><line x1={xP(d)} y1={padT} x2={xP(d)} y2={H - padB} stroke="#2a1f15" strokeWidth="0.5" strokeDasharray="2,3" /><text x={xP(d)} y={H - padB + 14} fontSize="9" fill="#78716c" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{d}</text></g>)}
+        <text x={padL + (W - padL - padR) / 2} y={H - 6} fontSize="10" fill="#a8a29e" textAnchor="middle">Pin per tone (dBm)</text>
+        <text x={padL - 48} y={padT + (H - padT - padB) / 2} fontSize="10" fill="#a8a29e" textAnchor="middle" transform={`rotate(-90, ${padL - 48}, ${padT + (H - padT - padB) / 2})`}>Pout (dBm)</text>
+
+        <path d={linearPath} stroke="#fbbf24" strokeWidth="2" fill="none" />
+        <path d={im3Path} stroke="#ef4444" strokeWidth="2" fill="none" />
+        <line x1={padL} y1={yP(p1dbOut)} x2={W - padR} y2={yP(p1dbOut)} stroke="#f97316" strokeWidth="1" strokeDasharray="4,4" opacity="0.6" />
+        <text x={W - padR - 4} y={yP(p1dbOut) - 3} fontSize="9" fill="#f97316" textAnchor="end" opacity="0.8">P1dB out ({p1dbOut} dBm)</text>
+        {iip3 > pinMin && iip3 < pinMax && <g>
+          <line x1={xP(iip3)} y1={padT} x2={xP(iip3)} y2={yP(oip3)} stroke="#c084fc" strokeWidth="1" strokeDasharray="4,4" opacity="0.6" />
+          <circle cx={xP(iip3)} cy={yP(oip3)} r="5" fill="#c084fc" />
+          <text x={xP(iip3) + 8} y={yP(oip3) - 4} fontSize="9" fill="#c084fc" fontFamily="JetBrains Mono, monospace">IP3 ({iip3.toFixed(0)}, {oip3.toFixed(0)})</text>
+        </g>}
+        {pin > pinMin && pin < pinMax && <g>
+          <circle cx={xP(pin)} cy={yP(pout)} r="5" fill="#fbbf24" />
+          <circle cx={xP(pin)} cy={yP(pim3_out)} r="5" fill="#ef4444" />
+          <line x1={xP(pin)} y1={padT} x2={xP(pin)} y2={H - padB} stroke="#fbbf24" strokeWidth="0.5" strokeDasharray="2,2" opacity="0.4" />
+        </g>}
+
+        <g transform={`translate(${W - padR - 140}, ${padT + 10})`}>
+          <rect x={0} y={0} width={140} height={50} fill="rgba(15,10,5,0.9)" stroke="#2a1f15" strokeWidth="0.5" />
+          <line x1={8} y1={14} x2={24} y2={14} stroke="#fbbf24" strokeWidth="2" />
+          <text x={30} y={17} fontSize="9" fill="#d6cfc4" fontFamily="JetBrains Mono, monospace">Fundamental (slope 1)</text>
+          <line x1={8} y1={28} x2={24} y2={28} stroke="#ef4444" strokeWidth="2" />
+          <text x={30} y={31} fontSize="9" fill="#d6cfc4" fontFamily="JetBrains Mono, monospace">IM3 (slope 3)</text>
+          <circle cx={16} cy={42} r="3" fill="#c084fc" />
+          <text x={30} y={45} fontSize="9" fill="#d6cfc4" fontFamily="JetBrains Mono, monospace">IP3 extrapolation</text>
+        </g>
+      </svg>
+
+      <div style={{ fontSize: 10, color: "#a8a29e", padding: "10px 12px", background: "rgba(15,10,5,0.4)", borderRadius: 3, lineHeight: 1.6, marginTop: 14 }}>
+        💡 <strong style={{ color: "#fbbf24" }}>IM3 grows 3× faster than fundamental:</strong> Increase input by 1 dB → fundamental rises 1 dB, IM3 rises 3 dB. IP3 is the extrapolated intercept where they'd meet (never reached in real amps because they saturate first). <strong>Rule of thumb:</strong> P1dB ≈ OIP3 − 10 to 15 dB. Keep Pin well below P1dB for linear operation.
+      </div>
+    </div>
+  );
+}
+
+function CalcField({ label, value, set, step = 1 }) {
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 9, color: "#a8a29e", marginBottom: 2, letterSpacing: 0.5 }}>{label}</div>
+      <input type="number" value={value} step={step} onChange={e => set(Number(e.target.value))} style={{ width: "100%", background: "rgba(15,10,5,0.8)", border: "1px solid #57534e", color: "#fbbf24", padding: "4px 8px", fontSize: 11, fontFamily: "JetBrains Mono, monospace", borderRadius: 2 }} />
+    </div>
+  );
+}
+
+function PathLossTool() {
+  const [freqMHz, setFreqMHz] = useState(2400);
+  const [distKm, setDistKm] = useState(1);
+  const [txPower, setTxPower] = useState(30);
+  const [txGain, setTxGain] = useState(15);
+  const [rxGain, setRxGain] = useState(15);
+  const [rxSens, setRxSens] = useState(-85);
+  const [cableLossTx, setCableLossTx] = useState(3);
+  const [cableLossRx, setCableLossRx] = useState(0);
+
+  // FSPL (Friis): 32.45 + 20log(f_MHz) + 20log(d_km)
+  const fspl = 32.45 + 20 * Math.log10(freqMHz) + 20 * Math.log10(distKm);
+  const eirp = txPower + txGain - cableLossTx;
+  const rxPower = eirp - fspl + rxGain - cableLossRx;
+  const margin = rxPower - rxSens;
+  const ok = margin > 0;
+  const verdict = linkVerdict(margin);
+
+  // Fresnel zone 1 radius at midpoint
+  const wavelength = 300 / freqMHz;  // meters (c=300e6/f_Hz; f_MHz → λ in m = 300/fMHz)
+  const fresnelR = 0.6 * Math.sqrt(wavelength * distKm * 1000 / 4);  // 60% F1 clearance recommended
+
+  // Max theoretical range for current margin
+  const fsplMax = txPower + txGain - cableLossTx - rxSens + rxGain - cableLossRx;
+  // fsplMax = 32.45 + 20log(f) + 20log(d) → d = 10^((fsplMax - 32.45 - 20log(f))/20)
+  const maxDistKm = Math.pow(10, (fsplMax - 32.45 - 20 * Math.log10(freqMHz)) / 20);
+
+  const W = 720, H = 200, padL = 60, padR = 20, padT = 20, padB = 40;
+  // Plot RX power vs distance (log scale)
+  const dMin = 0.01, dMax = Math.min(1000, maxDistKm * 2);
+  const pMin = rxSens - 20, pMax = txPower + txGain + 10;
+  const xD = d => padL + (Math.log10(d) - Math.log10(dMin)) / (Math.log10(dMax) - Math.log10(dMin)) * (W - padL - padR);
+  const yR = r => padT + (1 - (r - pMin) / (pMax - pMin)) * (H - padT - padB);
+  const curvePath = Array.from({ length: 80 }, (_, i) => {
+    const d = Math.pow(10, Math.log10(dMin) + i / 79 * (Math.log10(dMax) - Math.log10(dMin)));
+    const fs = 32.45 + 20 * Math.log10(freqMHz) + 20 * Math.log10(d);
+    const rx = txPower + txGain - cableLossTx - fs + rxGain - cableLossRx;
+    return `${i === 0 ? "M" : "L"} ${xD(d).toFixed(1)} ${yR(rx).toFixed(1)}`;
+  }).join(" ");
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 16 }}>
+        <div style={{ padding: 14, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 10 }}>RF link</div>
+          <CalcField label="Frequency (MHz)" value={freqMHz} set={setFreqMHz} step={10} />
+          <CalcField label="Distance (km)" value={distKm} set={setDistKm} step={0.1} />
+          <div style={{ fontSize: 9, color: "#78716c", marginTop: 6 }}>λ = <strong style={{ color: "#fbbf24" }}>{(wavelength * 100).toFixed(2)} cm</strong> · F₁ clearance mid = <strong style={{ color: "#fbbf24" }}>{fresnelR.toFixed(2)} m</strong></div>
+        </div>
+        <div style={{ padding: 14, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 10 }}>TX side</div>
+          <CalcField label="TX power (dBm)" value={txPower} set={setTxPower} step={1} />
+          <CalcField label="TX antenna gain (dBi)" value={txGain} set={setTxGain} step={0.5} />
+          <CalcField label="TX cable loss (dB)" value={cableLossTx} set={setCableLossTx} step={0.5} />
+          <div style={{ fontSize: 10, color: "#a8a29e", marginTop: 6 }}>EIRP = <strong style={{ color: "#fbbf24", fontFamily: "JetBrains Mono, monospace" }}>{eirp.toFixed(1)} dBm</strong></div>
+        </div>
+        <div style={{ padding: 14, background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#a8a29e", textTransform: "uppercase", marginBottom: 10 }}>RX side</div>
+          <CalcField label="RX antenna gain (dBi)" value={rxGain} set={setRxGain} step={0.5} />
+          <CalcField label="RX cable loss (dB)" value={cableLossRx} set={setCableLossRx} step={0.5} />
+          <CalcField label="RX sensitivity (dBm)" value={rxSens} set={setRxSens} step={1} />
+        </div>
+        <div style={{ padding: 14, background: `${verdict.color}18`, border: `1px solid ${verdict.color}`, borderRadius: 4 }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: verdict.color, textTransform: "uppercase", marginBottom: 10 }}>{verdict.icon} {verdict.title}</div>
+          <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 11, color: "#d6cfc4", lineHeight: 1.9 }}>
+            <div>FSPL = <strong style={{ color: "#ef4444" }}>{fspl.toFixed(2)} dB</strong></div>
+            <div>RX power = <strong style={{ color: ok ? "#34d399" : "#ef4444" }}>{rxPower.toFixed(1)} dBm</strong></div>
+            <div>Margin = <strong style={{ color: verdict.color, fontSize: 14 }}>{margin > 0 ? "+" : ""}{margin.toFixed(1)} dB</strong></div>
+            <div style={{ fontSize: 10, color: "#a8a29e", marginTop: 4 }}>Max range: <strong style={{ color: "#fbbf24" }}>{maxDistKm < 1 ? `${(maxDistKm * 1000).toFixed(0)} m` : `${maxDistKm.toFixed(2)} km`}</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", background: "rgba(15,10,5,0.5)", borderRadius: 4 }}>
+        {[dMin, 0.1, 1, 10, 100, dMax].filter(d => d >= dMin && d <= dMax).map((d, i) => <g key={`d${i}`}><line x1={xD(d)} y1={padT} x2={xD(d)} y2={H - padB} stroke="#2a1f15" strokeWidth="0.5" strokeDasharray="2,3" /><text x={xD(d)} y={H - padB + 14} fontSize="9" fill="#78716c" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{d < 1 ? `${(d * 1000).toFixed(0)}m` : `${d}km`}</text></g>)}
+        {[pMin, -60, -30, 0, 30].filter(p => p >= pMin && p <= pMax).map((p, i) => <g key={`p${i}`}><line x1={padL} y1={yR(p)} x2={W - padR} y2={yR(p)} stroke="#2a1f15" strokeWidth="0.5" strokeDasharray="2,3" /><text x={padL - 6} y={yR(p) + 3} fontSize="9" fill="#78716c" textAnchor="end" fontFamily="JetBrains Mono, monospace">{p}</text></g>)}
+        <text x={padL + (W - padL - padR) / 2} y={H - 6} fontSize="10" fill="#a8a29e" textAnchor="middle">Distance (log)</text>
+        <text x={padL - 46} y={padT + (H - padT - padB) / 2} fontSize="10" fill="#a8a29e" textAnchor="middle" transform={`rotate(-90, ${padL - 46}, ${padT + (H - padT - padB) / 2})`}>RX power (dBm)</text>
+
+        <line x1={padL} y1={yR(rxSens)} x2={W - padR} y2={yR(rxSens)} stroke="#ef4444" strokeWidth="1" strokeDasharray="4,4" opacity="0.5" />
+        <text x={W - padR - 4} y={yR(rxSens) - 3} fontSize="9" fill="#ef4444" textAnchor="end" opacity="0.7">Sensitivity ({rxSens} dBm)</text>
+        <path d={curvePath} stroke="#fbbf24" strokeWidth="2" fill="none" />
+        <circle cx={xD(distKm)} cy={yR(rxPower)} r="6" fill={ok ? "#34d399" : "#ef4444"} stroke="#0a0705" strokeWidth="2" />
+        <text x={xD(distKm) + 10} y={yR(rxPower) + 4} fontSize="10" fill={ok ? "#34d399" : "#ef4444"} fontFamily="JetBrains Mono, monospace" fontWeight="700">{distKm < 1 ? `${(distKm * 1000).toFixed(0)}m` : `${distKm}km`}, {rxPower.toFixed(1)} dBm</text>
+      </svg>
+
+      <div style={{ fontSize: 10, color: "#a8a29e", padding: "10px 12px", background: "rgba(15,10,5,0.4)", borderRadius: 3, lineHeight: 1.6, marginTop: 14 }}>
+        💡 <strong style={{ color: "#fbbf24" }}>Friis FSPL:</strong> 32.45 + 20·log(f<sub>MHz</sub>) + 20·log(d<sub>km</sub>). Every doubling of distance = +6 dB loss, every doubling of freq = +6 dB loss. <strong>Fresnel zone 1:</strong> Clear 60% of F₁ radius of any obstruction along the path for near-FSPL performance. Below that, expect diffraction loss.
+      </div>
+    </div>
+  );
+}
+
+const calcInputStyle = { background: "rgba(15,10,5,0.8)", border: "1px solid #57534e", color: "#fbbf24", padding: "3px 6px", fontSize: 10.5, fontFamily: "JetBrains Mono, monospace", borderRadius: 2, width: "100%" };
 
 function SmithChartTool() {
   const [gR, setGR] = useState(0.3);
