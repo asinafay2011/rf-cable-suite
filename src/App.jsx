@@ -1295,6 +1295,7 @@ const TOOLS = [
   { name: "calculate_nf_cascade", description: "Cascaded noise figure + IP3 using Friis formula for a chain of amplifiers, mixers, cables, or lossy elements. Returns total NF, gain, noise temperature, and cascaded IP3.", input_schema: { type: "object", properties: { stages: { type: "array", items: { type: "object", properties: { name: { type: "string" }, gain_db: { type: "number" }, nf_db: { type: "number" }, oip3_dbm: { type: "number", description: "optional, for IP3 cascade" } }, required: ["gain_db", "nf_db"] } } }, required: ["stages"] } },
   { name: "calculate_distortion", description: "Amplifier distortion: IM3 power, 1-dB compression, SFDR from Pin, Gain, OIP3, and P1dB. Also computes IM product frequencies if f1/f2 provided.", input_schema: { type: "object", properties: { pin_per_tone_dbm: { type: "number" }, gain_db: { type: "number" }, oip3_dbm: { type: "number" }, p1db_out_dbm: { type: "number" }, f1_mhz: { type: "number" }, f2_mhz: { type: "number" } }, required: ["pin_per_tone_dbm", "gain_db", "oip3_dbm"] } },
   { name: "calculate_path_loss", description: "Free-space path loss (Friis) for a wireless hop: FSPL, EIRP, received power, link margin, Fresnel zone, max theoretical range.", input_schema: { type: "object", properties: { frequency_mhz: { type: "number" }, distance_km: { type: "number" }, tx_power_dbm: { type: "number" }, tx_antenna_gain_dbi: { type: "number" }, rx_antenna_gain_dbi: { type: "number" }, rx_sensitivity_dbm: { type: "number" }, tx_cable_loss_db: { type: "number" }, rx_cable_loss_db: { type: "number" } }, required: ["frequency_mhz", "distance_km", "tx_power_dbm"] } },
+  { name: "synth_s11_sweep", description: "Generate a synthetic |S11| frequency sweep in Touchstone .s1p format for the TDR / S-params viewer. Use when the user asks to plot / visualise return-loss or S-parameters of a cable, connector mismatch, or arbitrary resistive load. Output text is plottable directly.", input_schema: { type: "object", properties: { cable_id: { type: "string", description: "optional — database cable id (adds a gaussian mismatch bump around bump_mhz)" }, line_impedance: { type: "number", description: "system Z0, default 50" }, load_impedance: { type: "number", description: "optional — real resistive load for constant-VSWR sweep" }, freq_min_mhz: { type: "number" }, freq_max_mhz: { type: "number" }, n_points: { type: "number", description: "5-60, default 15" }, bump_mhz: { type: "number", description: "frequency of the simulated mismatch bump, default = mid-band" }, bump_depth_db: { type: "number", description: "depth of the bump above the baseline return loss, default 10 dB" }, note: { type: "string", description: "free-form comment written into the s1p header" } }, required: ["freq_min_mhz", "freq_max_mhz"] } },
 ];
 
 function executeTool(name, input) {
@@ -1317,6 +1318,7 @@ function executeTool(name, input) {
       case "calculate_nf_cascade": return toolCalcNFCascade(input);
       case "calculate_distortion": return toolCalcDistortion(input);
       case "calculate_path_loss": return toolCalcPathLoss(input);
+      case "synth_s11_sweep": return toolSynthS11(input);
       default: return { error: `Unknown tool: ${name}` };
     }
   } catch (e) { return { error: e.message }; }
@@ -1356,21 +1358,88 @@ function mapAgentSegToLink(s, idx) {
 // Pick a plausible frequency hint from any agent tool input block (for Smith)
 function pickFreqFromInputs(inputsByName) {
   if (!inputsByName) return null;
-  const order = ["calculate_path_loss", "analyze_link_chain", "calculate_link_budget", "calculate_nf_cascade", "calculate_distortion"];
+  const order = ["calculate_path_loss", "analyze_link_chain", "calculate_link_budget", "calculate_nf_cascade", "calculate_distortion", "synth_s11_sweep"];
   for (const k of order) {
     const inp = inputsByName[k];
     if (!inp) continue;
     if (inp.frequency_mhz) return Number(inp.frequency_mhz);
     if (inp.freq_mhz) return Number(inp.freq_mhz);
     if (inp.f1_mhz) return Number(inp.f1_mhz);
+    if (inp.freq_min_mhz && inp.freq_max_mhz) return (Number(inp.freq_min_mhz) + Number(inp.freq_max_mhz)) / 2;
   }
   return null;
+}
+
+// Compute Γ (reflection coefficient) from load (R+jX) on line Z₀
+function reflectionFromLoad(R, X, Z0) {
+  const Zr = Number(R), Zi = Number(X) || 0, Z = Number(Z0) || 50;
+  const denom = (Zr + Z) * (Zr + Z) + Zi * Zi;
+  if (denom < 1e-12) return null;
+  return {
+    gR: (Zr * Zr - Z * Z + Zi * Zi) / denom,
+    gI: (2 * Zi * Z) / denom,
+  };
+}
+
+// Deterministic S11 sweep generator (shared by the agent tool AND the TDR auto-fill chip,
+// so the preset matches the data the agent just reasoned about).
+function synthesizeS11SweepText({ cable_id, line_impedance = 50, load_impedance, freq_min_mhz, freq_max_mhz, n_points = 15, note, bump_mhz, bump_depth_db = 10 }) {
+  const fMin = Number(freq_min_mhz), fMax = Number(freq_max_mhz);
+  if (!Number.isFinite(fMin) || !Number.isFinite(fMax) || fMax <= fMin) return null;
+  const N = Math.max(5, Math.min(60, Math.round(Number(n_points) || 15)));
+  const ratio = fMax / fMin;
+  const freqs = [];
+  if (ratio > 10) {
+    for (let k = 0; k < N; k++) freqs.push(fMin * Math.pow(ratio, k / (N - 1)));
+  } else {
+    for (let k = 0; k < N; k++) freqs.push(fMin + (fMax - fMin) * k / (N - 1));
+  }
+  const z0 = Number(line_impedance) || 50;
+  const bump_f = Number(bump_mhz) || ((fMin + fMax) / 2);
+  const bump_w = (fMax - fMin) * 0.12 + 1;
+  const hasCable = cable_id && CABLES[cable_id];
+  const baseDb = hasCable ? -33 : -30;
+  const rows = [];
+  for (const f of freqs) {
+    let s11_db, phase_deg;
+    if (Number.isFinite(Number(load_impedance))) {
+      const gamma = Math.abs((Number(load_impedance) - z0) / (Number(load_impedance) + z0));
+      s11_db = 20 * Math.log10(Math.max(1e-5, gamma));
+      phase_deg = -30 - ((f - fMin) / Math.max(1, fMax - fMin)) * 120;
+    } else {
+      // Cable-like base return loss with a gaussian mismatch bump
+      const bump = bump_depth_db * Math.exp(-Math.pow((f - bump_f) / bump_w, 2) / 2);
+      s11_db = baseDb + bump;
+      phase_deg = -45 - ((f - fMin) / Math.max(1, fMax - fMin)) * 140;
+    }
+    const fStr = f < 100 ? f.toFixed(1) : Math.round(f).toString();
+    rows.push(`${fStr} ${s11_db.toFixed(2)} ${phase_deg.toFixed(0)}`);
+  }
+  const header = [
+    `! ${note || (hasCable ? `Synthesized S11 sweep for ${CABLES[cable_id].name}` : `Synthesized S11 sweep ${fMin}-${fMax} MHz`)}`,
+    `! Agent-generated via synth_s11_sweep tool`,
+    `# MHz S DB R ${z0}`,
+  ];
+  return [...header, ...rows].join("\n");
+}
+
+function toolSynthS11(input) {
+  const s1p = synthesizeS11SweepText(input);
+  if (!s1p) return { error: "Invalid frequency range. Require freq_min_mhz < freq_max_mhz." };
+  return {
+    s1p_text: s1p,
+    n_points: s1p.split("\n").filter(l => !l.startsWith("!") && !l.startsWith("#")).length,
+    freq_min_mhz: input.freq_min_mhz,
+    freq_max_mhz: input.freq_max_mhz,
+    line_impedance: Number(input.line_impedance) || 50,
+    note: "User can click the 'TDR / S-Params' jump chip to plot this sweep.",
+  };
 }
 
 const SYSTEM_PROMPT = `You are a senior RF cable engineer with 15+ years of experience in both design and field troubleshooting. You have access to:
 - A ${CABLE_IDS.length}-cable production database (RG, LMR, Heliax, semi-rigid, video, phase-stable, Chinese SYV, Russian RK).
 - A ${CONNECTOR_IDS.length}-connector database (N, SMA, TNC, BNC, 7/16 DIN, 4.3-10, F, UHF, 2.92mm, 2.4mm, 1.85mm, 1.0mm, MCX, MMCX, SMB, SMP, RP-SMA).
-- 17 computational tools for lookup, calculation, validation, and system analysis.
+- 18 computational tools for lookup, calculation, validation, and system analysis.
 
 CORE PRINCIPLES:
 1. ALWAYS use tools for specific numbers. Never guess impedance, loss, VSWR, or dimensions from memory. Even if you recall a typical value, confirm with tools.
@@ -1389,6 +1458,8 @@ REASONING BEHAVIOR:
 - For receiver chain / NF analysis, use calculate_nf_cascade (Friis for NF + IP3 cascade).
 - For amplifier linearity (IP3, P1dB, IM3), use calculate_distortion.
 - For connector lookup / matching, use lookup_connector (by impedance, freq, power, or query).
+- For visualising return loss / S-parameter sweep of a cable or resistive mismatch, call synth_s11_sweep with freq_min/max (and optional cable_id, load_impedance) — the user can plot the result in the TDR viewer via the jump chip.
+- When the user asks about VSWR or impedance-matching for a specific load, use calculate_vswr with the numeric line_impedance, load_resistance, and load_reactance — the user can view it on the Smith chart via the jump chip.
 - For troubleshooting measured loss, always use diagnose_loss_anomaly with the measurement data.
 - For multi-cable comparisons, use compare_cables (one tool call) instead of many get_cable_details calls.
 - When cables are selected, also suggest_connectors if frequency is given.
@@ -2324,7 +2395,7 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign, tog
     <div style={S.viewInner}>
       <div style={{ ...S.viewIntro, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div style={{ flex: 1, minWidth: 200 }}>
-          <strong style={S.viewIntroStrong}>Ask mode.</strong> Senior RF engineer agent with 12 tools for lookup, calculation, and validation.
+          <strong style={S.viewIntroStrong}>Ask mode.</strong> Senior RF engineer agent with 18 tools for lookup, calculation, validation, and plot synthesis.
           Replies are grounded in the database — all numerical claims come from tool calls, not memory.
         </div>
         {messages.length > 0 && (
@@ -2448,11 +2519,14 @@ function ChatMessage({ message: m, messageIndex, allMessages, showTools, openInL
           const hasNFTool = !!msgToolInputs.calculate_nf_cascade;
           const hasIP3Tool = !!msgToolInputs.calculate_distortion;
           const hasPathTool = !!msgToolInputs.calculate_path_loss;
+          const hasSmithTool = !!msgToolInputs.calculate_vswr;
+          const hasTDRTool = !!msgToolInputs.synth_s11_sweep;
           const suggestLink = hasLinkTool || /\b(link\s+budget|chain|tx\s*→|cascade|multi[- ]?segment)\b/.test(lowerText);
-          const suggestSmith = /\b(impedance|smith\s+chart|vswr|matching\s+network|reflection)\b/.test(lowerText);
+          const suggestSmith = hasSmithTool || /\b(impedance|smith\s+chart|vswr|matching\s+network|reflection)\b/.test(lowerText);
           const suggestNF = hasNFTool || /\b(noise\s+figure|nf\s+cascade|friis|sensitivity\s+budget)\b/.test(lowerText);
           const suggestPath = hasPathTool || /\b(free[- ]?space|path\s+loss|fspl|fresnel|eirp)\b/.test(lowerText);
           const suggestIP3 = hasIP3Tool || /\b(ip3|oip3|iip3|p1db|intermod|distortion)\b/.test(lowerText);
+          const suggestTDR = hasTDRTool || /\b(s11|s-param|s\d+p|touchstone|return\s+loss|tdr)\b/.test(lowerText);
           return (
             <div key={i}>
               <div style={S.assistantText}>{block.text}{m.streaming && isLastTextBlock && <span className="streaming-cursor" style={{ display: "inline-block", width: 8, height: 14, background: "#fbbf24", marginLeft: 2, verticalAlign: "text-bottom", animation: "blink 1s steps(2) infinite" }}></span>}</div>
@@ -2481,19 +2555,32 @@ function ChatMessage({ message: m, messageIndex, allMessages, showTools, openInL
                   ))}
                 </div>
               )}
-              {!m.streaming && setTab && (suggestLink || suggestSmith || suggestNF || suggestPath || suggestIP3) && (() => {
+              {!m.streaming && setTab && (suggestLink || suggestSmith || suggestNF || suggestPath || suggestIP3 || suggestTDR) && (() => {
                 const nfData = msgToolInputs.calculate_nf_cascade;
                 const ip3Data = msgToolInputs.calculate_distortion;
                 const pathData = msgToolInputs.calculate_path_loss;
                 const linkData = msgToolInputs.analyze_link_chain || msgToolInputs.calculate_link_budget;
+                const vswrData = msgToolInputs.calculate_vswr;
                 const smithFreq = pickFreqFromInputs(msgToolInputs);
+                const smithData = {};
+                if (smithFreq) smithData.frequency_mhz = smithFreq;
+                if (vswrData) {
+                  if (vswrData.line_impedance != null) smithData.line_impedance = vswrData.line_impedance;
+                  if (vswrData.load_resistance != null) smithData.load_resistance = vswrData.load_resistance;
+                  if (vswrData.load_reactance != null) smithData.load_reactance = vswrData.load_reactance;
+                }
+                const hasSmithData = !!(smithFreq || vswrData);
+                const tdrSynthInput = msgToolInputs.synth_s11_sweep;
+                const tdrData = tdrSynthInput ? { s1p_text: synthesizeS11SweepText(tdrSynthInput) } : null;
+                const anyFill = !!(nfData || ip3Data || pathData || linkData || hasSmithData || tdrData?.s1p_text);
                 const dot = (on) => on ? <span style={{ color: "#fbbf24", marginLeft: 4 }}>•</span> : null;
                 return (
                   <div style={{ ...S.quickChipsRow, marginTop: 4 }}>
                     <div style={S.quickChipGroup}>
-                      <span style={{ ...S.quickChipName, color: "#a8a29e" }}>Jump to tool{(nfData || ip3Data || pathData || linkData || smithFreq) ? " (• = auto-fill ready)" : ""}:</span>
+                      <span style={{ ...S.quickChipName, color: "#a8a29e" }}>Jump to tool{anyFill ? " (• = auto-fill ready)" : ""}:</span>
                       {suggestLink && <button onClick={() => jumpToTool("link", linkData)} style={{ ...S.quickChip, color: "#fbbf24" }}>🔗 Link Budget{dot(!!linkData)}</button>}
-                      {suggestSmith && <button onClick={() => jumpToTool("smith", smithFreq ? { frequency_mhz: smithFreq } : {})} style={{ ...S.quickChip, color: "#c084fc", borderColor: "#7c3aed" }}>🎯 Smith Chart{dot(!!smithFreq)}</button>}
+                      {suggestSmith && <button onClick={() => jumpToTool("smith", smithData)} style={{ ...S.quickChip, color: "#c084fc", borderColor: "#7c3aed" }}>🎯 Smith Chart{dot(hasSmithData)}</button>}
+                      {suggestTDR && <button onClick={() => jumpToTool("tdr", tdrData)} style={{ ...S.quickChip, color: "#fbbf24", borderColor: "#d97706" }}>📊 TDR / S-Params{dot(!!tdrData?.s1p_text)}</button>}
                       {suggestNF && <button onClick={() => jumpToTool("nf", nfData)} style={{ ...S.quickChip, color: "#34d399", borderColor: "#10b981" }}>🔊 NF Cascade{dot(!!nfData)}</button>}
                       {suggestIP3 && <button onClick={() => jumpToTool("ip3", ip3Data)} style={{ ...S.quickChip, color: "#f97316", borderColor: "#c2410c" }}>⚡ IP3 / P1dB{dot(!!ip3Data)}</button>}
                       {suggestPath && <button onClick={() => jumpToTool("path", pathData)} style={{ ...S.quickChip, color: "#60a5fa", borderColor: "#2563eb" }}>📡 Path Loss{dot(!!pathData)}</button>}
@@ -3235,7 +3322,7 @@ function ToolsView({ toolPreset, clearToolPreset }) {
         ))}
       </div>
       {subTool === "smith" && <SmithChartTool preset={matchedPreset("smith")} onPresetApplied={clearToolPreset} />}
-      {subTool === "tdr" && <TDRTool />}
+      {subTool === "tdr" && <TDRTool preset={matchedPreset("tdr")} onPresetApplied={clearToolPreset} />}
       {subTool === "nf" && <NFCascadeTool preset={matchedPreset("nf")} onPresetApplied={clearToolPreset} />}
       {subTool === "ip3" && <DistortionTool preset={matchedPreset("ip3")} onPresetApplied={clearToolPreset} />}
       {subTool === "path" && <PathLossTool preset={matchedPreset("path")} onPresetApplied={clearToolPreset} />}
@@ -3634,8 +3721,17 @@ function SmithChartTool({ preset, onPresetApplied }) {
 
   useEffect(() => {
     if (!preset?.data) return;
-    const f = Number(preset.data.frequency_mhz || preset.data.freq_mhz);
+    const d = preset.data;
+    const f = Number(d.frequency_mhz || d.freq_mhz);
     if (Number.isFinite(f) && f > 0) setFreq(f);
+    // If calculate_vswr was invoked, drop the reflection pin on Γ(R + jX)
+    if (d.load_resistance != null) {
+      const g = reflectionFromLoad(d.load_resistance, d.load_reactance, d.line_impedance ?? Z0);
+      if (g && Number.isFinite(g.gR) && Number.isFinite(g.gI)) {
+        setGR(Math.max(-0.999, Math.min(0.999, g.gR)));
+        setGI(Math.max(-0.999, Math.min(0.999, g.gI)));
+      }
+    }
     onPresetApplied?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset?.ts]);
@@ -3876,9 +3972,17 @@ const SAMPLE_TOUCHSTONE = `! Sample S1P — LMR-400 type cable, 10m, with minor 
 6000 -29.8 115
 `;
 
-function TDRTool() {
+function TDRTool({ preset, onPresetApplied }) {
   const [input, setInput] = useState(SAMPLE_TOUCHSTONE);
   const [parsed, setParsed] = useState(() => { try { return parseTouchstone(SAMPLE_TOUCHSTONE); } catch { return null; } });
+
+  useEffect(() => {
+    if (!preset?.data?.s1p_text) return;
+    setInput(preset.data.s1p_text);
+    try { setParsed(parseTouchstone(preset.data.s1p_text)); } catch {}
+    onPresetApplied?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset?.ts]);
   const [error, setError] = useState(null);
 
   const doParse = () => {
