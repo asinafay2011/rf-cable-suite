@@ -1170,7 +1170,7 @@ export default function RFCableSuite() {
           </div>
           <div style={S.headerRight}>
             <nav style={S.nav}>
-              {[["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["wizard", "Wizard"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]].map(([k, label]) => (
+              {[["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["wizard", "Wizard"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]].map(([k, label]) => (
                 <button key={k} onClick={() => setTab(k)} style={{ ...S.navBtn, ...(tab === k ? S.navBtnActive : {}), ...(k === "compare" && comparedCables.length > 0 ? { borderColor: "#d97706", color: "#fbbf24" } : {}) }}>{label}</button>
               ))}
             </nav>
@@ -1237,6 +1237,7 @@ export default function RFCableSuite() {
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
           {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} />}
           {tab === "connectors" && <ConnectorView />}
+          {tab === "link" && <LinkView openInLibrary={openInLibrary} />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
           {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}
         </main>
@@ -2156,6 +2157,279 @@ function CompareView({ comparedCables, setComparedCables, openInLibrary }) {
 // ═══════════════════════════════════════════════════════════════
 // RECOMMENDATION WIZARD
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// MULTI-SEGMENT LINK BUDGET
+// ═══════════════════════════════════════════════════════════════
+function defaultSegment(type) {
+  const id = "s" + Math.random().toString(36).slice(2, 9);
+  if (type === "cable")     return { id, type, cableId: "lmr400", lengthM: 5 };
+  if (type === "connector") return { id, type, connectorId: "nType" };
+  if (type === "amp")       return { id, type, gain: 15 };
+  if (type === "atten")     return { id, type, loss: 3 };
+  if (type === "splitter")  return { id, type, nWay: 2 };
+  if (type === "custom")    return { id, type, label: "Custom component", loss: 1 };
+  return { id, type };
+}
+
+const SPLITTER_LOSS = { 2: 3.5, 3: 5.2, 4: 6.5, 6: 8.2, 8: 9.5, 16: 12.5 };
+const SEGMENT_TYPES = [
+  { v: "cable",     icon: "━", label: "Cable",     color: "#fbbf24" },
+  { v: "connector", icon: "◎", label: "Connector", color: "#38bdf8" },
+  { v: "amp",       icon: "▲", label: "Amplifier", color: "#34d399" },
+  { v: "atten",     icon: "▼", label: "Attenuator", color: "#f97316" },
+  { v: "splitter",  icon: "⌂", label: "Splitter",  color: "#c084fc" },
+  { v: "custom",    icon: "◆", label: "Custom",    color: "#a8a29e" },
+];
+
+function LinkView({ openInLibrary }) {
+  const [freq, setFreq] = useState(900);
+  const [segments, setSegments] = useState(() => {
+    try { const s = localStorage.getItem("rf-link-chain"); if (s) return JSON.parse(s); } catch {}
+    return [
+      { id: "tx", type: "tx", power: 30 },
+      { id: "c1", type: "cable", cableId: "lmr400", lengthM: 10 },
+      { id: "n1", type: "connector", connectorId: "nType" },
+      { id: "c2", type: "cable", cableId: "lmr400", lengthM: 5 },
+      { id: "n2", type: "connector", connectorId: "nType" },
+      { id: "rx", type: "rx", sensitivity: -85 },
+    ];
+  });
+  useEffect(() => { try { localStorage.setItem("rf-link-chain", JSON.stringify(segments)); } catch {} }, [segments]);
+
+  const stages = useMemo(() => {
+    const out = [];
+    let pwr = 0;
+    segments.forEach((seg, i) => {
+      let loss = 0, label = "", sub = "", warn = null;
+      if (seg.type === "tx") {
+        pwr = seg.power;
+        label = "TX"; sub = dbmToPower(pwr) + " transmit";
+      } else if (seg.type === "cable") {
+        const cable = CABLES[seg.cableId];
+        if (!cable) { warn = "Cable missing"; label = "?"; sub = ""; }
+        else {
+          if (freq > cable.fMax * 1000) warn = `Above fMax (${cable.fMax} GHz)`;
+          loss = interpAtten(cable.atten, freq) * seg.lengthM / 100;
+          label = cable.name; sub = `${seg.lengthM} m · ${loss.toFixed(2)} dB`;
+          pwr -= loss;
+        }
+      } else if (seg.type === "connector") {
+        const conn = CONNECTORS[seg.connectorId];
+        loss = conn?.typicalLoss ?? 0.15;
+        if (conn && freq > conn.fMax * 1000) warn = `Above ${conn.name} fMax (${conn.fMax} GHz)`;
+        label = conn ? conn.name : "Connector"; sub = `${loss.toFixed(2)} dB IL`;
+        pwr -= loss;
+      } else if (seg.type === "amp") {
+        loss = -(seg.gain || 0);
+        label = "Amplifier"; sub = `+${seg.gain || 0} dB gain`;
+        pwr -= loss;
+      } else if (seg.type === "atten") {
+        loss = seg.loss || 0;
+        label = "Attenuator"; sub = `${loss} dB pad`;
+        pwr -= loss;
+      } else if (seg.type === "splitter") {
+        const n = seg.nWay || 2;
+        loss = SPLITTER_LOSS[n] || (10 * Math.log10(n) + 0.5);
+        label = `${n}-way splitter`; sub = `÷${n} ports · ${loss.toFixed(1)} dB`;
+        pwr -= loss;
+      } else if (seg.type === "custom") {
+        loss = seg.loss || 0;
+        label = seg.label || "Custom"; sub = `${loss} dB`;
+        pwr -= loss;
+      } else if (seg.type === "rx") {
+        label = "RX"; sub = `sens ${seg.sensitivity} dBm`;
+      }
+      out.push({ ...seg, label, sub, loss, pwrOut: pwr, warn, idx: i });
+    });
+    return out;
+  }, [segments, freq]);
+
+  const txPower = stages[0]?.power ?? 0;
+  const rxPower = stages[stages.length - 1]?.pwrOut ?? 0;
+  const rxSens = stages[stages.length - 1]?.sensitivity ?? -85;
+  const totalLoss = stages.reduce((s, st) => st.type !== "tx" && st.type !== "rx" ? s + (st.loss || 0) : s, 0);
+  const margin = rxPower - rxSens;
+  const verdict = linkVerdict(margin);
+
+  const update = (idx, patch) => setSegments(prev => prev.map((s, i) => i === idx ? { ...s, ...patch } : s));
+  const insert = (atIdx, type) => setSegments(prev => { const a = [...prev]; a.splice(atIdx, 0, defaultSegment(type)); return a; });
+  const remove = (idx) => { if (segments[idx].type === "tx" || segments[idx].type === "rx") return; setSegments(prev => prev.filter((_, i) => i !== idx)); };
+  const reset = () => setSegments([
+    { id: "tx", type: "tx", power: 30 },
+    { id: "c1", type: "cable", cableId: "lmr400", lengthM: 10 },
+    { id: "rx", type: "rx", sensitivity: -85 },
+  ]);
+
+  const cableIdsByName = Object.entries(CABLES).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  const connIdsByName = Object.entries(CONNECTORS).sort((a, b) => a[1].name.localeCompare(b[1].name));
+
+  return (
+    <div style={S.viewInner}>
+      <div style={{ ...S.viewIntro, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 250 }}>
+          <strong style={S.viewIntroStrong}>Link Budget.</strong> Chain components (TX → cable → connector → amp/atten/splitter → RX). Edit each stage to see live running power + total loss + margin.
+        </div>
+        <button onClick={reset} style={{ background: "transparent", color: "#a8a29e", border: "1px solid #57534e", padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 1, textTransform: "uppercase" }}>↺ Reset</button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 14, alignItems: "center", marginBottom: 18, padding: 14, background: "rgba(15,10,5,0.4)", borderRadius: 4, border: "1px solid #2a1f15" }}>
+        <div>
+          <div style={{ fontSize: 10, letterSpacing: 1, color: "#a8a29e", textTransform: "uppercase", marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
+            <span>Link frequency</span>
+            <span style={{ color: "#fbbf24" }}>{freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}</span>
+          </div>
+          <input type="range" min={10} max={40000} step={10} value={freq} onChange={e => setFreq(Number(e.target.value))} style={{ width: "100%", accentColor: "#d97706" }} />
+        </div>
+        <div style={{ padding: "8px 12px", background: `${verdict.color}20`, border: `1px solid ${verdict.color}`, borderRadius: 3, minWidth: 160, textAlign: "center" }}>
+          <div style={{ fontSize: 10, color: verdict.color, fontWeight: 700, letterSpacing: 0.5 }}>{verdict.icon} {verdict.title}</div>
+          <div style={{ fontSize: 12, color: verdict.color, fontFamily: "JetBrains Mono, monospace", fontWeight: 700 }}>{margin > 0 ? "+" : ""}{margin.toFixed(1)} dB margin</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 4, marginBottom: 4, padding: "8px 10px", background: "rgba(15,10,5,0.3)", borderRadius: 3, fontSize: 9, color: "#78716c", textAlign: "center" }}>
+        <div>TX: <strong style={{ color: "#fbbf24", fontFamily: "JetBrains Mono, monospace" }}>{txPower.toFixed(0)} dBm</strong></div>
+        <div>Total loss: <strong style={{ color: "#ef4444", fontFamily: "JetBrains Mono, monospace" }}>{totalLoss.toFixed(2)} dB</strong></div>
+        <div>RX: <strong style={{ color: "#34d399", fontFamily: "JetBrains Mono, monospace" }}>{rxPower.toFixed(1)} dBm</strong> ({dbmToPower(rxPower)})</div>
+        <div>Sens: <strong style={{ color: "#a8a29e", fontFamily: "JetBrains Mono, monospace" }}>{rxSens} dBm</strong></div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "stretch", gap: 0, flexWrap: "nowrap", overflowX: "auto", padding: "12px 6px", marginBottom: 16, background: "rgba(15,10,5,0.35)", borderRadius: 4 }}>
+        {stages.map((st, i) => (
+          <React.Fragment key={st.id}>
+            {i > 0 && i < stages.length && (
+              <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", minWidth: 60, padding: "0 4px", position: "relative" }}>
+                <div style={{ fontSize: 9, color: st.loss > 0 ? "#ef4444" : st.loss < 0 ? "#34d399" : "#78716c", fontFamily: "JetBrains Mono, monospace", fontWeight: 700 }}>{st.loss > 0 ? `-${st.loss.toFixed(2)}` : st.loss < 0 ? `+${(-st.loss).toFixed(1)}` : "0"} dB</div>
+                <div style={{ width: "100%", height: 2, background: `linear-gradient(90deg, #fbbf24 0%, ${st.pwrOut > rxSens ? "#34d399" : "#ef4444"} 100%)`, margin: "4px 0" }} />
+                <div style={{ fontSize: 9, color: "#a8a29e", fontFamily: "JetBrains Mono, monospace" }}>{st.pwrOut.toFixed(1)} dBm</div>
+                <button onClick={() => insert(i, "cable")} style={{ position: "absolute", bottom: -6, left: "50%", transform: "translateX(-50%)", width: 16, height: 16, borderRadius: "50%", background: "#0a0705", border: "1px solid #57534e", color: "#a8a29e", fontSize: 10, lineHeight: "14px", cursor: "pointer", padding: 0 }} title="Insert cable here">+</button>
+              </div>
+            )}
+            <SegmentCard stage={st} onUpdate={(patch) => update(i, patch)} onRemove={() => remove(i)} onAdd={(type) => insert(i + 1, type)} isLast={i === stages.length - 1} isFirst={i === 0} cableOptions={cableIdsByName} connOptions={connIdsByName} openInLibrary={openInLibrary} />
+          </React.Fragment>
+        ))}
+      </div>
+
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: "JetBrains Mono, monospace" }}>
+          <thead>
+            <tr>
+              <th style={{ padding: "8px 10px", textAlign: "left", color: "#a8a29e", borderBottom: "1px solid #2a1f15", fontSize: 10, letterSpacing: 1 }}>#</th>
+              <th style={{ padding: "8px 10px", textAlign: "left", color: "#a8a29e", borderBottom: "1px solid #2a1f15", fontSize: 10, letterSpacing: 1 }}>COMPONENT</th>
+              <th style={{ padding: "8px 10px", textAlign: "left", color: "#a8a29e", borderBottom: "1px solid #2a1f15", fontSize: 10, letterSpacing: 1 }}>DETAIL</th>
+              <th style={{ padding: "8px 10px", textAlign: "right", color: "#a8a29e", borderBottom: "1px solid #2a1f15", fontSize: 10, letterSpacing: 1 }}>LOSS / GAIN</th>
+              <th style={{ padding: "8px 10px", textAlign: "right", color: "#a8a29e", borderBottom: "1px solid #2a1f15", fontSize: 10, letterSpacing: 1 }}>POWER OUT</th>
+              <th style={{ padding: "8px 10px", textAlign: "left", color: "#a8a29e", borderBottom: "1px solid #2a1f15", fontSize: 10, letterSpacing: 1 }}>NOTE</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stages.map((st, i) => (
+              <tr key={st.id} style={{ background: i % 2 === 0 ? "rgba(15,10,5,0.25)" : "transparent" }}>
+                <td style={{ padding: "6px 10px", color: "#78716c" }}>{i + 1}</td>
+                <td style={{ padding: "6px 10px", color: "#e7e5e4", fontWeight: 600 }}>{st.label}</td>
+                <td style={{ padding: "6px 10px", color: "#a8a29e" }}>{st.sub}</td>
+                <td style={{ padding: "6px 10px", textAlign: "right", color: st.loss > 0 ? "#ef4444" : st.loss < 0 ? "#34d399" : "#78716c", fontWeight: 600 }}>{st.type === "tx" || st.type === "rx" ? "—" : `${st.loss > 0 ? "-" : st.loss < 0 ? "+" : ""}${Math.abs(st.loss).toFixed(2)} dB`}</td>
+                <td style={{ padding: "6px 10px", textAlign: "right", color: st.pwrOut >= rxSens || st.type === "tx" ? "#fbbf24" : "#ef4444", fontWeight: 600 }}>{st.type === "tx" ? `${st.power} dBm` : `${st.pwrOut.toFixed(2)} dBm`}</td>
+                <td style={{ padding: "6px 10px", color: st.warn ? "#f97316" : "#78716c", fontSize: 10 }}>{st.warn || ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ fontSize: 10, color: "#78716c", marginTop: 12, padding: "10px 12px", background: "rgba(15,10,5,0.3)", borderRadius: 3, lineHeight: 1.6 }}>
+        💡 <strong style={{ color: "#a8a29e" }}>Tip:</strong> Click <strong style={{ color: "#fbbf24" }}>+</strong> between segments to insert a cable. Use the type dropdown inside each card to change component (cable ↔ connector ↔ amp ↔ splitter). Frequency slider affects all cables + connectors in the chain. Splitter loss includes insertion loss on top of ideal −10·log(N).
+      </div>
+    </div>
+  );
+}
+
+function SegmentCard({ stage, onUpdate, onRemove, onAdd, isFirst, isLast, cableOptions, connOptions, openInLibrary }) {
+  const typeInfo = SEGMENT_TYPES.find(t => t.v === stage.type) || { color: "#a8a29e", icon: "●", label: stage.type };
+  const isEndpoint = stage.type === "tx" || stage.type === "rx";
+  const accent = stage.type === "tx" ? "#fbbf24" : stage.type === "rx" ? "#34d399" : stage.warn ? "#f97316" : typeInfo.color;
+
+  return (
+    <div style={{ minWidth: 170, maxWidth: 210, padding: "10px 10px 8px", background: "rgba(15,10,5,0.6)", border: `1px solid ${accent}77`, borderRadius: 4, display: "flex", flexDirection: "column", gap: 5, position: "relative", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 9, letterSpacing: 1, color: accent, fontWeight: 700, textTransform: "uppercase" }}>{typeInfo.icon} {stage.type === "tx" ? "TX" : stage.type === "rx" ? "RX" : typeInfo.label}</div>
+        {!isEndpoint && <button onClick={onRemove} style={{ background: "none", border: "none", color: "#78716c", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: 1 }}>✕</button>}
+      </div>
+
+      <div style={{ fontSize: 11.5, color: "#fbbf24", fontWeight: 700, fontFamily: "JetBrains Mono, monospace", minHeight: 15 }}>{stage.label}</div>
+
+      {stage.type === "tx" && (
+        <div style={{ fontSize: 10 }}>
+          <input type="number" value={stage.power} onChange={e => onUpdate({ power: Number(e.target.value) })} style={{ ...segInputStyle }} />
+          <span style={{ color: "#78716c", marginLeft: 4 }}>dBm · {dbmToPower(stage.power)}</span>
+        </div>
+      )}
+      {stage.type === "rx" && (
+        <div style={{ fontSize: 10 }}>
+          <input type="number" value={stage.sensitivity} onChange={e => onUpdate({ sensitivity: Number(e.target.value) })} style={{ ...segInputStyle }} />
+          <span style={{ color: "#78716c", marginLeft: 4 }}>dBm sens</span>
+        </div>
+      )}
+      {stage.type === "cable" && (
+        <>
+          <select value={stage.cableId} onChange={e => onUpdate({ cableId: e.target.value })} style={segSelectStyle}>
+            {cableOptions.map(([id, c]) => <option key={id} value={id}>{c.name}</option>)}
+          </select>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10 }}>
+            <input type="number" min={0.1} step={0.1} value={stage.lengthM} onChange={e => onUpdate({ lengthM: Number(e.target.value) })} style={{ ...segInputStyle, width: 55 }} />
+            <span style={{ color: "#78716c" }}>m</span>
+            <button onClick={() => openInLibrary && openInLibrary(stage.cableId)} style={{ marginLeft: "auto", background: "none", border: "none", color: "#60a5fa", cursor: "pointer", fontSize: 9, textDecoration: "underline", padding: 0 }}>view</button>
+          </div>
+        </>
+      )}
+      {stage.type === "connector" && (
+        <select value={stage.connectorId} onChange={e => onUpdate({ connectorId: e.target.value })} style={segSelectStyle}>
+          {connOptions.map(([id, c]) => <option key={id} value={id}>{c.name}</option>)}
+        </select>
+      )}
+      {stage.type === "amp" && (
+        <div style={{ fontSize: 10 }}>
+          <input type="number" value={stage.gain} onChange={e => onUpdate({ gain: Number(e.target.value) })} style={segInputStyle} />
+          <span style={{ color: "#78716c", marginLeft: 4 }}>dB gain</span>
+        </div>
+      )}
+      {stage.type === "atten" && (
+        <div style={{ fontSize: 10 }}>
+          <input type="number" value={stage.loss} min={0} step={0.5} onChange={e => onUpdate({ loss: Number(e.target.value) })} style={segInputStyle} />
+          <span style={{ color: "#78716c", marginLeft: 4 }}>dB pad</span>
+        </div>
+      )}
+      {stage.type === "splitter" && (
+        <select value={stage.nWay} onChange={e => onUpdate({ nWay: Number(e.target.value) })} style={segSelectStyle}>
+          {[2, 3, 4, 6, 8, 16].map(n => <option key={n} value={n}>{n}-way ({SPLITTER_LOSS[n]} dB)</option>)}
+        </select>
+      )}
+      {stage.type === "custom" && (
+        <>
+          <input type="text" value={stage.label} onChange={e => onUpdate({ label: e.target.value })} placeholder="Component name" style={{ ...segInputStyle, width: "100%" }} />
+          <div style={{ fontSize: 10 }}>
+            <input type="number" value={stage.loss} step={0.1} onChange={e => onUpdate({ loss: Number(e.target.value) })} style={segInputStyle} />
+            <span style={{ color: "#78716c", marginLeft: 4 }}>dB</span>
+          </div>
+        </>
+      )}
+
+      <div style={{ fontSize: 9, color: "#a8a29e", fontFamily: "JetBrains Mono, monospace", marginTop: 2 }}>{stage.sub}</div>
+      {stage.warn && <div style={{ fontSize: 9, color: "#f97316", marginTop: 2 }}>⚠ {stage.warn}</div>}
+
+      {!isLast && (
+        <div style={{ position: "absolute", bottom: -16, right: -2, display: "flex", gap: 2 }}>
+          {SEGMENT_TYPES.slice(0, 5).map(t => (
+            <button key={t.v} onClick={() => onAdd(t.v)} title={`Insert ${t.label}`} style={{ width: 18, height: 18, borderRadius: 2, background: "#0a0705", border: `1px solid ${t.color}55`, color: t.color, fontSize: 9, cursor: "pointer", padding: 0, lineHeight: "16px" }}>{t.icon}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const segInputStyle = { background: "rgba(15,10,5,0.8)", border: "1px solid #57534e", color: "#fbbf24", padding: "3px 6px", fontSize: 11, fontFamily: "JetBrains Mono, monospace", borderRadius: 2, width: 60 };
+const segSelectStyle = { background: "rgba(15,10,5,0.8)", border: "1px solid #57534e", color: "#fbbf24", padding: "3px 6px", fontSize: 10.5, fontFamily: "inherit", borderRadius: 2, width: "100%", cursor: "pointer" };
+
 function ConnectorView() {
   const { units } = useContext(SettingsContext);
   const [search, setSearch] = useState("");
