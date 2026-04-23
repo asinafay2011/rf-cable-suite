@@ -1322,6 +1322,51 @@ function executeTool(name, input) {
   } catch (e) { return { error: e.message }; }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// Agent tool-input → sub-tool state mappers (for "Jump to tool" auto-fill)
+// ═══════════════════════════════════════════════════════════════
+const _pid = () => `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+function mapAgentStageToNF(s, idx) {
+  return {
+    id: `${_pid()}-${idx}`,
+    name: s.name || `Stage ${idx + 1}`,
+    gain: Number(s.gain_db) || 0,
+    nf: Number(s.nf_db) || 0,
+    oip3: Number(s.oip3_dbm ?? 30),
+  };
+}
+
+function mapAgentSegToLink(s, idx) {
+  const out = { id: `${_pid()}-${idx}`, type: s.type };
+  switch (s.type) {
+    case "tx": out.power = Number(s.power_dbm ?? 30); break;
+    case "rx": out.sensitivity = Number(s.sensitivity_dbm ?? -85); break;
+    case "cable": out.cableId = s.cable_id; out.lengthM = Number(s.length_m) || 1; break;
+    case "connector": out.connectorId = s.connector_id; break;
+    case "amp": out.gain = Number(s.gain_db) || 0; break;
+    case "atten": out.loss = Number(s.loss_db) || 0; break;
+    case "splitter": out.nWay = Number(s.n_way) || 2; break;
+    case "custom": out.loss = Number(s.loss_db) || 0; out.label = s.name || "Custom"; break;
+    default: break;
+  }
+  return out;
+}
+
+// Pick a plausible frequency hint from any agent tool input block (for Smith)
+function pickFreqFromInputs(inputsByName) {
+  if (!inputsByName) return null;
+  const order = ["calculate_path_loss", "analyze_link_chain", "calculate_link_budget", "calculate_nf_cascade", "calculate_distortion"];
+  for (const k of order) {
+    const inp = inputsByName[k];
+    if (!inp) continue;
+    if (inp.frequency_mhz) return Number(inp.frequency_mhz);
+    if (inp.freq_mhz) return Number(inp.freq_mhz);
+    if (inp.f1_mhz) return Number(inp.f1_mhz);
+  }
+  return null;
+}
+
 const SYSTEM_PROMPT = `You are a senior RF cable engineer with 15+ years of experience in both design and field troubleshooting. You have access to:
 - A ${CABLE_IDS.length}-cable production database (RG, LMR, Heliax, semi-rigid, video, phase-stable, Chinese SYV, Russian RK).
 - A ${CONNECTOR_IDS.length}-connector database (N, SMA, TNC, BNC, 7/16 DIN, 4.3-10, F, UHF, 2.92mm, 2.4mm, 1.85mm, 1.0mm, MCX, MMCX, SMB, SMP, RP-SMA).
@@ -1385,6 +1430,9 @@ export default function RFCableSuite() {
 
   const [printing, setPrinting] = useState(null);
   const [printSetup, setPrintSetup] = useState(null);
+  // { target: "nf"|"ip3"|"path"|"smith"|"link", data: {...}, ts: number }
+  const [toolPreset, setToolPreset] = useState(null);
+  const clearToolPreset = () => setToolPreset(null);
   useEffect(() => {
     if (!printing) return;
     const prevTitle = document.title;
@@ -1533,12 +1581,12 @@ export default function RFCableSuite() {
         )}
 
         <main style={S.main}>
-          {tab === "ask" && <AskView queuedPrompt={queuedPrompt} clearQueued={() => setQueuedPrompt(null)} openInLibrary={openInLibrary} loadIntoDesign={loadCableIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} />}
+          {tab === "ask" && <AskView queuedPrompt={queuedPrompt} clearQueued={() => setQueuedPrompt(null)} openInLibrary={openInLibrary} loadIntoDesign={loadCableIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} setToolPreset={setToolPreset} />}
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
           {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} onPrint={(id) => setPrintSetup({ type: "cable", id })} />}
           {tab === "connectors" && <ConnectorView />}
-          {tab === "link" && <LinkView openInLibrary={openInLibrary} onPrint={() => setPrintSetup({ type: "link" })} />}
-          {tab === "tools" && <ToolsView />}
+          {tab === "link" && <LinkView openInLibrary={openInLibrary} onPrint={() => setPrintSetup({ type: "link" })} toolPreset={toolPreset} clearToolPreset={clearToolPreset} />}
+          {tab === "tools" && <ToolsView toolPreset={toolPreset} clearToolPreset={clearToolPreset} />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
           {tab === "cheat" && <CheatSheetView />}
           {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}
@@ -2093,7 +2141,7 @@ const CONSTRUCTION_PROMPT = `Estimate the specs of this cable from the visible c
 
 Use the database tools where helpful. Keep under 200 words.`;
 
-function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign, toggleCompare, comparedCables, setTab }) {
+function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign, toggleCompare, comparedCables, setTab, setToolPreset }) {
   const { showTools, ttsEnabled, model } = useContext(SettingsContext);
   const [messages, setMessages] = useState(() => {
     try {
@@ -2293,7 +2341,7 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign, tog
             </div>
           </div>
         )}
-        {messages.map((m, i) => <ChatMessage key={i} message={m} showTools={showTools} openInLibrary={openInLibrary} loadIntoDesign={loadIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} />)}
+        {messages.map((m, i) => <ChatMessage key={i} message={m} showTools={showTools} openInLibrary={openInLibrary} loadIntoDesign={loadIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} setToolPreset={setToolPreset} />)}
         {loading && (
           <div style={S.loadingMsg}>
             <span style={{ fontSize: 11, color: "#a89d8e", letterSpacing: "0.1em" }}>Thinking</span>
@@ -2331,7 +2379,20 @@ function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign, tog
   );
 }
 
-function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign, toggleCompare, comparedCables, setTab }) {
+function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign, toggleCompare, comparedCables, setTab, setToolPreset }) {
+  // Map tool_name → latest input block from this specific message (for auto-fill chips)
+  const msgToolInputs = (() => {
+    if (!Array.isArray(m?.content)) return {};
+    const map = {};
+    for (const b of m.content) {
+      if (b && b.type === "tool_use" && b.name) map[b.name] = b.input || {};
+    }
+    return map;
+  })();
+  const jumpToTool = (target, data) => {
+    if (setToolPreset) setToolPreset({ target, data: data || {}, ts: Date.now() });
+    if (setTab) setTab(target === "link" ? "link" : "tools");
+  };
   if (m.role === "user") {
     if (typeof m.content === "string") return <div className="msg-anim" style={S.userMsg}><div style={S.userBubble}>{m.content}</div></div>;
     if (Array.isArray(m.content)) {
@@ -2361,11 +2422,15 @@ function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign, tog
           const uniqueConn = [...new Set(mentionedConn)];
           const isLastTextBlock = i === m.content.length - 1 || !m.content.slice(i + 1).some(b => b.type === "text");
           const lowerText = block.text.toLowerCase();
-          const suggestLink = /\b(link\s+budget|chain|tx\s*→|cascade|multi[- ]?segment)\b/.test(lowerText);
+          const hasLinkTool = !!(msgToolInputs.analyze_link_chain || msgToolInputs.calculate_link_budget);
+          const hasNFTool = !!msgToolInputs.calculate_nf_cascade;
+          const hasIP3Tool = !!msgToolInputs.calculate_distortion;
+          const hasPathTool = !!msgToolInputs.calculate_path_loss;
+          const suggestLink = hasLinkTool || /\b(link\s+budget|chain|tx\s*→|cascade|multi[- ]?segment)\b/.test(lowerText);
           const suggestSmith = /\b(impedance|smith\s+chart|vswr|matching\s+network|reflection)\b/.test(lowerText);
-          const suggestNF = /\b(noise\s+figure|nf\s+cascade|friis|sensitivity\s+budget)\b/.test(lowerText);
-          const suggestPath = /\b(free[- ]?space|path\s+loss|fspl|fresnel|eirp)\b/.test(lowerText);
-          const suggestIP3 = /\b(ip3|oip3|iip3|p1db|intermod|distortion)\b/.test(lowerText);
+          const suggestNF = hasNFTool || /\b(noise\s+figure|nf\s+cascade|friis|sensitivity\s+budget)\b/.test(lowerText);
+          const suggestPath = hasPathTool || /\b(free[- ]?space|path\s+loss|fspl|fresnel|eirp)\b/.test(lowerText);
+          const suggestIP3 = hasIP3Tool || /\b(ip3|oip3|iip3|p1db|intermod|distortion)\b/.test(lowerText);
           return (
             <div key={i}>
               <div style={S.assistantText}>{block.text}{m.streaming && isLastTextBlock && <span className="streaming-cursor" style={{ display: "inline-block", width: 8, height: 14, background: "#fbbf24", marginLeft: 2, verticalAlign: "text-bottom", animation: "blink 1s steps(2) infinite" }}></span>}</div>
@@ -2394,16 +2459,24 @@ function ChatMessage({ message: m, showTools, openInLibrary, loadIntoDesign, tog
                   ))}
                 </div>
               )}
-              {!m.streaming && setTab && (suggestLink || suggestSmith || suggestNF || suggestPath || suggestIP3) && (
-                <div style={{ ...S.quickChipsRow, marginTop: 4 }}>
-                  <span style={{ ...S.quickChipName, color: "#a8a29e" }}>Jump to tool:</span>
-                  {suggestLink && <button onClick={() => setTab("link")} style={{ ...S.quickChip, color: "#fbbf24" }}>🔗 Link Budget</button>}
-                  {suggestSmith && <button onClick={() => setTab("tools")} style={{ ...S.quickChip, color: "#c084fc", borderColor: "#7c3aed" }}>🎯 Smith Chart</button>}
-                  {suggestNF && <button onClick={() => setTab("tools")} style={{ ...S.quickChip, color: "#34d399", borderColor: "#10b981" }}>🔊 NF Cascade</button>}
-                  {suggestIP3 && <button onClick={() => setTab("tools")} style={{ ...S.quickChip, color: "#f97316", borderColor: "#c2410c" }}>⚡ IP3 / P1dB</button>}
-                  {suggestPath && <button onClick={() => setTab("tools")} style={{ ...S.quickChip, color: "#60a5fa", borderColor: "#2563eb" }}>📡 Path Loss</button>}
-                </div>
-              )}
+              {!m.streaming && setTab && (suggestLink || suggestSmith || suggestNF || suggestPath || suggestIP3) && (() => {
+                const nfData = msgToolInputs.calculate_nf_cascade;
+                const ip3Data = msgToolInputs.calculate_distortion;
+                const pathData = msgToolInputs.calculate_path_loss;
+                const linkData = msgToolInputs.analyze_link_chain || msgToolInputs.calculate_link_budget;
+                const smithFreq = pickFreqFromInputs(msgToolInputs);
+                const dot = (on) => on ? <span style={{ color: "#fbbf24", marginLeft: 4 }}>•</span> : null;
+                return (
+                  <div style={{ ...S.quickChipsRow, marginTop: 4 }}>
+                    <span style={{ ...S.quickChipName, color: "#a8a29e" }}>Jump to tool{(nfData || ip3Data || pathData || linkData || smithFreq) ? " (• = auto-fill ready)" : ""}:</span>
+                    {suggestLink && <button onClick={() => jumpToTool("link", linkData)} style={{ ...S.quickChip, color: "#fbbf24" }}>🔗 Link Budget{dot(!!linkData)}</button>}
+                    {suggestSmith && <button onClick={() => jumpToTool("smith", smithFreq ? { frequency_mhz: smithFreq } : {})} style={{ ...S.quickChip, color: "#c084fc", borderColor: "#7c3aed" }}>🎯 Smith Chart{dot(!!smithFreq)}</button>}
+                    {suggestNF && <button onClick={() => jumpToTool("nf", nfData)} style={{ ...S.quickChip, color: "#34d399", borderColor: "#10b981" }}>🔊 NF Cascade{dot(!!nfData)}</button>}
+                    {suggestIP3 && <button onClick={() => jumpToTool("ip3", ip3Data)} style={{ ...S.quickChip, color: "#f97316", borderColor: "#c2410c" }}>⚡ IP3 / P1dB{dot(!!ip3Data)}</button>}
+                    {suggestPath && <button onClick={() => jumpToTool("path", pathData)} style={{ ...S.quickChip, color: "#60a5fa", borderColor: "#2563eb" }}>📡 Path Loss{dot(!!pathData)}</button>}
+                  </div>
+                );
+              })()}
             </div>
           );
         }
@@ -3118,8 +3191,15 @@ function CheatSheetView() {
 // ═══════════════════════════════════════════════════════════════
 // RF TOOLS (Smith Chart + TDR Viewer)
 // ═══════════════════════════════════════════════════════════════
-function ToolsView() {
+function ToolsView({ toolPreset, clearToolPreset }) {
   const [subTool, setSubTool] = useState("smith");
+  useEffect(() => {
+    if (!toolPreset) return;
+    if (["smith", "tdr", "nf", "ip3", "path"].includes(toolPreset.target)) {
+      setSubTool(toolPreset.target);
+    }
+  }, [toolPreset?.ts, toolPreset?.target]);
+  const matchedPreset = (key) => (toolPreset && toolPreset.target === key) ? toolPreset : null;
   return (
     <div style={S.viewInner}>
       <div style={S.viewIntro}>
@@ -3130,16 +3210,16 @@ function ToolsView() {
           <button key={k} onClick={() => setSubTool(k)} style={{ padding: "7px 14px", background: subTool === k ? "#d97706" : "rgba(15,10,5,0.4)", color: subTool === k ? "#0a0705" : "#a8a29e", border: `1px solid ${subTool === k ? "#d97706" : "#2a1f15"}`, borderRadius: 3, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.3 }}>{label}</button>
         ))}
       </div>
-      {subTool === "smith" && <SmithChartTool />}
+      {subTool === "smith" && <SmithChartTool preset={matchedPreset("smith")} onPresetApplied={clearToolPreset} />}
       {subTool === "tdr" && <TDRTool />}
-      {subTool === "nf" && <NFCascadeTool />}
-      {subTool === "ip3" && <DistortionTool />}
-      {subTool === "path" && <PathLossTool />}
+      {subTool === "nf" && <NFCascadeTool preset={matchedPreset("nf")} onPresetApplied={clearToolPreset} />}
+      {subTool === "ip3" && <DistortionTool preset={matchedPreset("ip3")} onPresetApplied={clearToolPreset} />}
+      {subTool === "path" && <PathLossTool preset={matchedPreset("path")} onPresetApplied={clearToolPreset} />}
     </div>
   );
 }
 
-function NFCascadeTool() {
+function NFCascadeTool({ preset, onPresetApplied }) {
   const [stages, setStages] = useState(() => {
     try { const s = localStorage.getItem("rf-nf-stages"); if (s) return JSON.parse(s); } catch {}
     return [
@@ -3150,6 +3230,12 @@ function NFCascadeTool() {
     ];
   });
   useEffect(() => { try { localStorage.setItem("rf-nf-stages", JSON.stringify(stages)); } catch {} }, [stages]);
+  useEffect(() => {
+    if (!preset?.data?.stages || !Array.isArray(preset.data.stages) || preset.data.stages.length === 0) return;
+    setStages(preset.data.stages.map((s, i) => mapAgentStageToNF(s, i)));
+    onPresetApplied?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset?.ts]);
 
   const result = useMemo(() => {
     let F_total = 1, G_cum = 1, G_cum_dB = 0;
@@ -3258,13 +3344,26 @@ function NFCascadeTool() {
   );
 }
 
-function DistortionTool() {
+function DistortionTool({ preset, onPresetApplied }) {
   const [pin, setPin] = useState(-20);     // dBm input
   const [gain, setGain] = useState(15);
   const [oip3, setOip3] = useState(30);
   const [p1dbOut, setP1dbOut] = useState(20);
   const [f1, setF1] = useState(1000);
   const [f2, setF2] = useState(1010);
+
+  useEffect(() => {
+    if (!preset?.data) return;
+    const d = preset.data;
+    if (d.pin_per_tone_dbm != null) setPin(Number(d.pin_per_tone_dbm));
+    if (d.gain_db != null) setGain(Number(d.gain_db));
+    if (d.oip3_dbm != null) setOip3(Number(d.oip3_dbm));
+    if (d.p1db_out_dbm != null) setP1dbOut(Number(d.p1db_out_dbm));
+    if (d.f1_mhz != null) setF1(Number(d.f1_mhz));
+    if (d.f2_mhz != null) setF2(Number(d.f2_mhz));
+    onPresetApplied?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset?.ts]);
 
   const pout = pin + gain;
   const iip3 = oip3 - gain;
@@ -3391,7 +3490,7 @@ function CalcField({ label, value, set, step = 1 }) {
   );
 }
 
-function PathLossTool() {
+function PathLossTool({ preset, onPresetApplied }) {
   const [freqMHz, setFreqMHz] = useState(2400);
   const [distKm, setDistKm] = useState(1);
   const [txPower, setTxPower] = useState(30);
@@ -3400,6 +3499,21 @@ function PathLossTool() {
   const [rxSens, setRxSens] = useState(-85);
   const [cableLossTx, setCableLossTx] = useState(3);
   const [cableLossRx, setCableLossRx] = useState(0);
+
+  useEffect(() => {
+    if (!preset?.data) return;
+    const d = preset.data;
+    if (d.frequency_mhz != null) setFreqMHz(Number(d.frequency_mhz));
+    if (d.distance_km != null) setDistKm(Number(d.distance_km));
+    if (d.tx_power_dbm != null) setTxPower(Number(d.tx_power_dbm));
+    if (d.tx_antenna_gain_dbi != null) setTxGain(Number(d.tx_antenna_gain_dbi));
+    if (d.rx_antenna_gain_dbi != null) setRxGain(Number(d.rx_antenna_gain_dbi));
+    if (d.rx_sensitivity_dbm != null) setRxSens(Number(d.rx_sensitivity_dbm));
+    if (d.tx_cable_loss_db != null) setCableLossTx(Number(d.tx_cable_loss_db));
+    if (d.rx_cable_loss_db != null) setCableLossRx(Number(d.rx_cable_loss_db));
+    onPresetApplied?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset?.ts]);
 
   // FSPL (Friis): 32.45 + 20log(f_MHz) + 20log(d_km)
   const fspl = 32.45 + 20 * Math.log10(freqMHz) + 20 * Math.log10(distKm);
@@ -3486,13 +3600,21 @@ function PathLossTool() {
 
 const calcInputStyle = { background: "rgba(15,10,5,0.8)", border: "1px solid #57534e", color: "#fbbf24", padding: "3px 6px", fontSize: 10.5, fontFamily: "JetBrains Mono, monospace", borderRadius: 2, width: "100%" };
 
-function SmithChartTool() {
+function SmithChartTool({ preset, onPresetApplied }) {
   const [gR, setGR] = useState(0.3);
   const [gI, setGI] = useState(0.2);
   const [freq, setFreq] = useState(1000);
   const [dragging, setDragging] = useState(false);
   const svgRef = useRef(null);
   const Z0 = 50;
+
+  useEffect(() => {
+    if (!preset?.data) return;
+    const f = Number(preset.data.frequency_mhz || preset.data.freq_mhz);
+    if (Number.isFinite(f) && f > 0) setFreq(f);
+    onPresetApplied?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset?.ts]);
 
   // Z from Γ
   const num = { r: 1 + gR, i: gI };
@@ -3971,7 +4093,7 @@ const SEGMENT_TYPES = [
   { v: "custom",    icon: "◆", label: "Custom",    color: "#a8a29e" },
 ];
 
-function LinkView({ openInLibrary, onPrint }) {
+function LinkView({ openInLibrary, onPrint, toolPreset, clearToolPreset }) {
   const [freq, setFreq] = useState(() => {
     try { const s = localStorage.getItem("rf-link-freq"); if (s) return Number(s) || 900; } catch {}
     return 900;
@@ -3998,6 +4120,28 @@ function LinkView({ openInLibrary, onPrint }) {
     ];
   });
   useEffect(() => { try { localStorage.setItem("rf-link-chain", JSON.stringify(segments)); } catch {} }, [segments]);
+
+  // Auto-fill from agent's analyze_link_chain / calculate_link_budget tool input when user clicks the chip
+  useEffect(() => {
+    if (!toolPreset || toolPreset.target !== "link" || !toolPreset.data) return;
+    const d = toolPreset.data;
+    if (d.frequency_mhz) setFreq(Number(d.frequency_mhz));
+    // analyze_link_chain shape: { frequency_mhz, stages: [...] }
+    if (Array.isArray(d.stages) && d.stages.length >= 2) {
+      setSegments(d.stages.map((s, i) => mapAgentSegToLink(s, i)));
+    } else if (d.cable_id_or_loss_db_100m && d.cable_length_m) {
+      // calculate_link_budget shape — single cable hop. Synthesize a simple chain.
+      const cableId = (CABLES[d.cable_id_or_loss_db_100m] ? d.cable_id_or_loss_db_100m : "lmr400");
+      const nConn = Number(d.n_connectors) || 2;
+      const synth = [{ id: `${_pid()}-tx`, type: "tx", power: Number(d.tx_power_dbm) || 30 }];
+      for (let k = 0; k < nConn; k++) synth.push({ id: `${_pid()}-n${k}`, type: "connector", connectorId: "nType" });
+      synth.splice(2, 0, { id: `${_pid()}-c`, type: "cable", cableId, lengthM: Number(d.cable_length_m) || 10 });
+      synth.push({ id: `${_pid()}-rx`, type: "rx", sensitivity: Number(d.rx_sensitivity_dbm) || -85 });
+      setSegments(synth);
+    }
+    clearToolPreset?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toolPreset?.ts]);
 
   const [shareState, setShareState] = useState(null); // "copied" | "error" | null
   const [showBOM, setShowBOM] = useState(false);
