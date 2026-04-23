@@ -1291,6 +1291,16 @@ export default function RFCableSuite() {
   });
   useEffect(() => { try { localStorage.setItem("rf-compared", JSON.stringify(comparedCables)); } catch {} }, [comparedCables]);
   const toggleCompare = (id) => setComparedCables(prev => prev.includes(id) ? prev.filter(x => x !== id) : prev.length < 4 ? [...prev, id] : prev);
+
+  const [printing, setPrinting] = useState(null);
+  useEffect(() => {
+    if (!printing) return;
+    document.body.setAttribute("data-printing", "1");
+    const done = () => { setPrinting(null); document.body.removeAttribute("data-printing"); };
+    window.addEventListener("afterprint", done);
+    const t = setTimeout(() => window.print(), 120);
+    return () => { clearTimeout(t); window.removeEventListener("afterprint", done); document.body.removeAttribute("data-printing"); };
+  }, [printing]);
   const [ttsEnabled, setTtsEnabled] = useState(() => {
     try { return localStorage.getItem("rf-tts") === "1"; } catch { return false; }
   });
@@ -1319,6 +1329,24 @@ export default function RFCableSuite() {
           @keyframes slideIn { from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:translateY(0)} }
           @keyframes slideDown { from{opacity:0; transform:translateY(-10px); max-height:0} to{opacity:1; transform:translateY(0); max-height:200px} }
           @keyframes blink { 0%,50%{opacity:1} 51%,100%{opacity:0} }
+          .print-only { display: none; }
+          @media print {
+            @page { size: A4; margin: 14mm; }
+            body { background: white !important; color: #111 !important; }
+            body > *:not(.print-only) { display: none !important; }
+            .print-only { display: block !important; position: static !important; background: white !important; color: #111 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; }
+            .print-only * { color: #111 !important; background: transparent !important; border-color: #999 !important; }
+            .print-only .print-accent { color: #b45309 !important; }
+            .print-only .print-muted { color: #555 !important; }
+            .print-only table { border-collapse: collapse !important; width: 100% !important; font-size: 10pt !important; }
+            .print-only th, .print-only td { border: 1px solid #ccc !important; padding: 4pt 6pt !important; text-align: left !important; }
+            .print-only th { background: #f0f0f0 !important; font-weight: 700 !important; }
+            .print-only h1 { font-size: 18pt !important; margin: 0 0 4pt 0 !important; color: #111 !important; }
+            .print-only h2 { font-size: 13pt !important; margin: 14pt 0 6pt 0 !important; color: #b45309 !important; border-bottom: 1px solid #ccc !important; padding-bottom: 2pt !important; }
+            .print-only svg circle, .print-only svg path, .print-only svg line, .print-only svg rect, .print-only svg text {
+              fill: attr(fill) !important; stroke: attr(stroke) !important;
+            }
+          }
           .msg-anim { animation: slideIn 0.25s ease-out; }
           .settings-anim { animation: slideDown 0.2s ease-out; }
           .dots span { animation: pulse 1.4s infinite; }
@@ -1404,16 +1432,228 @@ export default function RFCableSuite() {
         <main style={S.main}>
           {tab === "ask" && <AskView queuedPrompt={queuedPrompt} clearQueued={() => setQueuedPrompt(null)} openInLibrary={openInLibrary} loadIntoDesign={loadCableIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} />}
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
-          {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} />}
+          {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} onPrint={(id) => setPrinting({ type: "cable", id })} />}
           {tab === "connectors" && <ConnectorView />}
-          {tab === "link" && <LinkView openInLibrary={openInLibrary} />}
+          {tab === "link" && <LinkView openInLibrary={openInLibrary} onPrint={() => setPrinting({ type: "link" })} />}
           {tab === "tools" && <ToolsView />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
           {tab === "cheat" && <CheatSheetView />}
           {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}
         </main>
       </div>
+      {printing?.type === "cable" && <PrintableCableSpec id={printing.id} units={units} />}
+      {printing?.type === "link" && <PrintableLinkReport />}
     </SettingsContext.Provider>
+  );
+}
+
+function PrintableCableSpec({ id, units }) {
+  const c = CABLES[id];
+  if (!c) return null;
+  const cat = CATEGORIES[c.cat];
+  const now = new Date();
+  return (
+    <div className="print-only" style={{ padding: 20, fontFamily: "sans-serif", color: "#111", background: "white", lineHeight: 1.4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderBottom: "2px solid #b45309", paddingBottom: 8, marginBottom: 12 }}>
+        <div>
+          <div className="print-muted" style={{ fontSize: "9pt", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 2 }}>RF Cable Specification Sheet</div>
+          <h1>{c.name}</h1>
+          <div className="print-muted" style={{ fontSize: "10pt" }}>{cat.label} · {c.alias}</div>
+        </div>
+        <div style={{ textAlign: "right", fontSize: "9pt" }} className="print-muted">
+          <div>Generated {now.toISOString().slice(0, 10)}</div>
+          <div>RF Cable Suite</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div>
+          <h2>Electrical</h2>
+          <table><tbody>
+            <tr><th style={{ width: "40%" }}>Impedance</th><td>{c.z} Ω</td></tr>
+            <tr><th>Velocity factor</th><td>{c.vp}%</td></tr>
+            <tr><th>Capacitance</th><td>{fmtCap(c.cap, units, 1)}</td></tr>
+            <tr><th>Max frequency</th><td>{c.fMax} GHz</td></tr>
+            <tr><th>Max voltage</th><td>{c.vMax} V RMS</td></tr>
+          </tbody></table>
+
+          <h2>Mechanical</h2>
+          <table><tbody>
+            <tr><th style={{ width: "40%" }}>Inner conductor</th><td>{fmtLen(c.d, units)}</td></tr>
+            <tr><th>Dielectric OD</th><td>{fmtLen(c.D, units)}</td></tr>
+            <tr><th>Shield OD</th><td>{fmtLen(c.shield, units)}</td></tr>
+            <tr><th>Jacket OD</th><td>{fmtLen(c.OD, units)}</td></tr>
+            <tr><th>Mass</th><td>{fmtMass(c.mass, units, 1)}</td></tr>
+            <tr><th>Flexibility</th><td>{c.flex}</td></tr>
+            <tr><th>Outdoor-rated</th><td>{c.outdoor ? "Yes" : "No"}</td></tr>
+            <tr><th>Power class</th><td>{c.power}</td></tr>
+          </tbody></table>
+        </div>
+
+        <div>
+          <h2>Cross-section</h2>
+          <svg width="200" height="200" viewBox="0 0 200 200" style={{ display: "block", margin: "0 auto" }}>
+            <circle cx="100" cy="100" r={(c.OD / c.OD) * 80} fill="#222" stroke="#555" strokeWidth="1" />
+            <circle cx="100" cy="100" r={(c.shield / c.OD) * 80} fill="#999" />
+            <circle cx="100" cy="100" r={(c.D / c.OD) * 80} fill="#f5e6a8" />
+            <circle cx="100" cy="100" r={(c.d / c.OD) * 80} fill="#b45309" />
+          </svg>
+
+          <h2>Construction</h2>
+          <table><tbody>
+            <tr><th style={{ width: "30%" }}>Conductor</th><td>{c.cons.conductor}</td></tr>
+            <tr><th>Dielectric</th><td>{c.cons.dielectric}</td></tr>
+            <tr><th>Shield</th><td>{c.cons.shield}</td></tr>
+            <tr><th>Jacket</th><td>{c.cons.jacket}</td></tr>
+          </tbody></table>
+        </div>
+      </div>
+
+      <h2>Attenuation</h2>
+      <table>
+        <thead><tr><th>Frequency</th><th>dB/100m</th><th>dB/100ft</th><th>dB/25ft</th></tr></thead>
+        <tbody>
+          {c.atten.map(([f, a], i) => (
+            <tr key={i}>
+              <td>{f < 1000 ? `${f} MHz` : `${(f / 1000).toFixed(1)} GHz`}</td>
+              <td>{a.toFixed(2)}</td>
+              <td>{(a * 0.3048).toFixed(2)}</td>
+              <td>{(a * 0.0762).toFixed(3)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h2>Manufacturing process</h2>
+      <ol style={{ fontSize: "10pt", paddingLeft: 20 }}>
+        {c.proc.map((s, i) => <li key={i} style={{ marginBottom: 3 }}>{s}</li>)}
+      </ol>
+
+      <h2>Applications & suppliers</h2>
+      <div style={{ fontSize: "10pt", marginBottom: 6 }}><strong>Applications:</strong> {c.apps}</div>
+      <div style={{ fontSize: "10pt" }}><strong>Typical makers:</strong> {c.makers}</div>
+
+      <div style={{ marginTop: 20, paddingTop: 10, borderTop: "1px solid #ccc", fontSize: "8pt", color: "#888", textAlign: "center" }}>
+        Generated by RF Cable Suite · {now.toLocaleString()} · rf-cable-suite.vercel.app
+      </div>
+    </div>
+  );
+}
+
+function PrintableLinkReport() {
+  let segments = [], freq = 900;
+  try {
+    const s = localStorage.getItem("rf-link-chain");
+    if (s) segments = JSON.parse(s);
+  } catch {}
+  // Compute stages same way as LinkView
+  const stages = [];
+  let pwr = 0;
+  segments.forEach(seg => {
+    let loss = 0, label = "", sub = "", warn = null;
+    if (seg.type === "tx") { pwr = seg.power; label = "TX"; sub = dbmToPower(pwr) + " transmit"; }
+    else if (seg.type === "cable") {
+      const cable = CABLES[seg.cableId];
+      if (cable) {
+        loss = interpAtten(cable.atten, freq) * seg.lengthM / 100;
+        label = cable.name; sub = `${seg.lengthM} m`;
+        pwr -= loss;
+      }
+    } else if (seg.type === "connector") {
+      const conn = CONNECTORS[seg.connectorId];
+      loss = conn?.typicalLoss ?? 0.15;
+      label = conn ? conn.name : "Connector"; sub = "connector";
+      pwr -= loss;
+    } else if (seg.type === "amp") { loss = -(seg.gain || 0); label = "Amplifier"; sub = `+${seg.gain} dB`; pwr -= loss; }
+    else if (seg.type === "atten") { loss = seg.loss || 0; label = "Attenuator"; sub = `${loss} dB`; pwr -= loss; }
+    else if (seg.type === "splitter") { const n = seg.nWay || 2; loss = SPLITTER_LOSS[n] || 10 * Math.log10(n); label = `${n}-way splitter`; sub = `÷${n}`; pwr -= loss; }
+    else if (seg.type === "custom") { loss = seg.loss || 0; label = seg.label || "Custom"; sub = ""; pwr -= loss; }
+    else if (seg.type === "rx") { label = "RX"; sub = `sens ${seg.sensitivity} dBm`; }
+    stages.push({ ...seg, label, sub, loss, pwrOut: pwr });
+  });
+  const txPwr = stages[0]?.power ?? 0;
+  const rxPwr = stages[stages.length - 1]?.pwrOut ?? 0;
+  const rxSens = stages[stages.length - 1]?.sensitivity ?? -85;
+  const totalLoss = txPwr - rxPwr;
+  const margin = rxPwr - rxSens;
+  const verdict = linkVerdict(margin);
+  const now = new Date();
+
+  // BOM aggregation
+  const cables = {}, connectors = {};
+  let amps = 0, attens = 0, splitters = [];
+  segments.forEach(s => {
+    if (s.type === "cable" && CABLES[s.cableId]) {
+      if (!cables[s.cableId]) cables[s.cableId] = { cable: CABLES[s.cableId], totalLength: 0 };
+      cables[s.cableId].totalLength += s.lengthM || 0;
+    } else if (s.type === "connector" && CONNECTORS[s.connectorId]) {
+      if (!connectors[s.connectorId]) connectors[s.connectorId] = { connector: CONNECTORS[s.connectorId], qty: 0 };
+      connectors[s.connectorId].qty += 1;
+    } else if (s.type === "amp") amps++;
+    else if (s.type === "atten") attens++;
+    else if (s.type === "splitter") splitters.push(s.nWay);
+  });
+
+  return (
+    <div className="print-only" style={{ padding: 20, fontFamily: "sans-serif", color: "#111", background: "white", lineHeight: 1.4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderBottom: "2px solid #b45309", paddingBottom: 8, marginBottom: 12 }}>
+        <div>
+          <div className="print-muted" style={{ fontSize: "9pt", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 2 }}>RF Link Budget Report</div>
+          <h1>{segments.length - 2} component chain at {freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}</h1>
+        </div>
+        <div style={{ textAlign: "right", fontSize: "9pt" }} className="print-muted">
+          <div>Generated {now.toISOString().slice(0, 10)}</div>
+          <div>RF Cable Suite</div>
+        </div>
+      </div>
+
+      <h2>Summary</h2>
+      <table><tbody>
+        <tr><th style={{ width: "30%" }}>Transmit power</th><td>{txPwr} dBm ({dbmToPower(txPwr)})</td></tr>
+        <tr><th>Total chain loss</th><td>{totalLoss.toFixed(2)} dB</td></tr>
+        <tr><th>Received power</th><td>{rxPwr.toFixed(2)} dBm ({dbmToPower(rxPwr)})</td></tr>
+        <tr><th>RX sensitivity</th><td>{rxSens} dBm</td></tr>
+        <tr><th>Link margin</th><td style={{ fontWeight: 700 }} className="print-accent">{margin > 0 ? "+" : ""}{margin.toFixed(2)} dB ({verdict.title})</td></tr>
+      </tbody></table>
+
+      <h2>Stage-by-stage analysis</h2>
+      <table>
+        <thead><tr><th>#</th><th>Component</th><th>Detail</th><th style={{ textAlign: "right" }}>Loss/Gain</th><th style={{ textAlign: "right" }}>Power out</th></tr></thead>
+        <tbody>
+          {stages.map((st, i) => (
+            <tr key={i}>
+              <td>{i + 1}</td>
+              <td>{st.label}</td>
+              <td>{st.sub}</td>
+              <td style={{ textAlign: "right" }}>{st.type === "tx" || st.type === "rx" ? "—" : `${st.loss > 0 ? "-" : st.loss < 0 ? "+" : ""}${Math.abs(st.loss).toFixed(2)} dB`}</td>
+              <td style={{ textAlign: "right" }}>{st.type === "tx" ? `${st.power} dBm` : `${st.pwrOut.toFixed(2)} dBm`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h2>Bill of materials</h2>
+      <table>
+        <thead><tr><th>Category</th><th>Item</th><th>Spec</th><th>Qty</th></tr></thead>
+        <tbody>
+          {Object.values(cables).map((c, i) => (
+            <tr key={`c${i}`}><td>Cable</td><td>{c.cable.name}</td><td>{c.cable.z} Ω, OD {c.cable.OD.toFixed(2)} mm</td><td>{c.totalLength} m total</td></tr>
+          ))}
+          {Object.values(connectors).map((c, i) => (
+            <tr key={`n${i}`}><td>Connector</td><td>{c.connector.name}</td><td>{c.connector.z} Ω, {c.connector.fMax} GHz</td><td>{c.qty} pcs</td></tr>
+          ))}
+          {amps > 0 && <tr><td>Active</td><td>Amplifier</td><td>application-specific</td><td>{amps} pcs</td></tr>}
+          {attens > 0 && <tr><td>Passive</td><td>Attenuator pad</td><td>50 Ω fixed</td><td>{attens} pcs</td></tr>}
+          {splitters.map((n, i) => (
+            <tr key={`s${i}`}><td>Passive</td><td>{n}-way splitter</td><td>{SPLITTER_LOSS[n]} dB insertion loss</td><td>1 pc</td></tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div style={{ marginTop: 20, paddingTop: 10, borderTop: "1px solid #ccc", fontSize: "8pt", color: "#888", textAlign: "center" }}>
+        Generated by RF Cable Suite · {now.toLocaleString()} · rf-cable-suite.vercel.app
+      </div>
+    </div>
   );
 }
 
@@ -1999,7 +2239,7 @@ function DesignView({ activeCable, clearCable, openLibrary }) {
 // ═══════════════════════════════════════════════════════════════
 // LIBRARY VIEW
 // ═══════════════════════════════════════════════════════════════
-function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCable, comparedCables, toggleCompare }) {
+function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCable, comparedCables, toggleCompare, onPrint }) {
   const [search, setSearch] = useState("");
   const [filterZ, setFilterZ] = useState("all");
   const [filterCat, setFilterCat] = useState("all");
@@ -2054,7 +2294,8 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
           <CableCard key={id} id={id} cable={c} expanded={expanded === id}
             onToggle={() => { setExpanded(expanded === id ? null : id); setActiveCable(id); }}
             onDesign={() => loadIntoDesign(id)} onAsk={() => askAboutCable(id)}
-            compared={comparedCables?.includes(id)} toggleCompare={toggleCompare} />
+            compared={comparedCables?.includes(id)} toggleCompare={toggleCompare}
+            onPrint={onPrint} />
         ))}
         {filtered.length === 0 && <div style={S.emptyState}>No cables match filters. Try relaxing criteria.</div>}
       </div>
@@ -2062,7 +2303,7 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
   );
 }
 
-function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared, toggleCompare }) {
+function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared, toggleCompare, onPrint }) {
   const { units } = useContext(SettingsContext);
   const cat = CATEGORIES[c.cat];
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity];
@@ -2116,6 +2357,7 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared
             <button onClick={onDesign} style={S.actionBtn}>→ Load into Designer</button>
             <button onClick={onAsk} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>Ask Agent about this</button>
             {toggleCompare && <button onClick={(e) => { e.stopPropagation(); toggleCompare(id); }} style={{ ...S.actionBtn, ...(compared ? { background: "rgba(52,211,153,0.15)", color: "#34d399", borderColor: "#10b981" } : S.actionBtnSecondary) }}>{compared ? "✓ In compare" : "+ Add to compare"}</button>}
+            {onPrint && <button onClick={(e) => { e.stopPropagation(); onPrint(id); }} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>🖨 Print / PDF</button>}
           </div>
           <div style={{ padding: "14px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
@@ -3395,7 +3637,7 @@ const SEGMENT_TYPES = [
   { v: "custom",    icon: "◆", label: "Custom",    color: "#a8a29e" },
 ];
 
-function LinkView({ openInLibrary }) {
+function LinkView({ openInLibrary, onPrint }) {
   const [freq, setFreq] = useState(900);
   const [segments, setSegments] = useState(() => {
     // URL-shared link takes priority over localStorage
@@ -3516,6 +3758,7 @@ function LinkView({ openInLibrary }) {
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <button onClick={shareLink} style={{ background: shareState === "copied" ? "rgba(52,211,153,0.2)" : "rgba(96,165,250,0.15)", color: shareState === "copied" ? "#34d399" : "#60a5fa", border: `1px solid ${shareState === "copied" ? "#10b981" : "#2563eb"}`, padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 1, textTransform: "uppercase", fontWeight: 600 }}>{shareState === "copied" ? "✓ Link copied" : shareState === "error" ? "⚠ Error" : "🔗 Share"}</button>
           <button onClick={() => setShowBOM(!showBOM)} style={{ background: showBOM ? "rgba(217,119,6,0.2)" : "transparent", color: showBOM ? "#fbbf24" : "#a8a29e", border: `1px solid ${showBOM ? "#d97706" : "#57534e"}`, padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 1, textTransform: "uppercase", fontWeight: 600 }}>📋 BOM {showBOM ? "▲" : "▼"}</button>
+          {onPrint && <button onClick={onPrint} style={{ background: "rgba(217,119,6,0.15)", color: "#fbbf24", border: "1px solid #d97706", padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 1, textTransform: "uppercase", fontWeight: 600 }}>🖨 Print / PDF</button>}
           <button onClick={reset} style={{ background: "transparent", color: "#a8a29e", border: "1px solid #57534e", padding: "4px 10px", fontSize: 10, cursor: "pointer", borderRadius: 3, letterSpacing: 1, textTransform: "uppercase" }}>↺ Reset</button>
         </div>
       </div>
