@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, Loader2, Trash2, Minimize2 } from 'lucide-react'
+import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight } from 'lucide-react'
 
 const MODEL_DEFAULT = 'claude-sonnet-4-6'
+const MAX_TOOL_TURNS = 6
 
 export default function FloatingAgent({
   accent = '#c97b3f',
@@ -16,6 +17,8 @@ export default function FloatingAgent({
   fontFamily = '"Bricolage Grotesque", system-ui, sans-serif',
   maxTokens = 2048,
   storageKey,
+  tools,        // optional Anthropic-format tool array
+  onToolUse,    // optional (name, input) => result|Promise<result>
 }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState(() => {
@@ -29,7 +32,8 @@ export default function FloatingAgent({
   })
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [streamText, setStreamText] = useState('')
+  const [streamBlocks, setStreamBlocks] = useState(null) // in-flight assistant blocks
+  const [toolStatus, setToolStatus] = useState(null)     // 'executing' | null
   const [error, setError] = useState(null)
   const scrollRef = useRef(null)
   const inputRef = useRef(null)
@@ -38,7 +42,7 @@ export default function FloatingAgent({
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [messages, streamText, open])
+  }, [messages, streamBlocks, toolStatus, open])
 
   useEffect(() => {
     if (open) inputRef.current?.focus()
@@ -51,68 +55,148 @@ export default function FloatingAgent({
     } catch {}
   }, [messages, storageKey])
 
+  // Streams one turn, returns { blocks, stop_reason }
+  const streamOnce = async (messagesPayload, onUpdate) => {
+    const body = {
+      model,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: messagesPayload,
+      stream: true,
+    }
+    if (tools && tools.length) body.tools = tools
+
+    const res = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok || !res.body) {
+      let detail = ''
+      try { const j = await res.json(); detail = j?.error?.message || j?.error || '' } catch {}
+      throw new Error(detail || `HTTP ${res.status}`)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    const blocks = []
+    let stopReason = 'end_turn'
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const events = buffer.split('\n\n')
+      buffer = events.pop() || ''
+      for (const chunk of events) {
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data: ')) continue
+          const jsonStr = line.slice(6).trim()
+          if (!jsonStr) continue
+          try {
+            const ev = JSON.parse(jsonStr)
+            if (ev.type === 'content_block_start') {
+              const b = { ...ev.content_block }
+              if (b.type === 'text') b.text = ''
+              else if (b.type === 'tool_use') { b.input_json = ''; b.input = {} }
+              blocks[ev.index] = b
+              onUpdate?.(blocks.map(x => ({ ...x })))
+            } else if (ev.type === 'content_block_delta') {
+              const b = blocks[ev.index]
+              if (!b) continue
+              if (ev.delta.type === 'text_delta') {
+                b.text = (b.text || '') + ev.delta.text
+                onUpdate?.(blocks.map(x => ({ ...x })))
+              } else if (ev.delta.type === 'input_json_delta') {
+                b.input_json = (b.input_json || '') + ev.delta.partial_json
+              }
+            } else if (ev.type === 'content_block_stop') {
+              const b = blocks[ev.index]
+              if (b && b.type === 'tool_use' && b.input_json) {
+                try { b.input = JSON.parse(b.input_json) } catch {}
+                onUpdate?.(blocks.map(x => ({ ...x })))
+              }
+            } else if (ev.type === 'message_delta' && ev.delta?.stop_reason) {
+              stopReason = ev.delta.stop_reason
+            }
+          } catch {}
+        }
+      }
+    }
+
+    return { blocks: blocks.filter(Boolean), stop_reason: stopReason }
+  }
+
+  // Build the messages array sent to the API from internal state.
+  // Strip our display-only `input_json` field from tool_use blocks.
+  const toApiMessages = (history) =>
+    history.map((m) => ({
+      role: m.role,
+      content: typeof m.content === 'string'
+        ? m.content
+        : m.content.map((b) => {
+            if (b.type === 'tool_use') {
+              return { type: 'tool_use', id: b.id, name: b.name, input: b.input || {} }
+            }
+            if (b.type === 'tool_result') {
+              return { type: 'tool_result', tool_use_id: b.tool_use_id, content: b.content }
+            }
+            if (b.type === 'text') return { type: 'text', text: b.text || '' }
+            return b
+          }),
+    }))
+
   const send = async (textOverride) => {
     const text = (textOverride ?? input).trim()
     if (!text || loading) return
     setInput('')
     setError(null)
-    const next = [...messages, { role: 'user', content: text }]
-    setMessages(next)
+
+    let history = [...messages, { role: 'user', content: text }]
+    setMessages(history)
     setLoading(true)
-    setStreamText('')
+    setStreamBlocks(null)
 
     try {
-      const res = await fetch('/api/claude', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          max_tokens: maxTokens,
-          system: systemPrompt,
-          messages: next.map((m) => ({ role: m.role, content: m.content })),
-          stream: true,
-        }),
-      })
+      for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+        setStreamBlocks([])
+        const { blocks, stop_reason } = await streamOnce(toApiMessages(history), setStreamBlocks)
+        const assistantMsg = { role: 'assistant', content: blocks }
+        history = [...history, assistantMsg]
+        setMessages(history)
+        setStreamBlocks(null)
 
-      if (!res.ok || !res.body) {
-        let detail = ''
-        try { const j = await res.json(); detail = j?.error?.message || j?.error || '' } catch {}
-        throw new Error(detail || `HTTP ${res.status}`)
-      }
+        if (stop_reason !== 'tool_use') break
+        if (!onToolUse) break
 
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let assistant = ''
+        const toolUses = blocks.filter((b) => b.type === 'tool_use')
+        if (toolUses.length === 0) break
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const events = buffer.split('\n\n')
-        buffer = events.pop() || ''
-        for (const chunk of events) {
-          for (const line of chunk.split('\n')) {
-            if (!line.startsWith('data: ')) continue
-            const jsonStr = line.slice(6).trim()
-            if (!jsonStr) continue
-            try {
-              const ev = JSON.parse(jsonStr)
-              if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
-                assistant += ev.delta.text
-                setStreamText(assistant)
-              }
-            } catch {}
+        setToolStatus('executing')
+        const results = []
+        for (const tu of toolUses) {
+          let result
+          try {
+            result = await onToolUse(tu.name, tu.input || {})
+          } catch (err) {
+            result = { error: err?.message || 'Tool failed' }
           }
+          results.push({
+            type: 'tool_result',
+            tool_use_id: tu.id,
+            content: typeof result === 'string' ? result : JSON.stringify(result),
+          })
         }
+        setToolStatus(null)
+        history = [...history, { role: 'user', content: results }]
+        setMessages(history)
       }
-
-      setMessages([...next, { role: 'assistant', content: assistant }])
-      setStreamText('')
     } catch (err) {
       setError(err.message || 'Request failed')
-      setMessages(next)
-      setStreamText('')
+      setStreamBlocks(null)
+      setToolStatus(null)
     } finally {
       setLoading(false)
     }
@@ -127,7 +211,8 @@ export default function FloatingAgent({
 
   const clear = () => {
     setMessages([])
-    setStreamText('')
+    setStreamBlocks(null)
+    setToolStatus(null)
     setError(null)
   }
 
@@ -148,11 +233,14 @@ export default function FloatingAgent({
         <MessageSquare size={16} strokeWidth={2.5} />
         <span className="text-[11px] font-semibold uppercase tracking-wider">Ask</span>
         {messages.length > 0 && (
-          <span className="text-[10px] bg-[#0a0d0f]/30 px-1.5 py-0.5 rounded">{messages.length}</span>
+          <span className="text-[10px] bg-[#0a0d0f]/30 px-1.5 py-0.5 rounded">{visibleCount(messages)}</span>
         )}
       </button>
     )
   }
+
+  // Visual messages — collapse user tool_results into the previous assistant's tool_use blocks
+  const view = buildView(messages, streamBlocks)
 
   return (
     <div
@@ -171,6 +259,15 @@ export default function FloatingAgent({
           >
             {label}
           </span>
+          {tools && tools.length > 0 && (
+            <span
+              className="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider border"
+              style={{ color: accent, borderColor: accent, background: 'transparent' }}
+              title={`${tools.length} tools available`}
+            >
+              {tools.length} tools
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           {messages.length > 0 && (
@@ -196,7 +293,7 @@ export default function FloatingAgent({
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-3 py-3 space-y-3 text-[13px] leading-relaxed"
       >
-        {messages.length === 0 && !loading && (
+        {view.length === 0 && !loading && (
           <div className="space-y-3">
             <div className="text-[#a7b0b6] text-[12px] leading-relaxed">
               {roleDescription}
@@ -227,13 +324,25 @@ export default function FloatingAgent({
           </div>
         )}
 
-        {messages.map((m, i) => (
-          <Message key={i} role={m.role} content={m.content} accent={accent} />
+        {view.map((item, i) => (
+          <ViewItem key={i} item={item} accent={accent} />
         ))}
 
-        {streamText && <Message role="assistant" content={streamText} accent={accent} streaming />}
+        {toolStatus === 'executing' && (
+          <div className="flex items-center gap-2 text-[#6b7479] text-[12px]">
+            <Wrench size={12} className="animate-pulse" style={{ color: accent }} />
+            <span>running tool…</span>
+          </div>
+        )}
 
-        {loading && !streamText && (
+        {loading && view.length > 0 && view[view.length - 1].kind !== 'streaming' && !toolStatus && (
+          <div className="flex items-center gap-2 text-[#6b7479] text-[12px]">
+            <Loader2 size={12} className="animate-spin" />
+            <span>thinking…</span>
+          </div>
+        )}
+
+        {loading && view.length === 0 && (
           <div className="flex items-center gap-2 text-[#6b7479] text-[12px]">
             <Loader2 size={12} className="animate-spin" />
             <span>thinking…</span>
@@ -281,25 +390,163 @@ export default function FloatingAgent({
   )
 }
 
-function Message({ role, content, streaming, accent }) {
-  const isUser = role === 'user'
+// ── Build a flat array of view items from messages + in-flight stream
+// Stitches assistant tool_use blocks with their matching tool_result by id
+function buildView(messages, streamBlocks) {
+  const view = []
+  // Pre-index tool_results by tool_use_id for stitching
+  const resultsById = {}
+  for (const m of messages) {
+    if (m.role === 'user' && Array.isArray(m.content)) {
+      for (const b of m.content) {
+        if (b.type === 'tool_result') resultsById[b.tool_use_id] = b
+      }
+    }
+  }
+
+  for (const m of messages) {
+    if (m.role === 'user') {
+      if (typeof m.content === 'string') {
+        view.push({ kind: 'user', text: m.content })
+      }
+      // tool_result-only user messages are not shown directly (stitched into tool_use above)
+    } else if (m.role === 'assistant') {
+      const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text', text: m.content }]
+      for (const b of blocks) {
+        if (b.type === 'text' && (b.text || '').trim()) {
+          view.push({ kind: 'assistant', text: b.text })
+        } else if (b.type === 'tool_use') {
+          view.push({
+            kind: 'tool',
+            name: b.name,
+            input: b.input || {},
+            result: resultsById[b.id]?.content,
+          })
+        }
+      }
+    }
+  }
+
+  // In-flight stream
+  if (streamBlocks && streamBlocks.length > 0) {
+    for (const b of streamBlocks) {
+      if (!b) continue
+      if (b.type === 'text' && (b.text || '').length > 0) {
+        view.push({ kind: 'streaming', text: b.text })
+      } else if (b.type === 'tool_use') {
+        view.push({
+          kind: 'tool',
+          name: b.name,
+          input: b.input || tryParseJson(b.input_json) || {},
+          result: undefined,
+          partial: true,
+        })
+      }
+    }
+  }
+
+  return view
+}
+
+function tryParseJson(s) {
+  if (!s) return null
+  try { return JSON.parse(s) } catch { return null }
+}
+
+function visibleCount(messages) {
+  return messages.filter((m) => m.role === 'user' && typeof m.content === 'string').length +
+         messages.filter((m) => m.role === 'assistant').length
+}
+
+function ViewItem({ item, accent }) {
+  if (item.kind === 'user') {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[88%] px-3 py-2 rounded text-[13px] leading-relaxed whitespace-pre-wrap bg-[#2a1d14] border border-[#3d2a1c] text-[#fbbf24]">
+          {item.text}
+        </div>
+      </div>
+    )
+  }
+  if (item.kind === 'assistant' || item.kind === 'streaming') {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[88%] px-3 py-2 rounded text-[13px] leading-relaxed whitespace-pre-wrap bg-[#12171a] border border-[#252e33] text-[#f0ebe2]">
+          {item.text}
+          {item.kind === 'streaming' && (
+            <span
+              className="inline-block w-1.5 h-3.5 ml-0.5 animate-pulse"
+              style={{ background: accent }}
+            />
+          )}
+        </div>
+      </div>
+    )
+  }
+  if (item.kind === 'tool') {
+    return <ToolPill name={item.name} input={item.input} result={item.result} accent={accent} partial={item.partial} />
+  }
+  return null
+}
+
+function ToolPill({ name, input, result, accent, partial }) {
+  const [open, setOpen] = useState(false)
+  const inputSummary = summarizeInput(input)
+  let parsedResult = result
+  if (typeof result === 'string') {
+    try { parsedResult = JSON.parse(result) } catch {}
+  }
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <div className="flex justify-start">
       <div
-        className={`max-w-[88%] px-3 py-2 rounded text-[13px] leading-relaxed whitespace-pre-wrap ${
-          isUser
-            ? 'bg-[#2a1d14] border border-[#3d2a1c] text-[#fbbf24]'
-            : 'bg-[#12171a] border border-[#252e33] text-[#f0ebe2]'
-        }`}
+        className="max-w-[92%] w-full text-[12px] rounded border bg-[#0d1416]"
+        style={{ borderColor: '#252e33' }}
       >
-        {content}
-        {streaming && (
-          <span
-            className="inline-block w-1.5 h-3.5 ml-0.5 animate-pulse"
-            style={{ background: accent }}
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-[#12171a] rounded-t"
+        >
+          <ChevronRight
+            size={11}
+            style={{ color: accent, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}
           />
+          <Wrench size={11} style={{ color: accent }} />
+          <span className="font-mono text-[11px]" style={{ color: accent }}>{name}</span>
+          <span className="text-[#6b7479] font-mono text-[11px] truncate flex-1">({inputSummary})</span>
+          {partial ? (
+            <Loader2 size={10} className="animate-spin text-[#6b7479]" />
+          ) : parsedResult?.error ? (
+            <span className="text-[10px] text-[#f87171]">err</span>
+          ) : parsedResult ? (
+            <span className="text-[10px]" style={{ color: '#5eead4' }}>ok</span>
+          ) : null}
+        </button>
+        {open && (
+          <div className="px-2.5 pb-2 pt-0 border-t" style={{ borderColor: '#1a2226' }}>
+            <div className="text-[10px] uppercase tracking-wider text-[#6b7479] mt-2 mb-1">input</div>
+            <pre className="font-mono text-[11px] text-[#a7b0b6] whitespace-pre-wrap break-all">{JSON.stringify(input, null, 2)}</pre>
+            {parsedResult !== undefined && (
+              <>
+                <div className="text-[10px] uppercase tracking-wider text-[#6b7479] mt-2 mb-1">result</div>
+                <pre
+                  className="font-mono text-[11px] whitespace-pre-wrap break-all"
+                  style={{ color: parsedResult?.error ? '#f87171' : '#f0ebe2' }}
+                >{typeof parsedResult === 'object' ? JSON.stringify(parsedResult, null, 2) : String(parsedResult)}</pre>
+              </>
+            )}
+          </div>
         )}
       </div>
     </div>
   )
+}
+
+function summarizeInput(input) {
+  if (!input || typeof input !== 'object') return ''
+  const entries = Object.entries(input)
+  if (entries.length === 0) return ''
+  return entries
+    .slice(0, 4)
+    .map(([k, v]) => `${k}=${typeof v === 'number' ? v : JSON.stringify(v)}`)
+    .join(', ') + (entries.length > 4 ? '…' : '')
 }

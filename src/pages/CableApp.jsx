@@ -6,8 +6,9 @@ import {
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import FloatingAgent from '../components/FloatingAgent.jsx';
+import { CABLE_TOOLS, dispatchCableTool } from '../components/cableTools.js';
 
-const CABLE_SYSTEM_PROMPT = `You are a senior cable manufacturing engineer embedded in the High-Speed Cable Manufacturing curriculum (CABLE.LAB).
+const CABLE_SYSTEM_PROMPT = `You are a senior cable manufacturing engineer embedded in the High-Speed Cable Manufacturing curriculum (CABLE.LAB). You have access to calculation tools — use them whenever the user gives or asks for numeric values; do not rely on memorized constants when a tool can compute the exact answer.
 
 Domain focus:
 - Coaxial cable construction (RG-58, RG-174, RG-213, LMR-400, Heliax, semi-rigid, phase-stable)
@@ -28,10 +29,10 @@ Style:
 - If outside cable/RF/manufacturing scope, say so briefly and redirect.`;
 
 const CABLE_STARTERS = [
-  'Why does pair lay length matter for NEXT?',
-  'Walk me through LMR-400 manufacturing',
-  'How does braid coverage affect Zt?',
-  'Difference between Z₀ and impedance matching?',
+  'Compute Z₀ for D=2.95mm, d=0.91mm, foamed PE εr=1.55',
+  'Braid coverage for N=24, P=7, d=0.13mm, D=5mm, PR=10?',
+  'What lay length gives ≤25 ps/m skew with Δεr=0.02?',
+  'Convert 38 AWG to mm and compare to 40 AWG',
 ];
 
 /* ============================================================
@@ -5841,6 +5842,8 @@ export default function CableApp() {
         topics={['Z₀ formulas', 'braid coverage', 'pair lay', 'TDR', 'manufacturing flow']}
         placeholder="Ask about cable design, manufacturing, formulas…"
         storageKey="cablelab-chat-history"
+        tools={CABLE_TOOLS}
+        onToolUse={dispatchCableTool}
       />
     </div>
   );
