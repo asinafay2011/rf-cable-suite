@@ -5,6 +5,7 @@ import {
   ArrowRight, Plus, Minus, Info, Eye, Radio, Coins, Boxes, Search, X, Settings
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import CableChat from '../components/CableChat.jsx';
 
 /* ============================================================
    Color tokens (engineering blueprint aesthetic)
@@ -5802,6 +5803,8 @@ export default function CableApp() {
           </div>
         </footer>
       )}
+
+      <CableChat />
     </div>
   );
 }
