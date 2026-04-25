@@ -5610,15 +5610,15 @@ function TopNav({ active, onChange }) {
   ];
   return (
     <nav className="sticky top-0 z-40 backdrop-blur-md bg-[#0a0d0f]/85 border-b border-[#252e33]">
-      <div className="max-w-6xl mx-auto px-4 md:px-12 py-3 flex items-center gap-1 overflow-x-auto">
-        <div className="font-mono text-xs text-[#c97b3f] tracking-[0.2em] mr-4 shrink-0">
+      <div className="px-4 md:px-8 py-2 pr-[230px] flex items-center gap-y-1 gap-x-0.5 flex-wrap">
+        <div className="font-mono text-[11px] text-[#c97b3f] tracking-[0.2em] mr-3 shrink-0">
           ◆ CABLE.LAB
         </div>
         {items.map((it) => (
           <button
             key={it.id}
             onClick={() => onChange(it.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-mono uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer rounded-sm ${
               active === it.id
                 ? 'text-[#fbbf24] border-b border-[#c97b3f] bg-[#2a1d14]'
                 : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610]'

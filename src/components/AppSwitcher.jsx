@@ -12,7 +12,7 @@ const cls = ({ isActive }) =>
 export default function AppSwitcher() {
   return (
     <div
-      className="fixed top-3 left-16 z-[100] flex gap-1 p-1 rounded-md bg-[#0a0d0f]/90 backdrop-blur-md border border-[#1f1610] shadow-lg"
+      className="fixed top-3 right-3 z-[100] flex gap-1 p-1 rounded-md bg-[#0a0d0f]/90 backdrop-blur-md border border-[#1f1610] shadow-lg"
       style={{ fontFamily: '"Bricolage Grotesque", system-ui, sans-serif' }}
     >
       <NavLink to="/" end className={cls}>
