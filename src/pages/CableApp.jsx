@@ -5763,8 +5763,8 @@ export default function CableApp() {
         }
       `}</style>
 
-      {section !== 'recipe' && <Hero />}
       {section !== 'recipe' && <TopNav active={section} onChange={setSection} />}
+      {section !== 'recipe' && <Hero />}
 
       <main className="max-w-6xl mx-auto px-4 md:px-12 py-12">
         {section === 'recipe' && <BuildRecipePage product={recipeProduct} onBack={closeRecipe} />}
