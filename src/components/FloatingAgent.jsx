@@ -1,8 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight } from 'lucide-react'
+import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown } from 'lucide-react'
 
 const MODEL_DEFAULT = 'claude-sonnet-4-6'
 const MAX_TOOL_TURNS = 6
+
+const DEFAULT_MODELS = [
+  { id: 'claude-opus-4-7',           label: 'Opus 4.7',   tier: 'flagship' },
+  { id: 'claude-sonnet-4-6',         label: 'Sonnet 4.6', tier: 'balanced' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5',  tier: 'fast' },
+]
 
 export default function FloatingAgent({
   accent = '#c97b3f',
@@ -14,6 +20,7 @@ export default function FloatingAgent({
   topics = [],
   placeholder = 'Ask anything…',
   model = MODEL_DEFAULT,
+  models = DEFAULT_MODELS,
   fontFamily = '"Bricolage Grotesque", system-ui, sans-serif',
   maxTokens = 2048,
   storageKey,
@@ -21,6 +28,21 @@ export default function FloatingAgent({
   onToolUse,    // optional (name, input) => result|Promise<result>
 }) {
   const [open, setOpen] = useState(false)
+  const modelKey = storageKey ? `${storageKey}-model` : null
+  const [modelId, setModelId] = useState(() => {
+    if (!modelKey) return model
+    try {
+      const stored = localStorage.getItem(modelKey)
+      if (stored && models.some((m) => m.id === stored)) return stored
+    } catch {}
+    return model
+  })
+  useEffect(() => {
+    if (!modelKey) return
+    try { localStorage.setItem(modelKey, modelId) } catch {}
+  }, [modelKey, modelId])
+  const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const currentModel = models.find((m) => m.id === modelId) || models[0]
   const [messages, setMessages] = useState(() => {
     if (!storageKey) return []
     try {
@@ -58,7 +80,7 @@ export default function FloatingAgent({
   // Streams one turn, returns { blocks, stop_reason }
   const streamOnce = async (messagesPayload, onUpdate) => {
     const body = {
-      model,
+      model: modelId,
       max_tokens: maxTokens,
       system: systemPrompt,
       messages: messagesPayload,
@@ -268,6 +290,42 @@ export default function FloatingAgent({
               {tools.length} tools
             </span>
           )}
+          <div className="relative">
+            <button
+              onClick={() => setModelMenuOpen((v) => !v)}
+              disabled={loading}
+              className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider border bg-transparent hover:bg-[#1f1610] disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ color: '#a7b0b6', borderColor: '#384249', fontFamily: '"JetBrains Mono", monospace' }}
+              title={`Model: ${currentModel.label}`}
+            >
+              <span>{currentModel.label}</span>
+              <ChevronDown size={9} />
+            </button>
+            {modelMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-[100]"
+                  onClick={() => setModelMenuOpen(false)}
+                />
+                <div
+                  className="absolute top-full left-0 mt-1 z-[101] min-w-[160px] bg-[#0a0d0f] border border-[#252e33] rounded shadow-xl overflow-hidden"
+                  style={{ fontFamily: '"JetBrains Mono", monospace' }}
+                >
+                  {models.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => { setModelId(m.id); setModelMenuOpen(false); }}
+                      className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[11px] hover:bg-[#12171a] transition-colors"
+                      style={{ color: m.id === modelId ? accent : '#a7b0b6' }}
+                    >
+                      <span>{m.label}</span>
+                      <span className="text-[9px] uppercase tracking-wider text-[#6b7479]">{m.tier}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1">
           {messages.length > 0 && (
