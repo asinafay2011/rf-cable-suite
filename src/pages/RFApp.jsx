@@ -1,4 +1,35 @@
 import React, { useState, useMemo, useRef, useEffect, createContext, useContext } from "react";
+import FloatingAgent from "../components/FloatingAgent.jsx";
+
+const RF_SYSTEM_PROMPT = `You are a senior RF cable engineer embedded in the RF Cable Engineering Suite.
+
+Domain focus:
+- Coaxial cable selection (RG-50/75/174/178/213, LMR-100/240/400/600, Heliax LDF/AVA, semi-rigid, phase-stable, video/broadcast)
+- RF connectors (N, BNC, TNC, SMA, SMB, MMCX, F, 7-16 DIN, MCX) — gender, polarity, frequency limits, IL
+- Link budget: TX → cable → connector → cable → RX with attenuation accounting
+- Free-space path loss: FSPL = 32.45 + 20·log10(f_MHz) + 20·log10(d_km) dB
+- Smith chart, return loss, VSWR, impedance matching, mismatch loss
+- Velocity factor, Z₀, propagation delay, electrical length
+- Frequency-dependent attenuation (skin effect √f, dielectric loss ∝f)
+- Power handling (CW/peak), voltage rating, max VSWR
+- 50 Ω vs 75 Ω systems, when each is used
+- Noise figure cascade (Friis), IP3, dynamic range
+- TDR, return loss measurement, time-to-distance via VF
+- Manufacturers: Belden, Times Microwave, CommScope/Andrew, Pasternack, Harbour, Micro-Coax
+
+Style:
+- Concise, technically precise. 2–4 short paragraphs default.
+- Show formulas in ASCII (FSPL = 32.45 + 20·log(f) + 20·log(d)). Use markdown sparingly.
+- When asked "why", give physics intuition before the formula.
+- If the user references a specific tab (Ask, Design, Library, Connectors, Link, Tools, Wizard, Cheat Sheet, Compare), tie the answer to what that tab does.
+- If outside RF cable/connector scope, say so briefly and redirect.`;
+
+const RF_STARTERS = [
+  'Why 50 Ω for RF and 75 Ω for CATV/video?',
+  'When should I pick LMR-400 over RG-58?',
+  'How do connector losses add up in a link budget?',
+  'What does VSWR 1.5:1 mean for transmitted power?',
+];
 
 // ═══════════════════════════════════════════════════════════════
 // RF CABLE ENGINEERING SUITE · v2
@@ -1670,6 +1701,17 @@ export default function RFCableSuite() {
       {printSetup && <PrintSetupModal type={printSetup.type} subjectId={printSetup.id} onCancel={() => setPrintSetup(null)} onConfirm={(meta) => { setPrinting({ ...printSetup, meta }); setPrintSetup(null); }} />}
       {printing?.type === "cable" && <PrintableCableSpec id={printing.id} units={units} meta={printing.meta || {}} />}
       {printing?.type === "link" && <PrintableLinkReport meta={printing.meta || {}} />}
+      <FloatingAgent
+        accent="#d97706"
+        accentBright="#fbbf24"
+        label="◆ RF · AGENT"
+        systemPrompt={RF_SYSTEM_PROMPT}
+        starters={RF_STARTERS}
+        roleDescription="Senior RF cable engineer."
+        topics={['cable selection', 'link budgets', 'connectors', 'VSWR / Smith', 'path loss']}
+        placeholder="Ask about RF cable, connectors, link budgets…"
+        storageKey="rf-chat-history"
+      />
     </SettingsContext.Provider>
   );
 }

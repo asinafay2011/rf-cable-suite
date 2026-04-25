@@ -5,7 +5,34 @@ import {
   ArrowRight, Plus, Minus, Info, Eye, Radio, Coins, Boxes, Search, X, Settings
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import CableChat from '../components/CableChat.jsx';
+import FloatingAgent from '../components/FloatingAgent.jsx';
+
+const CABLE_SYSTEM_PROMPT = `You are a senior cable manufacturing engineer embedded in the High-Speed Cable Manufacturing curriculum (CABLE.LAB).
+
+Domain focus:
+- Coaxial cable construction (RG-58, RG-174, RG-213, LMR-400, Heliax, semi-rigid, phase-stable)
+- Twisted-pair design: pair lay (8–17 mm typical), intra-pair skew, differential impedance (90 Ω / 100 Ω)
+- 4-pair bundle geometry, cross-spline / X-filler, NEXT, FEXT, ANEXT
+- Shielding: foil + braid, optical coverage K = (2F − F²)·100% per SCTE 51, transfer impedance Zt
+- Z₀ formula: 138 / √εᵣ · log10(D/d) for coax; differential pair from Wadell
+- Manufacturing flow: conductor draw → bunch → insulation extrusion → twisting → cabling → shielding → jacketing → testing
+- Materials: Cu (1.68e-8 Ω·m), TC, SPC, NPC, PTFE/FEP/PFA/PE, foamed PE, ePTFE
+- Test: TDR, return loss, IL, eye diagram, BER, hipot
+- AWG ↔ mm conversions; Glenair Series 963 reference
+
+Style:
+- Concise, technically precise. Default to 2–4 short paragraphs unless asked for depth.
+- Show formulas in ASCII (Z = 138/√εᵣ·log(D/d)). Use markdown sparingly.
+- When asked "why", give the physics intuition before the formula.
+- If the user references a specific tool/tab in the app (Z₀ Calc, TDR Sim, Braid, Atten, Eye, Cost, Lay Design), tie the answer to what that tab computes.
+- If outside cable/RF/manufacturing scope, say so briefly and redirect.`;
+
+const CABLE_STARTERS = [
+  'Why does pair lay length matter for NEXT?',
+  'Walk me through LMR-400 manufacturing',
+  'How does braid coverage affect Zt?',
+  'Difference between Z₀ and impedance matching?',
+];
 
 /* ============================================================
    Color tokens (engineering blueprint aesthetic)
@@ -5804,7 +5831,17 @@ export default function CableApp() {
         </footer>
       )}
 
-      <CableChat />
+      <FloatingAgent
+        accent="#c97b3f"
+        accentBright="#e89357"
+        label="◆ CABLE.LAB · AGENT"
+        systemPrompt={CABLE_SYSTEM_PROMPT}
+        starters={CABLE_STARTERS}
+        roleDescription="Senior cable manufacturing engineer."
+        topics={['Z₀ formulas', 'braid coverage', 'pair lay', 'TDR', 'manufacturing flow']}
+        placeholder="Ask about cable design, manufacturing, formulas…"
+        storageKey="cablelab-chat-history"
+      />
     </div>
   );
 }

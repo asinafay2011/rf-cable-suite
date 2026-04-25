@@ -1,39 +1,32 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, X, Send, Loader2, Trash2, Minimize2 } from 'lucide-react'
+import { MessageSquare, Send, Loader2, Trash2, Minimize2 } from 'lucide-react'
 
-const SYSTEM_PROMPT = `You are a senior cable manufacturing engineer embedded in the High-Speed Cable Manufacturing curriculum (CABLE.LAB).
+const MODEL_DEFAULT = 'claude-sonnet-4-6'
 
-Domain focus:
-- Coaxial cable construction (RG-58, RG-174, RG-213, LMR-400, Heliax, semi-rigid, phase-stable)
-- Twisted-pair design: pair lay (8–17 mm typical), intra-pair skew, differential impedance (90 Ω / 100 Ω)
-- 4-pair bundle geometry, cross-spline / X-filler, NEXT, FEXT, ANEXT
-- Shielding: foil + braid, optical coverage K = (2F − F²)·100% per SCTE 51, transfer impedance Zt
-- Z₀ formula: 138 / √εᵣ · log10(D/d) for coax; differential pair from Wadell
-- Manufacturing flow: conductor draw → bunch → insulation extrusion → twisting → cabling → shielding → jacketing → testing
-- Materials: Cu (1.68e-8 Ω·m), TC, SPC, NPC, PTFE/FEP/PFA/PE, foamed PE, ePTFE
-- Test: TDR, return loss, IL, eye diagram, BER, hipot
-- AWG ↔ mm conversions; Glenair Series 963 reference
-
-Style:
-- Concise, technically precise. Default to 2–4 short paragraphs unless asked for depth.
-- Show formulas in ASCII (Z = 138/√εᵣ·log(D/d)). Use markdown sparingly.
-- When asked "why", give the physics intuition before the formula.
-- If the user references a specific tool/tab in the app (Z₀ Calc, TDR Sim, Braid, Atten, Eye, Cost, Lay Design), tie the answer to what that tab computes.
-- No memory disclaimer — answer with what you know.
-- If outside cable/RF/manufacturing scope, say so briefly and redirect.`
-
-const STARTERS = [
-  'Why does pair lay length matter for NEXT?',
-  'Walk me through LMR-400 manufacturing',
-  'How does braid coverage affect Zt?',
-  'Difference between Z₀ and impedance matching?',
-]
-
-const MODEL = 'claude-sonnet-4-6'
-
-export default function CableChat() {
+export default function FloatingAgent({
+  accent = '#c97b3f',
+  accentBright = '#e89357',
+  label = '◆ AGENT',
+  systemPrompt,
+  starters = [],
+  roleDescription = 'Domain expert.',
+  topics = [],
+  placeholder = 'Ask anything…',
+  model = MODEL_DEFAULT,
+  fontFamily = '"Bricolage Grotesque", system-ui, sans-serif',
+  maxTokens = 2048,
+  storageKey,
+}) {
   const [open, setOpen] = useState(false)
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState(() => {
+    if (!storageKey) return []
+    try {
+      const raw = localStorage.getItem(storageKey)
+      return raw ? JSON.parse(raw) : []
+    } catch {
+      return []
+    }
+  })
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [streamText, setStreamText] = useState('')
@@ -51,6 +44,13 @@ export default function CableChat() {
     if (open) inputRef.current?.focus()
   }, [open])
 
+  useEffect(() => {
+    if (!storageKey) return
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(messages))
+    } catch {}
+  }, [messages, storageKey])
+
   const send = async (textOverride) => {
     const text = (textOverride ?? input).trim()
     if (!text || loading) return
@@ -66,9 +66,9 @@ export default function CableChat() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: MODEL,
-          max_tokens: 2048,
-          system: SYSTEM_PROMPT,
+          model,
+          max_tokens: maxTokens,
+          system: systemPrompt,
           messages: next.map((m) => ({ role: m.role, content: m.content })),
           stream: true,
         }),
@@ -135,8 +135,14 @@ export default function CableChat() {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-4 left-4 z-[90] flex items-center gap-2 px-4 py-3 rounded-full bg-[#c97b3f] hover:bg-[#e89357] text-[#0a0d0f] shadow-2xl transition-colors border border-[#e89357]"
-        style={{ fontFamily: '"JetBrains Mono", monospace' }}
+        className="fixed bottom-4 left-4 z-[90] flex items-center gap-2 px-4 py-3 rounded-full text-[#0a0d0f] shadow-2xl transition-colors border"
+        style={{
+          fontFamily: '"JetBrains Mono", monospace',
+          background: accent,
+          borderColor: accentBright,
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = accentBright)}
+        onMouseLeave={(e) => (e.currentTarget.style.background = accent)}
         aria-label="Open chat"
       >
         <MessageSquare size={16} strokeWidth={2.5} />
@@ -151,17 +157,19 @@ export default function CableChat() {
   return (
     <div
       className="fixed bottom-4 left-4 z-[90] flex flex-col w-[380px] max-w-[calc(100vw-2rem)] h-[520px] max-h-[calc(100vh-2rem)] bg-[#0a0d0f] border border-[#252e33] rounded-md shadow-2xl backdrop-blur-md overflow-hidden"
-      style={{ fontFamily: '"Bricolage Grotesque", system-ui, sans-serif' }}
+      style={{ fontFamily }}
     >
-      {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-[#252e33] bg-[#12171a]">
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-[#5eead4] shadow-[0_0_8px_#5eead4]" />
+          <div
+            className="w-2 h-2 rounded-full"
+            style={{ background: '#5eead4', boxShadow: '0 0 8px #5eead4' }}
+          />
           <span
-            className="text-[11px] uppercase tracking-[0.2em] text-[#c97b3f] font-semibold"
-            style={{ fontFamily: '"JetBrains Mono", monospace' }}
+            className="text-[11px] uppercase tracking-[0.2em] font-semibold"
+            style={{ color: accent, fontFamily: '"JetBrains Mono", monospace' }}
           >
-            ◆ CABLE.LAB · AGENT
+            {label}
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -184,7 +192,6 @@ export default function CableChat() {
         </div>
       </div>
 
-      {/* Messages */}
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-3 py-3 space-y-3 text-[13px] leading-relaxed"
@@ -192,14 +199,22 @@ export default function CableChat() {
         {messages.length === 0 && !loading && (
           <div className="space-y-3">
             <div className="text-[#a7b0b6] text-[12px] leading-relaxed">
-              Senior cable manufacturing engineer. Ask about{' '}
-              <span className="text-[#c97b3f]">Z₀ formulas</span>,{' '}
-              <span className="text-[#c97b3f]">braid coverage</span>,{' '}
-              <span className="text-[#c97b3f]">pair lay</span>,{' '}
-              <span className="text-[#c97b3f]">TDR</span>, manufacturing flow, or any tab in this app.
+              {roleDescription}
+              {topics.length > 0 && (
+                <>
+                  {' '}Ask about{' '}
+                  {topics.map((t, i) => (
+                    <span key={t}>
+                      <span style={{ color: accent }}>{t}</span>
+                      {i < topics.length - 2 ? ', ' : i === topics.length - 2 ? ', or ' : ''}
+                    </span>
+                  ))}
+                  .
+                </>
+              )}
             </div>
             <div className="space-y-1.5">
-              {STARTERS.map((s) => (
+              {starters.map((s) => (
                 <button
                   key={s}
                   onClick={() => send(s)}
@@ -213,10 +228,10 @@ export default function CableChat() {
         )}
 
         {messages.map((m, i) => (
-          <Message key={i} role={m.role} content={m.content} />
+          <Message key={i} role={m.role} content={m.content} accent={accent} />
         ))}
 
-        {streamText && <Message role="assistant" content={streamText} streaming />}
+        {streamText && <Message role="assistant" content={streamText} accent={accent} streaming />}
 
         {loading && !streamText && (
           <div className="flex items-center gap-2 text-[#6b7479] text-[12px]">
@@ -232,7 +247,6 @@ export default function CableChat() {
         )}
       </div>
 
-      {/* Input */}
       <div className="border-t border-[#252e33] bg-[#0a0d0f] p-2 flex gap-2 items-end">
         <textarea
           ref={inputRef}
@@ -240,15 +254,24 @@ export default function CableChat() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKey}
-          placeholder="Ask about cable design, manufacturing, formulas…"
-          className="flex-1 resize-none bg-[#12171a] border border-[#252e33] focus:border-[#c97b3f] focus:outline-none rounded px-2.5 py-2 text-[13px] text-[#f0ebe2] placeholder:text-[#6b7479] max-h-[120px]"
+          placeholder={placeholder}
+          className="flex-1 resize-none bg-[#12171a] border border-[#252e33] focus:outline-none rounded px-2.5 py-2 text-[13px] text-[#f0ebe2] placeholder:text-[#6b7479] max-h-[120px]"
           style={{ fontFamily: 'inherit' }}
+          onFocus={(e) => (e.currentTarget.style.borderColor = accent)}
+          onBlur={(e) => (e.currentTarget.style.borderColor = '')}
           disabled={loading}
         />
         <button
           onClick={() => send()}
           disabled={loading || !input.trim()}
-          className="shrink-0 px-3 py-2 bg-[#c97b3f] hover:bg-[#e89357] disabled:bg-[#252e33] disabled:text-[#6b7479] disabled:cursor-not-allowed text-[#0a0d0f] rounded transition-colors flex items-center gap-1"
+          className="shrink-0 px-3 py-2 disabled:bg-[#252e33] disabled:text-[#6b7479] disabled:cursor-not-allowed text-[#0a0d0f] rounded transition-colors flex items-center gap-1"
+          style={{ background: loading || !input.trim() ? undefined : accent }}
+          onMouseEnter={(e) => {
+            if (!loading && input.trim()) e.currentTarget.style.background = accentBright
+          }}
+          onMouseLeave={(e) => {
+            if (!loading && input.trim()) e.currentTarget.style.background = accent
+          }}
           title="Send (Enter)"
         >
           {loading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
@@ -258,7 +281,7 @@ export default function CableChat() {
   )
 }
 
-function Message({ role, content, streaming }) {
+function Message({ role, content, streaming, accent }) {
   const isUser = role === 'user'
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -270,7 +293,12 @@ function Message({ role, content, streaming }) {
         }`}
       >
         {content}
-        {streaming && <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-[#c97b3f] animate-pulse" />}
+        {streaming && (
+          <span
+            className="inline-block w-1.5 h-3.5 ml-0.5 animate-pulse"
+            style={{ background: accent }}
+          />
+        )}
       </div>
     </div>
   )
