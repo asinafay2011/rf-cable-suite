@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown } from 'lucide-react'
+import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown, Eye, EyeOff } from 'lucide-react'
 
 const MODEL_DEFAULT = 'claude-sonnet-4-6'
 const MAX_TOOL_TURNS = 6
@@ -62,6 +62,20 @@ export default function FloatingAgent({
     try { localStorage.setItem(sizeKey, JSON.stringify(size)) } catch {}
   }, [sizeKey, size])
   const [resizing, setResizing] = useState(false)
+
+  // Show/hide tool pills toggle — default hidden for cleaner look
+  const showToolsKey = storageKey ? `${storageKey}-show-tools` : null
+  const [showTools, setShowTools] = useState(() => {
+    if (!showToolsKey) return false
+    try {
+      const v = localStorage.getItem(showToolsKey)
+      return v === '1'
+    } catch { return false }
+  })
+  useEffect(() => {
+    if (!showToolsKey) return
+    try { localStorage.setItem(showToolsKey, showTools ? '1' : '0') } catch {}
+  }, [showToolsKey, showTools])
 
   const startResize = (edges) => (e) => {
     e.preventDefault()
@@ -392,6 +406,16 @@ export default function FloatingAgent({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {tools && tools.length > 0 && (
+            <button
+              onClick={() => setShowTools((v) => !v)}
+              className="p-1.5 text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded transition-colors"
+              title={showTools ? 'Hide tool calls' : 'Show tool calls'}
+              style={showTools ? { color: accent } : undefined}
+            >
+              {showTools ? <Eye size={13} /> : <EyeOff size={13} />}
+            </button>
+          )}
           {messages.length > 0 && (
             <button
               onClick={clear}
@@ -446,9 +470,11 @@ export default function FloatingAgent({
           </div>
         )}
 
-        {view.map((item, i) => (
-          <ViewItem key={i} item={item} accent={accent} />
-        ))}
+        {view
+          .filter((item) => showTools || item.kind !== 'tool')
+          .map((item, i) => (
+            <ViewItem key={i} item={item} accent={accent} />
+          ))}
 
         {toolStatus === 'executing' && (
           <div className="flex items-center gap-2 text-[#6b7479] text-[12px]">
