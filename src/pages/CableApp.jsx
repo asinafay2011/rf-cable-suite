@@ -2148,7 +2148,7 @@ function BraidCoverage() {
   const sliders = [
     { label: 'N — total carriers', val: N, set: setN, min: 8, max: 48, step: 2, hint: '16 / 24 / 36 / 48 standard', fmt: (v) => v },
     { label: 'P — ends per carrier', val: P, set: setP, min: 1, max: 15, step: 1, hint: '5–8 typical, up to 12 premium', fmt: (v) => v },
-    { label: 'd — strand Ø (mm)', val: d, set: setStrand, min: 0.05, max: 0.40, step: 0.01, hint: '36–40 AWG SPC/TC', fmt: (v) => `${v.toFixed(2)} / ${(v/25.4).toFixed(4)}″` },
+    { label: 'd — strand Ø (mm)', val: d, set: setStrand, min: 0.025, max: 0.255, step: 0.005, hint: '30–50 AWG SPC/TC', fmt: (v) => `${v.toFixed(3)} / ${(v/25.4).toFixed(4)}″` },
     { label: 'D — cable Ø (mm)', val: D, set: setCableD, min: 1.0, max: 15.0, step: 0.1, hint: 'OD under braid', fmt: (v) => `${v.toFixed(1)} / ${(v/25.4).toFixed(3)}″` },
     { label: 'PR — picks/inch', val: PR, set: setPR, min: 4, max: 30, step: 1, hint: '8–25 typical', fmt: (v) => v },
   ];
