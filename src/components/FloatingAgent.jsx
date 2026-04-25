@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown, Eye, EyeOff } from 'lucide-react'
+import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown, Eye, EyeOff, Image as ImageIcon, X as XIcon, Paperclip } from 'lucide-react'
 
 const MODEL_DEFAULT = 'claude-sonnet-4-6'
 const MAX_TOOL_TURNS = 6
@@ -62,6 +62,8 @@ export default function FloatingAgent({
     try { localStorage.setItem(sizeKey, JSON.stringify(size)) } catch {}
   }, [sizeKey, size])
   const [resizing, setResizing] = useState(false)
+  const [pendingImage, setPendingImage] = useState(null) // { mediaType, data, dataUrl }
+  const fileInputRef = useRef(null)
 
   // Show/hide tool pills toggle — default hidden for cleaner look
   const showToolsKey = storageKey ? `${storageKey}-show-tools` : null
@@ -227,17 +229,72 @@ export default function FloatingAgent({
               return { type: 'tool_result', tool_use_id: b.tool_use_id, content: b.content }
             }
             if (b.type === 'text') return { type: 'text', text: b.text || '' }
+            if (b.type === 'image') return { type: 'image', source: b.source }
             return b
           }),
     }))
 
+  // Read a File/Blob as base64 data URL
+  const readImage = (file) =>
+    new Promise((resolve, reject) => {
+      if (!file.type.startsWith('image/')) return reject(new Error('Not an image'))
+      const reader = new FileReader()
+      reader.onload = () => {
+        const url = reader.result
+        const m = /^data:([^;]+);base64,(.+)$/.exec(url)
+        if (!m) return reject(new Error('Bad image encoding'))
+        resolve({ mediaType: m[1], data: m[2], dataUrl: url })
+      }
+      reader.onerror = () => reject(new Error('Failed to read image'))
+      reader.readAsDataURL(file)
+    })
+
+  const onPaste = async (e) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (!file) continue
+        e.preventDefault()
+        try {
+          const img = await readImage(file)
+          setPendingImage(img)
+        } catch (err) {
+          setError(err.message || 'Could not read image')
+        }
+        return
+      }
+    }
+  }
+
+  const onPickFile = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // reset so same file can be picked twice
+    if (!file) return
+    try {
+      const img = await readImage(file)
+      setPendingImage(img)
+    } catch (err) {
+      setError(err.message || 'Could not read image')
+    }
+  }
+
   const send = async (textOverride) => {
     const text = (textOverride ?? input).trim()
-    if (!text || loading) return
+    const img = pendingImage
+    if ((!text && !img) || loading) return
     setInput('')
     setError(null)
+    setPendingImage(null)
 
-    let history = [...messages, { role: 'user', content: text }]
+    const userContent = img
+      ? [
+          { type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data }, _dataUrl: img.dataUrl },
+          { type: 'text', text: text || 'What do you see in this image?' },
+        ]
+      : text
+    let history = [...messages, { role: 'user', content: userContent }]
     setMessages(history)
     setLoading(true)
     setStreamBlocks(null)
@@ -504,35 +561,75 @@ export default function FloatingAgent({
         )}
       </div>
 
-      <div className="border-t border-[#252e33] bg-[#0a0d0f] p-2 flex gap-2 items-end">
-        <textarea
-          ref={inputRef}
-          rows={1}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKey}
-          placeholder={placeholder}
-          className="flex-1 resize-none bg-[#12171a] border border-[#252e33] focus:outline-none rounded px-2.5 py-2 text-[13px] text-[#f0ebe2] placeholder:text-[#6b7479] max-h-[120px]"
-          style={{ fontFamily: 'inherit' }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = accent)}
-          onBlur={(e) => (e.currentTarget.style.borderColor = '')}
-          disabled={loading}
-        />
-        <button
-          onClick={() => send()}
-          disabled={loading || !input.trim()}
-          className="shrink-0 px-3 py-2 disabled:bg-[#252e33] disabled:text-[#6b7479] disabled:cursor-not-allowed text-[#0a0d0f] rounded transition-colors flex items-center gap-1"
-          style={{ background: loading || !input.trim() ? undefined : accent }}
-          onMouseEnter={(e) => {
-            if (!loading && input.trim()) e.currentTarget.style.background = accentBright
-          }}
-          onMouseLeave={(e) => {
-            if (!loading && input.trim()) e.currentTarget.style.background = accent
-          }}
-          title="Send (Enter)"
-        >
-          {loading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-        </button>
+      <div className="border-t border-[#252e33] bg-[#0a0d0f] p-2 space-y-2">
+        {pendingImage && (
+          <div className="flex items-center gap-2 px-2 py-1.5 bg-[#12171a] border border-[#252e33] rounded">
+            <img
+              src={pendingImage.dataUrl}
+              alt=""
+              className="w-10 h-10 object-cover rounded border border-[#252e33]"
+            />
+            <div className="flex-1 min-w-0">
+              <div className="text-[11px] text-[#a7b0b6] truncate" style={{ fontFamily: '"JetBrains Mono", monospace' }}>
+                {pendingImage.mediaType.replace('image/', '').toUpperCase()} · {Math.round((pendingImage.data.length * 3) / 4 / 1024)} KB
+              </div>
+              <div className="text-[10px] text-[#6b7479]">attached — press Enter to send</div>
+            </div>
+            <button
+              onClick={() => setPendingImage(null)}
+              className="p-1 text-[#6b7479] hover:text-[#f87171] rounded"
+              title="Remove image"
+            >
+              <XIcon size={13} />
+            </button>
+          </div>
+        )}
+        <div className="flex gap-2 items-end">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={onPickFile}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading}
+            className="shrink-0 p-2 text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#1f1610] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
+            title="Attach image (or paste / Ctrl+V)"
+          >
+            <Paperclip size={14} />
+          </button>
+          <textarea
+            ref={inputRef}
+            rows={1}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKey}
+            onPaste={onPaste}
+            placeholder={pendingImage ? 'Add a question (optional)…' : placeholder}
+            className="flex-1 resize-none bg-[#12171a] border border-[#252e33] focus:outline-none rounded px-2.5 py-2 text-[13px] text-[#f0ebe2] placeholder:text-[#6b7479] max-h-[120px]"
+            style={{ fontFamily: 'inherit' }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = accent)}
+            onBlur={(e) => (e.currentTarget.style.borderColor = '')}
+            disabled={loading}
+          />
+          <button
+            onClick={() => send()}
+            disabled={loading || (!input.trim() && !pendingImage)}
+            className="shrink-0 px-3 py-2 disabled:bg-[#252e33] disabled:text-[#6b7479] disabled:cursor-not-allowed text-[#0a0d0f] rounded transition-colors flex items-center gap-1"
+            style={{ background: loading || (!input.trim() && !pendingImage) ? undefined : accent }}
+            onMouseEnter={(e) => {
+              if (!loading && (input.trim() || pendingImage)) e.currentTarget.style.background = accentBright
+            }}
+            onMouseLeave={(e) => {
+              if (!loading && (input.trim() || pendingImage)) e.currentTarget.style.background = accent
+            }}
+            title="Send (Enter)"
+          >
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -556,8 +653,23 @@ function buildView(messages, streamBlocks) {
     if (m.role === 'user') {
       if (typeof m.content === 'string') {
         view.push({ kind: 'user', text: m.content })
+      } else if (Array.isArray(m.content)) {
+        // User message with blocks — could be image+text, or tool_result
+        const hasNonTool = m.content.some((b) => b.type === 'image' || b.type === 'text')
+        if (hasNonTool) {
+          const textBlock = m.content.find((b) => b.type === 'text')
+          const imgBlock = m.content.find((b) => b.type === 'image')
+          view.push({
+            kind: 'user',
+            text: textBlock?.text || '',
+            imageUrl: imgBlock?._dataUrl ||
+              (imgBlock?.source?.type === 'base64'
+                ? `data:${imgBlock.source.media_type};base64,${imgBlock.source.data}`
+                : null),
+          })
+        }
+        // tool_result-only user messages are not shown directly (stitched into tool_use above)
       }
-      // tool_result-only user messages are not shown directly (stitched into tool_use above)
     } else if (m.role === 'assistant') {
       const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text', text: m.content }]
       for (const b of blocks) {
@@ -610,8 +722,15 @@ function ViewItem({ item, accent }) {
   if (item.kind === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[88%] px-3 py-2 rounded text-[13px] leading-relaxed whitespace-pre-wrap bg-[#2a1d14] border border-[#3d2a1c] text-[#fbbf24]">
-          {item.text}
+        <div className="max-w-[88%] px-3 py-2 rounded text-[13px] leading-relaxed whitespace-pre-wrap bg-[#2a1d14] border border-[#3d2a1c] text-[#fbbf24] space-y-2">
+          {item.imageUrl && (
+            <img
+              src={item.imageUrl}
+              alt=""
+              className="max-w-full max-h-[240px] rounded border border-[#3d2a1c]"
+            />
+          )}
+          {item.text && <div>{item.text}</div>}
         </div>
       </div>
     )
