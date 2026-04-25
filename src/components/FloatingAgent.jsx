@@ -43,6 +43,53 @@ export default function FloatingAgent({
   }, [modelKey, modelId])
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const currentModel = models.find((m) => m.id === modelId) || models[0]
+
+  // Resize state — persisted size per-app
+  const sizeKey = storageKey ? `${storageKey}-size` : null
+  const [size, setSize] = useState(() => {
+    if (!sizeKey) return { w: 380, h: 520 }
+    try {
+      const raw = localStorage.getItem(sizeKey)
+      if (raw) {
+        const s = JSON.parse(raw)
+        if (s?.w > 0 && s?.h > 0) return s
+      }
+    } catch {}
+    return { w: 380, h: 520 }
+  })
+  useEffect(() => {
+    if (!sizeKey) return
+    try { localStorage.setItem(sizeKey, JSON.stringify(size)) } catch {}
+  }, [sizeKey, size])
+  const [resizing, setResizing] = useState(false)
+
+  const startResize = (edges) => (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startY = e.clientY
+    const startW = size.w
+    const startH = size.h
+    setResizing(true)
+    const onMove = (ev) => {
+      let w = startW
+      let h = startH
+      if (edges.includes('right')) {
+        w = Math.max(280, Math.min(window.innerWidth - 32, startW + (ev.clientX - startX)))
+      }
+      if (edges.includes('top')) {
+        h = Math.max(280, Math.min(window.innerHeight - 32, startH - (ev.clientY - startY)))
+      }
+      setSize({ w, h })
+    }
+    const onUp = () => {
+      setResizing(false)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
   const [messages, setMessages] = useState(() => {
     if (!storageKey) return []
     try {
@@ -266,9 +313,26 @@ export default function FloatingAgent({
 
   return (
     <div
-      className="fixed bottom-4 left-4 z-[90] flex flex-col w-[380px] max-w-[calc(100vw-2rem)] h-[520px] max-h-[calc(100vh-2rem)] bg-[#0a0d0f] border border-[#252e33] rounded-md shadow-2xl backdrop-blur-md overflow-hidden"
-      style={{ fontFamily }}
+      className="fixed bottom-4 left-4 z-[90] flex flex-col max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] bg-[#0a0d0f] border border-[#252e33] rounded-md shadow-2xl backdrop-blur-md overflow-hidden"
+      style={{ fontFamily, width: size.w, height: size.h, userSelect: resizing ? 'none' : undefined }}
     >
+      {/* Resize handles — top edge, right edge, top-right corner */}
+      <div
+        onPointerDown={startResize('top')}
+        className="absolute top-0 left-2 right-3 h-1.5 cursor-ns-resize hover:bg-[#c97b3f]/20 z-[5]"
+        title="Drag to resize"
+      />
+      <div
+        onPointerDown={startResize('right')}
+        className="absolute top-3 bottom-0 right-0 w-1.5 cursor-ew-resize hover:bg-[#c97b3f]/20 z-[5]"
+        title="Drag to resize"
+      />
+      <div
+        onPointerDown={startResize('top right')}
+        className="absolute top-0 right-0 w-3 h-3 cursor-nesw-resize z-[6]"
+        style={{ background: 'linear-gradient(225deg, transparent 40%, ' + accent + ' 40%, ' + accent + ' 55%, transparent 55%, transparent 70%, ' + accent + ' 70%, ' + accent + ' 85%, transparent 85%)' }}
+        title="Drag to resize"
+      />
       <div className="flex items-center justify-between px-3 py-2 border-b border-[#252e33] bg-[#12171a]">
         <div className="flex items-center gap-2">
           <div
