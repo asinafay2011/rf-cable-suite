@@ -9,6 +9,9 @@ import FloatingAgent from '../components/FloatingAgent.jsx';
 import { CABLE_TOOLS, dispatchCableTool } from '../components/cableTools.js';
 import VNATest from '../components/VNATest.jsx';
 import CustomCablesPanel from '../components/CustomCablesPanel.jsx';
+import { useIsMobile } from '../components/useIsMobile.js';
+import { Menu, X as XIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { parseTouchstone, returnLossDb, vswr, s11Summary } from '../components/touchstone.js';
 import { computeTDR, peakReflection } from '../components/fft.js';
 
@@ -5757,6 +5760,8 @@ function Hero() {
    Top Nav
    ============================================================ */
 function TopNav({ active, onChange }) {
+  const isMobile = useIsMobile();
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const items = [
     { id: 'progression', label: 'Progression', icon: Cable },
     { id: 'm1', label: 'Conductor', icon: Atom },
@@ -5775,6 +5780,71 @@ function TopNav({ active, onChange }) {
     { id: 'catalog', label: '963 Catalog', icon: Library },
     { id: 'more', label: 'Modules 4–10', icon: ChevronRight },
   ];
+  const activeLabel = items.find((it) => it.id === active)?.label || 'CABLE.LAB';
+
+  if (isMobile) {
+    return (
+      <>
+        <nav className="sticky top-0 z-40 backdrop-blur-md bg-[#0a0d0f]/85 border-b border-[#252e33]">
+          <div className="px-4 py-2 flex items-center justify-between gap-2">
+            <div className="font-mono text-[11px] text-[#c97b3f] tracking-[0.2em] shrink-0">
+              ◆ CABLE.LAB
+            </div>
+            <div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-[#fbbf24] truncate">
+                {activeLabel}
+              </span>
+              <button
+                onClick={() => setDrawerOpen(true)}
+                className="p-2 -mr-2 text-[#a7b0b6] hover:text-[#fbbf24]"
+                aria-label="Open menu"
+              >
+                <Menu size={20} />
+              </button>
+            </div>
+          </div>
+        </nav>
+        {drawerOpen && (
+          <div className="fixed inset-0 z-[200]" onClick={() => setDrawerOpen(false)}>
+            <div className="absolute inset-0 bg-[#0a0d0f]/90 backdrop-blur-sm" />
+            <aside
+              onClick={(e) => e.stopPropagation()}
+              className="absolute top-0 right-0 bottom-0 w-[85%] max-w-[340px] bg-[#0a0d0f] border-l border-[#252e33] overflow-y-auto"
+              style={{ fontFamily: 'Bricolage Grotesque, sans-serif' }}
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-[#252e33]">
+                <span className="font-mono text-[11px] text-[#c97b3f] tracking-[0.2em]">◆ CABLE.LAB</span>
+                <button onClick={() => setDrawerOpen(false)} className="p-2 -mr-2 text-[#a7b0b6] hover:text-[#fbbf24]" aria-label="Close menu">
+                  <XIcon size={18} />
+                </button>
+              </div>
+              <div className="px-3 py-3 border-b border-[#252e33] flex flex-col gap-1">
+                <Link to="/rf" onClick={() => setDrawerOpen(false)} className="px-3 py-2 text-[12px] font-mono uppercase tracking-wider text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded">RF Workbench</Link>
+                <Link to="/about" onClick={() => setDrawerOpen(false)} className="px-3 py-2 text-[12px] font-mono uppercase tracking-wider text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded">Methodology</Link>
+                <Link to="/" onClick={() => setDrawerOpen(false)} className="px-3 py-2 text-[12px] font-mono uppercase tracking-wider text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded">Home</Link>
+              </div>
+              <div className="px-2 py-2 flex flex-col">
+                {items.map((it) => (
+                  <button
+                    key={it.id}
+                    onClick={() => { onChange(it.id); setDrawerOpen(false); }}
+                    className={`flex items-center gap-3 px-3 py-3 text-[13px] font-mono uppercase tracking-wider rounded transition-colors text-left ${
+                      active === it.id
+                        ? 'bg-[#2a1d14] text-[#fbbf24]'
+                        : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610]'
+                    }`}
+                  >
+                    <it.icon className="w-4 h-4 shrink-0" />
+                    {it.label}
+                  </button>
+                ))}
+              </div>
+            </aside>
+          </div>
+        )}
+      </>
+    );
+  }
   return (
     <nav className="sticky top-0 z-40 backdrop-blur-md bg-[#0a0d0f]/85 border-b border-[#252e33]">
       <div className="px-4 md:px-8 py-2 pr-[230px] flex items-center gap-y-1 gap-x-0.5 flex-wrap">

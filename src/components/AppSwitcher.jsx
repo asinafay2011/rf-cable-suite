@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { Radio, Cable, BookOpen } from 'lucide-react'
+import { useIsMobile } from './useIsMobile.js'
 
 const baseTab =
   'flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium tracking-wide uppercase rounded-sm border transition-colors'
@@ -10,6 +11,10 @@ const cls = ({ isActive }) =>
     : `${baseTab} text-[#a7b0b6] bg-transparent border-transparent hover:bg-[#1f1610]`
 
 export default function AppSwitcher() {
+  const isMobile = useIsMobile()
+  // On mobile, the inline AppSwitcher is hidden — its links are surfaced inside
+  // each app's hamburger menu instead.
+  if (isMobile) return null
   return (
     <div
       className="fixed top-3 right-3 z-[100] flex gap-1 p-1 rounded-md bg-[#0a0d0f]/90 backdrop-blur-md border border-[#1f1610] shadow-lg"

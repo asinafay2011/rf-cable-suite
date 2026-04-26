@@ -1,7 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect, createContext, useContext } from "react";
+import { Link } from "react-router-dom";
+import { Menu, X as XIcon } from "lucide-react";
 import FloatingAgent from "../components/FloatingAgent.jsx";
 import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
 import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
+import { useIsMobile } from "../components/useIsMobile.js";
 
 const RF_SYSTEM_PROMPT = `You are a senior RF cable engineer embedded in the RF Cable Engineering Suite. You have access to calculation tools — use them whenever a numeric answer is requested instead of relying on memorized constants.
 
@@ -1627,6 +1630,10 @@ export default function RFCableSuite() {
 
   const settingsCtx = { units, setUnits, showTools, setShowTools, ttsEnabled, setTtsEnabled, model, setModel };
 
+  const isMobile = useIsMobile();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const NAV_TABS = [["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["tools", "Tools"], ["wizard", "Wizard"], ["cheat", "Cheat Sheet"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]];
+
   const loadCableIntoDesign = (id) => { setActiveCable(id); setTab("design"); };
   const askAboutCable = (id) => {
     const c = CABLES[id];
@@ -1684,22 +1691,88 @@ export default function RFCableSuite() {
           .hover-pill:hover { background: rgba(217,119,6,0.1) !important; }
         `}</style>
 
-        <header style={S.header}>
-          <div>
-            <div style={S.eyebrow}>RF Engineering Suite</div>
-            <h1 style={S.title}>Coaxial Cable Workbench</h1>
+        {isMobile ? (
+          <header style={{ ...S.header, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+              <div style={{ ...S.eyebrow, fontSize: 9 }}>RF Engineering Suite</div>
+              <div style={{ ...S.title, fontSize: 18, lineHeight: 1.1, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {NAV_TABS.find(([k]) => k === tab)?.[1] || "Coaxial Cable Workbench"}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button onClick={() => setSettingsOpen(!settingsOpen)} style={{ ...S.settingsBtn, ...(settingsOpen ? S.settingsBtnActive : {}) }} title="Settings">
+                <SettingsIcon />
+              </button>
+              <button
+                onClick={() => setMobileNavOpen(true)}
+                style={{ ...S.settingsBtn, padding: 8 }}
+                aria-label="Open menu"
+              >
+                <Menu size={20} />
+              </button>
+            </div>
+          </header>
+        ) : (
+          <header style={S.header}>
+            <div>
+              <div style={S.eyebrow}>RF Engineering Suite</div>
+              <h1 style={S.title}>Coaxial Cable Workbench</h1>
+            </div>
+            <div style={S.headerRight}>
+              <nav style={S.nav}>
+                {NAV_TABS.map(([k, label]) => (
+                  <button key={k} onClick={() => setTab(k)} style={{ ...S.navBtn, ...(tab === k ? S.navBtnActive : {}), ...(k === "compare" && comparedCables.length > 0 ? { borderColor: "#d97706", color: "#fbbf24" } : {}) }}>{label}</button>
+                ))}
+              </nav>
+              <button onClick={() => setSettingsOpen(!settingsOpen)} style={{ ...S.settingsBtn, ...(settingsOpen ? S.settingsBtnActive : {}) }} title="Settings">
+                <SettingsIcon />
+              </button>
+            </div>
+          </header>
+        )}
+        {isMobile && mobileNavOpen && (
+          <div style={{ position: "fixed", inset: 0, zIndex: 200 }} onClick={() => setMobileNavOpen(false)}>
+            <div style={{ position: "absolute", inset: 0, background: "rgba(10,7,5,0.92)", backdropFilter: "blur(6px)" }} />
+            <aside
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "absolute", top: 0, right: 0, bottom: 0, width: "85%", maxWidth: 340,
+                background: "#0a0705", borderLeft: "1px solid #2a1f15", overflowY: "auto",
+                fontFamily: "'Fraunces', serif",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid #2a1f15" }}>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#d97706", letterSpacing: 2, textTransform: "uppercase" }}>◆ RF Workbench</span>
+                <button onClick={() => setMobileNavOpen(false)} style={{ background: "transparent", border: "none", color: "#a89d8e", padding: 6, cursor: "pointer" }} aria-label="Close">
+                  <XIcon size={18} />
+                </button>
+              </div>
+              <div style={{ padding: "10px 12px", borderBottom: "1px solid #2a1f15", display: "flex", flexDirection: "column", gap: 2 }}>
+                <Link to="/highspeed" onClick={() => setMobileNavOpen(false)} style={{ padding: "10px 12px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#a89d8e", textTransform: "uppercase", letterSpacing: 1, textDecoration: "none", borderRadius: 3 }}>Highspeed Cable</Link>
+                <Link to="/about" onClick={() => setMobileNavOpen(false)} style={{ padding: "10px 12px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#a89d8e", textTransform: "uppercase", letterSpacing: 1, textDecoration: "none", borderRadius: 3 }}>Methodology</Link>
+                <Link to="/" onClick={() => setMobileNavOpen(false)} style={{ padding: "10px 12px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#a89d8e", textTransform: "uppercase", letterSpacing: 1, textDecoration: "none", borderRadius: 3 }}>Home</Link>
+              </div>
+              <div style={{ padding: "8px 8px", display: "flex", flexDirection: "column" }}>
+                {NAV_TABS.map(([k, label]) => (
+                  <button
+                    key={k}
+                    onClick={() => { setTab(k); setMobileNavOpen(false); }}
+                    style={{
+                      textAlign: "left", padding: "12px 14px", border: "none",
+                      background: tab === k ? "#2a1d14" : "transparent",
+                      color: tab === k ? "#fbbf24" : "#a89d8e",
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 13, textTransform: "uppercase", letterSpacing: 1,
+                      borderRadius: 3, cursor: "pointer", marginBottom: 2,
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </aside>
           </div>
-          <div style={S.headerRight}>
-            <nav style={S.nav}>
-              {[["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["tools", "Tools"], ["wizard", "Wizard"], ["cheat", "Cheat Sheet"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]].map(([k, label]) => (
-                <button key={k} onClick={() => setTab(k)} style={{ ...S.navBtn, ...(tab === k ? S.navBtnActive : {}), ...(k === "compare" && comparedCables.length > 0 ? { borderColor: "#d97706", color: "#fbbf24" } : {}) }}>{label}</button>
-              ))}
-            </nav>
-            <button onClick={() => setSettingsOpen(!settingsOpen)} style={{ ...S.settingsBtn, ...(settingsOpen ? S.settingsBtnActive : {}) }} title="Settings">
-              <SettingsIcon />
-            </button>
-          </div>
-        </header>
+        )}
 
         {settingsOpen && (
           <div className="settings-anim" style={S.settingsPanel}>

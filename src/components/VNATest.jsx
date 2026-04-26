@@ -482,7 +482,7 @@ function FileSlot({ label, sub, accent, entry, onFile, onClear }) {
           </button>
         )}
       </div>
-      <input ref={ref} type="file" accept=".s1p,.s2p,.s3p,.s4p,.txt" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f) }} className="hidden" />
+      <input ref={ref} type="file" accept=".s1p,.s2p,.s3p,.s4p,.txt,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f) }} className="hidden" />
       {entry ? (
         <div className="text-[12px] text-[#f0ebe2] space-y-1">
           <div className="font-mono truncate" title={entry.name}>{entry.name}</div>

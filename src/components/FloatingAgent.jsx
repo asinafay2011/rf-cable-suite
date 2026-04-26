@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown, Eye, EyeOff, Image as ImageIcon, X as XIcon, Paperclip, Download, Mic, MicOff, HelpCircle, Globe } from 'lucide-react'
+import { useIsMobile } from './useIsMobile.js'
 
 const MODEL_DEFAULT = 'claude-sonnet-4-6'
 const MAX_TOOL_TURNS = 6
@@ -33,6 +34,7 @@ export default function FloatingAgent({
   toolToSection,   // optional { [toolName]: { id, label } } — maps tool to a target tab
   onJumpToSection, // optional (sectionId) => void — host wires this to its section setter
 }) {
+  const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const modelKey = storageKey ? `${storageKey}-model` : null
   const [modelId, setModelId] = useState(() => {
@@ -553,7 +555,7 @@ export default function FloatingAgent({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-4 left-4 z-[90] flex items-center gap-2 px-4 py-3 rounded-full text-[#0a0d0f] shadow-2xl transition-colors border"
+        className={`fixed z-[90] flex items-center gap-2 rounded-full text-[#0a0d0f] shadow-2xl transition-colors border ${isMobile ? 'bottom-3 left-3 px-3 py-2.5' : 'bottom-4 left-4 px-4 py-3'}`}
         style={{
           fontFamily: '"JetBrains Mono", monospace',
           background: accent,
@@ -563,7 +565,7 @@ export default function FloatingAgent({
         onMouseLeave={(e) => (e.currentTarget.style.background = accent)}
         aria-label="Open chat"
       >
-        <MessageSquare size={16} strokeWidth={2.5} />
+        <MessageSquare size={isMobile ? 18 : 16} strokeWidth={2.5} />
         <span className="text-[11px] font-semibold uppercase tracking-wider">Ask</span>
         {messages.length > 0 && (
           <span className="text-[10px] bg-[#0a0d0f]/30 px-1.5 py-0.5 rounded">{visibleCount(messages)}</span>
@@ -577,26 +579,37 @@ export default function FloatingAgent({
 
   return (
     <div
-      className="fixed bottom-4 left-4 z-[90] flex flex-col max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] bg-[#0a0d0f] border border-[#252e33] rounded-md shadow-2xl backdrop-blur-md overflow-hidden"
-      style={{ fontFamily, width: size.w, height: size.h, userSelect: resizing ? 'none' : undefined }}
+      className={`fixed z-[90] flex flex-col bg-[#0a0d0f] border border-[#252e33] shadow-2xl backdrop-blur-md overflow-hidden ${
+        isMobile
+          ? 'inset-0 rounded-none'  // bottom-sheet style: full screen on mobile
+          : 'bottom-4 left-4 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] rounded-md'
+      }`}
+      style={isMobile
+        ? { fontFamily }
+        : { fontFamily, width: size.w, height: size.h, userSelect: resizing ? 'none' : undefined }
+      }
     >
-      {/* Resize handles — top edge, right edge, top-right corner */}
-      <div
-        onPointerDown={startResize('top')}
-        className="absolute top-0 left-2 right-3 h-1.5 cursor-ns-resize hover:bg-[#c97b3f]/20 z-[5]"
-        title="Drag to resize"
-      />
-      <div
-        onPointerDown={startResize('right')}
-        className="absolute top-3 bottom-0 right-0 w-1.5 cursor-ew-resize hover:bg-[#c97b3f]/20 z-[5]"
-        title="Drag to resize"
-      />
-      <div
-        onPointerDown={startResize('top right')}
-        className="absolute top-0 right-0 w-3 h-3 cursor-nesw-resize z-[6]"
-        style={{ background: 'linear-gradient(225deg, transparent 40%, ' + accent + ' 40%, ' + accent + ' 55%, transparent 55%, transparent 70%, ' + accent + ' 70%, ' + accent + ' 85%, transparent 85%)' }}
-        title="Drag to resize"
-      />
+      {/* Resize handles — desktop only (mobile uses fixed full-screen bottom-sheet) */}
+      {!isMobile && (
+        <>
+          <div
+            onPointerDown={startResize('top')}
+            className="absolute top-0 left-2 right-3 h-1.5 cursor-ns-resize hover:bg-[#c97b3f]/20 z-[5]"
+            title="Drag to resize"
+          />
+          <div
+            onPointerDown={startResize('right')}
+            className="absolute top-3 bottom-0 right-0 w-1.5 cursor-ew-resize hover:bg-[#c97b3f]/20 z-[5]"
+            title="Drag to resize"
+          />
+          <div
+            onPointerDown={startResize('top right')}
+            className="absolute top-0 right-0 w-3 h-3 cursor-nesw-resize z-[6]"
+            style={{ background: 'linear-gradient(225deg, transparent 40%, ' + accent + ' 40%, ' + accent + ' 55%, transparent 55%, transparent 70%, ' + accent + ' 70%, ' + accent + ' 85%, transparent 85%)' }}
+            title="Drag to resize"
+          />
+        </>
+      )}
       <div className="flex items-center justify-between px-3 py-2 border-b border-[#252e33] bg-[#12171a]">
         <div className="flex items-center gap-2">
           <div
@@ -832,6 +845,7 @@ export default function FloatingAgent({
             ref={fileInputRef}
             type="file"
             accept={attachAccept}
+            capture={isMobile && attachAccept.includes('image') ? 'environment' : undefined}
             onChange={onPickFile}
             className="hidden"
           />
