@@ -4477,7 +4477,17 @@ function CableTypeIcon({ type, size = 90 }) {
    Build recipe — generates BOM + process from product specs
    ============================================================ */
 function buildRecipe(p) {
-  const isShielded = /shield|s\/ftp|f\/utp|foil|braid/i.test(p.hl + p.name);
+  const blob = (p.hl || '') + ' ' + (p.name || '') + ' ' + (p.app || '') + ' ' + (p.std || '') + ' ' + (p.pn || '');
+  const isShielded = /shield|s\/ftp|f\/utp|s\/utp|sftp|foil|braid|screened/i.test(blob);
+  const isSFTP    = /s\/ftp|sftp|s-ftp/i.test(blob);
+  const isFTP     = /f\/utp|fftp|ftp|f-utp/i.test(blob);
+  const isUFTP    = /u\/ftp|uftp|per-?pair foil|individual.{0,5}foil/i.test(blob);
+  // Per-pair foil = each pair gets its OWN foil shield (S/FTP, U/FTP, USB4 etc.)
+  const hasPairFoil  = isSFTP || isUFTP || /usb4|usb 3\.|thunderbolt|tb[34]|hdmi|displayport/i.test(blob);
+  // Per-pair binder/wrap (PTFE tape or polyester) — required for high-temp / fluoropolymer or before pair foil
+  const hasPairWrap  = hasPairFoil || /PTFE|FEP|PFA|aerospace|MIL|space/i.test(blob);
+  const hasOuterFoil = isFTP || isShielded;
+  const hasOuterBraid = /braid|s\/ftp|sftp/i.test(blob);
   const isFEP = /FEP|PFA|PTFE|aerospace|space|MIL/i.test(p.app + p.std + p.hl);
   const isFoam = /foam/i.test(p.hl + p.name);
   const conductorMaterial = /SPC|silver/i.test(p.awg + p.hl) ? 'Silver-plated copper (SPC), ASTM B298 Class A'
@@ -4500,12 +4510,19 @@ function buildRecipe(p) {
   if (p.type === '4pair' || p.type === 'starquad' || p.type === 'twinax') {
     bom.push({ stage: 'Color compound', material: 'PE/FEP masterbatch (4–8 colors)', qty: 'per-pair coding', role: 'Pair identification' });
   }
-  if (isShielded) {
-    bom.push({ stage: 'Foil shield', material: 'Aluminum-polyester (Al/PET) tape, 25 µm Al + 12 µm PET', qty: 'longitudinal wrap, 25% overlap', role: 'HF shielding (≥1 GHz)' });
-    bom.push({ stage: 'Drain wire', material: '24-26 AWG tinned copper', qty: '1 strand', role: 'Foil ground continuity' });
+  if (hasPairWrap) {
+    bom.push({ stage: 'Pair binder wrap', material: hasPairFoil ? 'Polyester (Mylar) tape, 12 µm' : 'PTFE tape, 25-50 µm', qty: 'helical wrap, 25% overlap, per pair', role: 'Holds twist + interface to foil' });
   }
-  if (/braid|S\/FTP/i.test(p.hl + p.name)) {
-    bom.push({ stage: 'Braid', material: '36-40 AWG TC/SPC, 16-24 carriers × 5-8 ends', qty: '85-95% coverage', role: 'LF shielding + mechanical' });
+  if (hasPairFoil) {
+    bom.push({ stage: 'Per-pair foil', material: 'Al/PET tape, 25 µm Al + 12 µm PET, foil-side-in', qty: 'longitudinal wrap, per pair', role: 'Pair-level HF shield (S/FTP / U/FTP / USB4 etc.)' });
+    bom.push({ stage: 'Pair drain wire', material: '28-30 AWG tinned copper, per pair', qty: '1 strand × pair count', role: 'Per-pair foil ground continuity' });
+  }
+  if (hasOuterFoil) {
+    bom.push({ stage: 'Outer foil shield', material: 'Aluminum-polyester (Al/PET) tape, 25 µm Al + 12 µm PET', qty: 'longitudinal wrap, 25% overlap', role: 'Bundle-level HF shielding (≥1 GHz)' });
+    bom.push({ stage: 'Outer drain wire', material: '24-26 AWG tinned copper', qty: '1 strand', role: 'Outer-foil ground continuity' });
+  }
+  if (hasOuterBraid) {
+    bom.push({ stage: 'Outer braid', material: '36-40 AWG TC/SPC, 16-24 carriers × 5-8 ends', qty: '85-95% coverage', role: 'LF shielding + mechanical robustness' });
   }
   if (p.type === '4pair') {
     bom.push({ stage: 'Cross-spline', material: 'PE / FRPE extruded X-profile', qty: '0.5-0.8 mm × 2.5-3.5 mm arms', role: 'Pair separation, NEXT control' });
@@ -4583,6 +4600,33 @@ function buildRecipe(p) {
       spec: 'Lay ±5%, capacitance unbalance <40 pF/100ft (<20 pF for Cat 6A), DCR shift <2%, no visible kink/loop',
     });
   }
+  if ((p.type === '4pair' || p.type === 'twinax') && hasPairWrap) {
+    proc.push({
+      n: proc.length + 1,
+      name: 'Pair binder wrap (PTFE / polyester tape)',
+      machine: 'Helical tape applicator (per-pair head)',
+      detail: `Each twisted pair runs through a tape head BEFORE the foil station (or as the only "wrap" layer in PTFE-only constructions).
+• MATERIAL: ${hasPairFoil ? 'polyester (Mylar) 12 µm tape — works with the foil adhesive in S/FTP, U/FTP, USB4 builds' : 'PTFE tape 25-50 µm — high-temp, low-εr (~2.1), used in aerospace / FEP builds without foil'}.
+• OVERLAP: 25-50% so the spiral seals after relaxation. Too loose → foil gaps; too tight → ovalises pair.
+• TENSION: 50-150 g, dancer-controlled. Tape stretches if pulled — εr shifts.
+• SPEED MATCH: tape pad rpm tied to line speed via servo so overlap stays constant on different cable diameters.`,
+      spec: 'Continuous wrap, no gaps, overlap 25-50%, tension repeatable ±5%',
+    });
+  }
+  if ((p.type === '4pair' || p.type === 'twinax') && hasPairFoil) {
+    proc.push({
+      n: proc.length + 1,
+      name: 'Per-pair foil shield + drain wire',
+      machine: 'Longitudinal "cigarette" wrap head + drain payoff',
+      detail: `THIS IS THE STEP MOST OFTEN CALLED "S/FTP" OR "U/FTP" — each twisted pair gets its OWN foil shield (not a single shield over the whole bundle).
+• ORIENTATION: foil-side INWARD toward the pair. The PET side is the outer face for mechanical strength + adhesion to the next layer.
+• WRAP TYPE: longitudinal cigarette wrap — the tape folds around the pair lengthwise with a small longitudinal seam. Best HF performance; no helical seam to leak.
+• DRAIN WIRE: 28-30 AWG tinned copper laid in continuous contact with the foil's metallic side, runs the full length. This is what carries the foil's induced shield current to the connector ground.
+• ALTERNATIVE: helical 25-50% overlap wrap — easier on tight bend radii but worse Zt above 1 GHz.
+• DOWNSTREAM: bonded onto the pair via low-pressure heat-set roll (60-80°C) so the foil can't slip during cabling.`,
+      spec: '100% optical coverage longitudinal, drain DCR <10 Ω/100ft, foil-pair bond strength ≥0.5 N/cm',
+    });
+  }
   if (p.type === '4pair') {
     proc.push({
       n: proc.length + 1,
@@ -4620,22 +4664,26 @@ function buildRecipe(p) {
       spec: 'Square symmetry maintained, opposite conductors true diametrical',
     });
   }
-  if (isShielded) {
+  if (hasOuterFoil) {
     proc.push({
       n: proc.length + 1,
-      name: 'Foil shielding',
+      name: 'Outer foil shield (bundle-level)',
       machine: 'Tape-wrap head (longitudinal or helical)',
-      detail: 'Al/PET tape wrapped foil-side toward drain. Longitudinal cigarette wrap = best HF; helical 25-50% overlap = best flex. Drain wire laid alongside in continuous foil contact.',
-      spec: '100% optical coverage (longitudinal), drain DCR <10 Ω/100 ft',
+      detail: `Al/PET tape applied OVER the cabled bundle (not per-pair). Foil-side toward the drain wire.
+• Longitudinal cigarette wrap = best HF performance, no helical seam.
+• Helical 25-50% overlap = better bend tolerance but worse Zt above 1 GHz.
+• Outer drain wire laid alongside the foil seam, in continuous metallic contact.
+• In F/UTP cables this is the ONLY foil layer; in S/FTP it's stacked over per-pair foils for double-screen Zt < 1 mΩ/m.`,
+      spec: '100% optical coverage (longitudinal), drain DCR <10 Ω/100 ft, no foil tears',
     });
   }
-  if (/braid|S\/FTP/i.test(p.hl + p.name)) {
+  if (hasOuterBraid) {
     proc.push({
       n: proc.length + 1,
-      name: 'Braiding',
-      machine: 'Maypole braider (Steeger/OMA, 16-48 carriers)',
-      detail: '36-40 AWG TC/SPC, 5-8 ends/carrier, 8-25 picks/inch, 35-45° helix angle. K = (2F − F²)·100% per SCTE 51.',
-      spec: 'Coverage ≥85% general, ≥95% EMI-critical',
+      name: 'Outer braid (LF shield + mechanical)',
+      machine: 'Maypole braider (Steeger / OMA, 16-48 carriers)',
+      detail: '36-40 AWG TC/SPC strand. Typical 5-8 ends/carrier, 8-25 picks/inch, 35-45° helix angle. Coverage K = (2F − F²)·100% per SCTE 51. The braid carries the LF (<1 GHz) shield current — foil alone has too much Zt at low frequency due to the longitudinal seam.',
+      spec: 'Coverage ≥85% general, ≥95% EMI-critical (aerospace, mil-spec)',
     });
   }
   proc.push({
@@ -4704,7 +4752,207 @@ function buildRecipe(p) {
     },
     machineCount: proc.length,
     testCount: tests.length,
+    construction: {
+      isShielded, isSFTP, isFTP, isUFTP, isFEP, isFoam,
+      hasPairWrap, hasPairFoil, hasOuterFoil, hasOuterBraid,
+    },
   };
+}
+
+/* ============================================================
+   Build Flow Diagram — horizontal cross-section progression
+   Shows what each manufacturing stage does at the wire / pair / bundle
+   level so the engineer can SEE that, e.g., per-pair foil lives inside
+   the bundle, not over it.
+   ============================================================ */
+function StageXS({ kind, size = 56 }) {
+  const c = size / 2;
+  const stroke = '#384249';
+  const cu = '#c97b3f';
+  const cuHi = '#e89357';
+  const insColors = ['#fbbf24', '#7dd3fc', '#a78bfa', '#5eead4'];
+  const foilFill = '#a7b0b6';
+  const wrapFill = '#384249';
+  const jacketFill = '#1a2226';
+  const W = size;
+  if (kind === 'conductor') {
+    return (
+      <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`}>
+        <circle cx={c} cy={c} r={W * 0.18} fill={cu} stroke={cuHi} />
+      </svg>
+    );
+  }
+  if (kind === 'stranded') {
+    const r = W * 0.08;
+    const R = W * 0.16;
+    const cx = (a) => c + R * Math.cos(a);
+    const cy = (a) => c + R * Math.sin(a);
+    return (
+      <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`}>
+        <circle cx={c} cy={c} r={r} fill={cu} />
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <circle key={i} cx={cx((Math.PI / 3) * i)} cy={cy((Math.PI / 3) * i)} r={r} fill={cu} stroke={cuHi} strokeWidth="0.5" />
+        ))}
+      </svg>
+    );
+  }
+  if (kind === 'insulated') {
+    return (
+      <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`}>
+        <circle cx={c} cy={c} r={W * 0.36} fill={insColors[0]} stroke={stroke} />
+        <circle cx={c} cy={c} r={W * 0.18} fill={cu} />
+      </svg>
+    );
+  }
+  if (kind === 'pair') {
+    return (
+      <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`}>
+        <circle cx={c - W * 0.18} cy={c} r={W * 0.18} fill={insColors[0]} stroke={stroke} />
+        <circle cx={c - W * 0.18} cy={c} r={W * 0.09} fill={cu} />
+        <circle cx={c + W * 0.18} cy={c} r={W * 0.18} fill={insColors[1]} stroke={stroke} />
+        <circle cx={c + W * 0.18} cy={c} r={W * 0.09} fill={cu} />
+        <path d={`M ${c - W * 0.36} ${c} Q ${c} ${c - W * 0.10} ${c + W * 0.36} ${c}`} stroke={stroke} fill="none" strokeDasharray="2 2" />
+      </svg>
+    );
+  }
+  if (kind === 'pair-wrap') {
+    return (
+      <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`}>
+        <ellipse cx={c} cy={c} rx={W * 0.46} ry={W * 0.26} fill="none" stroke={wrapFill} strokeWidth="2" strokeDasharray="3 2" />
+        <circle cx={c - W * 0.16} cy={c} r={W * 0.16} fill={insColors[0]} stroke={stroke} />
+        <circle cx={c - W * 0.16} cy={c} r={W * 0.08} fill={cu} />
+        <circle cx={c + W * 0.16} cy={c} r={W * 0.16} fill={insColors[1]} stroke={stroke} />
+        <circle cx={c + W * 0.16} cy={c} r={W * 0.08} fill={cu} />
+      </svg>
+    );
+  }
+  if (kind === 'pair-foil') {
+    return (
+      <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`}>
+        <ellipse cx={c} cy={c} rx={W * 0.46} ry={W * 0.26} fill={foilFill} stroke={stroke} />
+        <circle cx={c - W * 0.16} cy={c} r={W * 0.16} fill={insColors[0]} />
+        <circle cx={c - W * 0.16} cy={c} r={W * 0.08} fill={cu} />
+        <circle cx={c + W * 0.16} cy={c} r={W * 0.16} fill={insColors[1]} />
+        <circle cx={c + W * 0.16} cy={c} r={W * 0.08} fill={cu} />
+        <circle cx={c + W * 0.40} cy={c - W * 0.12} r={W * 0.04} fill={cu} stroke={cuHi} />
+      </svg>
+    );
+  }
+  if (kind === 'bundle') {
+    const offsets = [
+      [-0.20, -0.20, 0],
+      [0.20, -0.20, 1],
+      [-0.20, 0.20, 2],
+      [0.20, 0.20, 3],
+    ];
+    return (
+      <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`}>
+        <circle cx={c} cy={c} r={W * 0.46} fill="none" stroke={stroke} />
+        <path d={`M ${c} ${c - W * 0.42} L ${c} ${c + W * 0.42} M ${c - W * 0.42} ${c} L ${c + W * 0.42} ${c}`} stroke={stroke} strokeWidth="1.5" />
+        {offsets.map(([dx, dy, ci], i) => (
+          <g key={i}>
+            <circle cx={c + W * dx - W * 0.06} cy={c + W * dy} r={W * 0.06} fill={insColors[ci]} />
+            <circle cx={c + W * dx + W * 0.06} cy={c + W * dy} r={W * 0.06} fill={insColors[ci]} />
+          </g>
+        ))}
+      </svg>
+    );
+  }
+  if (kind === 'bundle-foil') {
+    return (
+      <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`}>
+        <circle cx={c} cy={c} r={W * 0.46} fill={foilFill} stroke={stroke} />
+        <circle cx={c} cy={c} r={W * 0.40} fill="#0a0d0f" stroke={stroke} />
+        {[
+          [-0.20, -0.20, 0],
+          [0.20, -0.20, 1],
+          [-0.20, 0.20, 2],
+          [0.20, 0.20, 3],
+        ].map(([dx, dy, ci], i) => (
+          <g key={i}>
+            <circle cx={c + W * dx - W * 0.06} cy={c + W * dy} r={W * 0.06} fill={insColors[ci]} />
+            <circle cx={c + W * dx + W * 0.06} cy={c + W * dy} r={W * 0.06} fill={insColors[ci]} />
+          </g>
+        ))}
+      </svg>
+    );
+  }
+  if (kind === 'braid') {
+    return (
+      <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`}>
+        <defs>
+          <pattern id="braidp" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke={cu} strokeWidth="1.5" />
+            <line x1="3" y1="0" x2="3" y2="6" stroke={cuHi} strokeWidth="1" />
+          </pattern>
+        </defs>
+        <circle cx={c} cy={c} r={W * 0.48} fill="url(#braidp)" stroke={stroke} />
+        <circle cx={c} cy={c} r={W * 0.40} fill="#0a0d0f" stroke={stroke} />
+      </svg>
+    );
+  }
+  if (kind === 'jacket') {
+    return (
+      <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`}>
+        <circle cx={c} cy={c} r={W * 0.48} fill={jacketFill} stroke={stroke} strokeWidth="1.5" />
+        <circle cx={c} cy={c} r={W * 0.40} fill="#0a0d0f" stroke={stroke} />
+      </svg>
+    );
+  }
+  return null;
+}
+
+function BuildFlowDiagram({ recipe, product }) {
+  const c = recipe.construction;
+  const stages = [];
+  stages.push({ kind: 'conductor', label: 'Conductor', sub: 'Cu / SPC strand' });
+  if (/stranded|7\/|19\//i.test(product.awg)) stages.push({ kind: 'stranded', label: 'Strand', sub: '7/N or 19/N' });
+  stages.push({ kind: 'insulated', label: 'Insulation', sub: c.isFEP ? 'FEP / PFA' : c.isFoam ? 'Foamed PE' : 'Solid PE' });
+  if (product.type === '4pair' || product.type === 'twinax' || product.type === 'starquad') {
+    stages.push({ kind: 'pair', label: 'Twisted pair', sub: 'Lay 6-17 mm' });
+  }
+  if (c.hasPairWrap) stages.push({ kind: 'pair-wrap', label: 'Pair wrap', sub: c.hasPairFoil ? 'Polyester binder' : 'PTFE tape' });
+  if (c.hasPairFoil) stages.push({ kind: 'pair-foil', label: 'Pair foil', sub: 'Al/PET + drain' });
+  if (product.type === '4pair') stages.push({ kind: 'bundle', label: '4-pair bundle', sub: 'X-spline core' });
+  if (c.hasOuterFoil) stages.push({ kind: 'bundle-foil', label: 'Outer foil', sub: 'Bundle-level Al/PET' });
+  if (c.hasOuterBraid) stages.push({ kind: 'braid', label: 'Outer braid', sub: 'TC / SPC, 85-95% K' });
+  stages.push({ kind: 'jacket', label: 'Jacket', sub: c.isFEP ? 'FEP / plenum' : 'PVC / LSZH' });
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center justify-between mb-2">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#5eead4]">
+          ◆ Cross-section build flow · {stages.length} stage{stages.length === 1 ? '' : 's'}
+        </div>
+        <div className="font-mono text-[10px] text-[#6b7479] hidden md:block">
+          ⤳ scroll to inspect
+        </div>
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-2 border border-[#252e33] bg-[#12171a] p-3 rounded">
+        {stages.map((s, i) => (
+          <React.Fragment key={i}>
+            <div className="flex flex-col items-center gap-1 shrink-0 w-[88px] md:w-[100px]">
+              <div className="bg-[#0a0d0f] border border-[#252e33] rounded p-1 flex items-center justify-center" style={{ width: 64, height: 64 }}>
+                <StageXS kind={s.kind} size={56} />
+              </div>
+              <div className="font-mono text-[10px] text-[#fbbf24] text-center leading-tight">{s.label}</div>
+              <div className="font-mono text-[9px] text-[#6b7479] text-center leading-tight">{s.sub}</div>
+            </div>
+            {i < stages.length - 1 && (
+              <div className="flex items-center shrink-0 text-[#384249]" style={{ height: 64 }}>
+                →
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+      {!c.hasPairFoil && !c.hasOuterFoil && (
+        <div className="mt-2 text-[11px] text-[#a7b0b6] bg-[#1a1612] border border-[#384249] px-3 py-2 rounded">
+          <span className="text-[#fbbf24] font-medium">U/UTP variant</span> — this build has <span className="text-[#f87171]">no foil shield</span> and <span className="text-[#f87171]">no per-pair wrap</span>. Sister products in the S/FTP / U/FTP family add per-pair foil + binder steps and an outer braid.
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ============================================================
@@ -4770,6 +5018,9 @@ function BuildRecipePage({ product, onBack }) {
           <div className="font-mono text-2xl text-[#c97b3f] mt-0.5 truncate">${r.cost.total}</div>
         </div>
       </div>
+
+      {/* Visual cross-section progression */}
+      <BuildFlowDiagram recipe={r} product={product} />
 
       {/* Tabs */}
       <div className="flex border-b border-[#252e33] mb-6 overflow-x-auto">
