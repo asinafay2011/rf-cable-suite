@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown, Eye, EyeOff, Image as ImageIcon, X as XIcon, Paperclip, Download, Mic, MicOff, HelpCircle } from 'lucide-react'
+import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown, Eye, EyeOff, Image as ImageIcon, X as XIcon, Paperclip, Download, Mic, MicOff, HelpCircle, Globe } from 'lucide-react'
 
 const MODEL_DEFAULT = 'claude-sonnet-4-6'
 const MAX_TOOL_TURNS = 6
@@ -71,6 +71,17 @@ export default function FloatingAgent({
   const [pendingImage, setPendingImage] = useState(null) // { mediaType, data, dataUrl }
   const [pendingData, setPendingData] = useState(null)   // { summary, chip: { name, info } }
   const fileInputRef = useRef(null)
+
+  // Web search toggle (Anthropic native server-side tool)
+  const webSearchKey = storageKey ? `${storageKey}-web-search` : null
+  const [webSearch, setWebSearch] = useState(() => {
+    if (!webSearchKey) return false
+    try { return localStorage.getItem(webSearchKey) === '1' } catch { return false }
+  })
+  useEffect(() => {
+    if (!webSearchKey) return
+    try { localStorage.setItem(webSearchKey, webSearch ? '1' : '0') } catch {}
+  }, [webSearchKey, webSearch])
 
   // Show/hide tool pills toggle — default hidden for cleaner look
   const showToolsKey = storageKey ? `${storageKey}-show-tools` : null
@@ -152,14 +163,20 @@ export default function FloatingAgent({
     const contextSuffix = context?.sectionLabel
       ? `\n\nUser context (provided by the host app — use this to tailor your suggestions):\n- Currently viewing tab: ${context.sectionLabel}${context.extra ? `\n- Additional context: ${context.extra}` : ''}`
       : ''
+    const webSearchSuffix = webSearch
+      ? '\n\nWeb search is enabled this turn. Use the web_search tool to look up live datasheets, manufacturer specs, latest standards revisions, or any cable information that is not in the on-board database. After finding a spec, offer to save it via add_cable so the user keeps a permanent local copy.'
+      : ''
     const body = {
       model: modelId,
       max_tokens: maxTokens,
-      system: (systemPrompt || '') + contextSuffix,
+      system: (systemPrompt || '') + contextSuffix + webSearchSuffix,
       messages: messagesPayload,
       stream: true,
     }
-    if (tools && tools.length) body.tools = tools
+    const toolsList = []
+    if (tools && tools.length) toolsList.push(...tools)
+    if (webSearch) toolsList.push({ type: 'web_search_20250305', name: 'web_search', max_uses: 5 })
+    if (toolsList.length) body.tools = toolsList
 
     const res = await fetch('/api/claude', {
       method: 'POST',
@@ -639,6 +656,14 @@ export default function FloatingAgent({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => setWebSearch((v) => !v)}
+            className="p-1.5 text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded transition-colors"
+            title={webSearch ? 'Web search ON — agent can look up live datasheets / standards. Click to disable.' : 'Web search OFF — only on-board DB + training knowledge. Click to enable live web lookups.'}
+            style={webSearch ? { color: '#5eead4' } : undefined}
+          >
+            <Globe size={13} />
+          </button>
           {tools && tools.length > 0 && (
             <button
               onClick={() => setShowTools((v) => !v)}
