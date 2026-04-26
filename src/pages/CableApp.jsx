@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   Cable, Calculator, Layers, Shield, Box, FlaskConical, BookOpen,
   ChevronRight, Activity, Ruler, Zap, Atom, Wrench, Library,
-  ArrowRight, Plus, Minus, Info, Eye, Radio, Coins, Boxes, Search, X, Settings
+  ArrowRight, Plus, Minus, Info, Eye, Radio, Coins, Boxes, Search, X, Settings,
+  GitBranch, Sparkles, Home,
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import FloatingAgent from '../components/FloatingAgent.jsx';
@@ -110,6 +111,7 @@ const CABLE_STARTERS = [
 ];
 
 const SECTION_LABELS = {
+  home: 'Home (CABLE.LAB overview)',
   progression: 'Progression (overview)',
   m1: 'Conductor (Module 1)',
   m2: 'Twisted Pair (Module 2)',
@@ -131,6 +133,12 @@ const SECTION_LABELS = {
 };
 
 const SECTION_STARTERS = {
+  home: [
+    'What does this CABLE.LAB do?',
+    'Walk me through building a Cat 6A cable end-to-end',
+    'How do I run the Process Sim?',
+    'What custom cables can I add to my library?',
+  ],
   calc: [
     'Compute Z₀ for D=2.95mm, d=0.91mm, foamed PE εr=1.55',
     'What D/d ratio hits 50 Ω with PTFE εr=2.10?',
@@ -719,6 +727,408 @@ function StarQuadXS({ size = 280 }) {
 /* ============================================================
    Cable Progression Visualizer (THE MAIN VIEW)
    ============================================================ */
+/* ============================================================
+   HomeView — landing page for the high-speed cable manufacturing
+   workbench. Replaces the Progression module as the default tab.
+   ============================================================ */
+function HomeView({ setSection }) {
+  // Counts for the stat tiles
+  const cableCount = 38; // CABLE_DB
+  const standardCount = 8;
+  const moduleCount = 10;
+
+  const tools = [
+    { id: 'sim',     icon: 'sim',     title: 'Process Sim', sub: '9-stage manufacturing flow → predicted specs', accent: '#c97b3f' },
+    { id: 'vna',     icon: 'vna',     title: 'VNA Lab',     sub: 'Touchstone .s1p / .s2p analysis · TDR · pair skew', accent: '#5eead4' },
+    { id: 'calc',    icon: 'calc',    title: 'Z₀ Calc',     sub: '138/√εᵣ · log(D/d) for coax + diff', accent: '#fbbf24' },
+    { id: 'tdr',     icon: 'wave',    title: 'TDR Sim',     sub: 'Toggle defects · see Z(x) trace', accent: '#7dd3fc' },
+    { id: 'lay',     icon: 'lay',     title: 'Lay Designer',sub: 'Pair lays + bundle compatibility', accent: '#a78bfa' },
+    { id: 'braid',   icon: 'shield',  title: 'Braid Coverage', sub: 'K = (2F − F²)·100 % per SCTE 51', accent: '#e89357' },
+    { id: 'atten',   icon: 'atten',   title: 'Attenuation', sub: 'Skin + dielectric loss per geometry', accent: '#84cc16' },
+    { id: 'suckout', icon: 'suckout', title: 'Tape Suckout', sub: 'Multi-layer Bragg-notch designer', accent: '#f87171' },
+    { id: 'next',    icon: 'next',    title: 'NEXT',         sub: 'Pair-to-pair crosstalk vs lay diversity', accent: '#cbd5e1' },
+    { id: 'eye',     icon: 'eye',     title: 'Eye Diagram',  sub: 'BW · jitter · noise → eye opening', accent: '#fb923c' },
+    { id: 'cost',    icon: 'cost',    title: 'Cost Calc',    sub: 'Cu mass · jacket · labor · CPK', accent: '#facc15' },
+    { id: 'library', icon: 'library', title: 'Library',      sub: `${cableCount} vendor presets + your custom cables`, accent: '#5eead4' },
+  ];
+
+  const modules = [
+    { id: 'm1', label: 'M1 · Conductor', desc: 'Single insulated wire, εᵣ baseline' },
+    { id: 'm2', label: 'M2 · Twisted Pair', desc: 'Lay length, skew, NEXT geometry' },
+    { id: 'm3', label: 'M3 · Bundle', desc: '4-pair core + cross-spline' },
+    { id: 'progression', label: 'Progression', desc: 'Single → pair → bundle walk-through' },
+    { id: 'more', label: 'M4–10', desc: 'Shielding, jacket, hipot, BER, qualification' },
+  ];
+
+  return (
+    <div style={{ position: 'relative', minHeight: '100%' }}>
+      <style>{`
+        @keyframes hsPulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+        @keyframes hsFadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+        .hs-fade { animation: hsFadeUp 0.6s ease-out backwards; }
+        .hs-card { transition: all 0.18s ease; }
+        .hs-card:hover { transform: translateY(-2px); border-color: rgba(201, 123, 63, 0.6); }
+        @keyframes hsRingDraw { from { stroke-dashoffset: 360; } to { stroke-dashoffset: 0; } }
+        .hs-ring { stroke-dasharray: 360; animation: hsRingDraw 2s ease-out forwards; }
+      `}</style>
+
+      {/* Decorative grid + radial glow */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.18 }}>
+        <svg width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <pattern id="hs-home-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#252e33" strokeWidth="0.5" />
+            </pattern>
+            <radialGradient id="hs-home-glow" cx="78%" cy="22%" r="55%">
+              <stop offset="0%" stopColor="#c97b3f" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="#0a0d0f" stopOpacity="0" />
+            </radialGradient>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#hs-home-grid)" />
+          <rect width="100%" height="100%" fill="url(#hs-home-glow)" />
+        </svg>
+      </div>
+
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        {/* HERO */}
+        <section className="hs-fade" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 32, alignItems: 'center', paddingTop: 18, paddingBottom: 36, borderBottom: '1px solid #252e33' }}>
+          <div style={{ minWidth: 0 }}>
+            <div className="font-mono" style={{ fontSize: 11, letterSpacing: 3, color: '#c97b3f', textTransform: 'uppercase', marginBottom: 10 }}>
+              ◆ CABLE.LAB · High-Speed Manufacturing · v1
+            </div>
+            <h1 style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 'clamp(28px, 5vw, 46px)', fontWeight: 300, lineHeight: 1.05, color: '#f0ebe2', margin: 0, letterSpacing: '-0.01em' }}>
+              From a strand of copper to a <span style={{ color: '#c97b3f', fontStyle: 'italic' }}>controlled-impedance</span> cable.
+            </h1>
+            <p style={{ marginTop: 18, color: '#a7b0b6', fontSize: 14, lineHeight: 1.6, maxWidth: 640 }}>
+              Build a Cat 6A / Cat 8 / USB4 / coax recipe stage-by-stage and watch its predicted Z₀, IL, NEXT, and skew update in real time.
+              Every formula cited (Wadell, SCTE 51, IEC 61156). Every test path local. Every datasheet URL clickable.
+            </p>
+            <div className="hs-ctas" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 22 }}>
+              <HsPrimaryCTA onClick={() => setSection('sim')} label="Open Process Sim" />
+              <HsSecondaryCTA onClick={() => setSection('vna')} label="Try VNA Lab" />
+              <HsSecondaryCTA onClick={() => setSection('progression')} label="Progression walkthrough" />
+            </div>
+            <div style={{ marginTop: 16, fontSize: 11, color: '#6b7479', fontFamily: 'JetBrains Mono, monospace' }}>
+              ⓘ The <span style={{ color: '#fbbf24' }}>Ask</span> button bottom-left chats with a manufacturing-engineer agent — it can drive every tool here, save your custom cables, and remember company defaults.
+            </div>
+          </div>
+          {/* Decorative coax cross-section badge */}
+          <div className="hs-md" style={{ display: 'none', flexShrink: 0 }}>
+            <CoaxBadge />
+          </div>
+          <style>{`@media (min-width: 768px) { .hs-md { display: block !important; } }`}</style>
+        </section>
+
+        {/* STATS BAR */}
+        <section className="hs-fade" style={{ animationDelay: '120ms', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 1, background: '#252e33', border: '1px solid #252e33', borderRadius: 4, marginTop: 32, overflow: 'hidden' }}>
+          <HsStatTile value="9" label="Mfg stages" sub="conductor → jacket pipeline" color="#c97b3f" />
+          <HsStatTile value={cableCount} label="Cable presets" sub="RG · LMR · Cat · USB4 · IB · DAC" color="#5eead4" />
+          <HsStatTile value="276" label="Z₀ formula" sub="log/√εᵣ · Wadell" color="#fbbf24" />
+          <HsStatTile value={standardCount} label="Standards" sub="TIA · IEC · IEEE · SCTE · MIL" color="#a78bfa" />
+        </section>
+
+        {/* TOOL CARDS */}
+        <section style={{ marginTop: 36 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+            <h2 style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 22, fontWeight: 300, color: '#f0ebe2', margin: 0 }}>The toolkit</h2>
+            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', letterSpacing: 2, textTransform: 'uppercase' }}>
+              ◆ click to open · {tools.length} tools
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            {tools.map((t, i) => (
+              <button
+                key={t.id}
+                className="hs-card hs-fade"
+                onClick={() => setSection(t.id)}
+                style={{
+                  animationDelay: `${160 + i * 35}ms`,
+                  background: '#12171a',
+                  border: '1px solid #252e33',
+                  borderRadius: 4,
+                  padding: 16,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  color: '#f0ebe2',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
+              >
+                <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 4, background: t.accent, opacity: 0.5 }} />
+                <HsToolGlyph kind={t.icon} color={t.accent} />
+                <div style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 17, fontWeight: 500, color: t.accent, marginTop: 8 }}>{t.title}</div>
+                <div style={{ fontSize: 12, color: '#a7b0b6', lineHeight: 1.45 }}>{t.sub}</div>
+                <div style={{ marginTop: 10, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                  Open →
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* MODULES STRIP */}
+        <section style={{ marginTop: 40 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+            <h2 style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 22, fontWeight: 300, color: '#f0ebe2', margin: 0 }}>Curriculum modules</h2>
+            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', letterSpacing: 2, textTransform: 'uppercase' }}>
+              {moduleCount} modules · single → pair → bundle
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+            {modules.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setSection(m.id)}
+                className="hs-card"
+                style={{
+                  background: '#0d1416',
+                  border: '1px solid #252e33',
+                  borderRadius: 4,
+                  padding: 12,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  color: '#f0ebe2',
+                }}
+              >
+                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: 1.5 }}>{m.label}</div>
+                <div style={{ fontSize: 12, color: '#a7b0b6', marginTop: 6, lineHeight: 1.45 }}>{m.desc}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* RECIPE TEMPLATES PROMO */}
+        <section style={{ marginTop: 40, padding: 18, background: '#12171a', border: '1px solid #252e33', borderRadius: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            <div>
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 3, color: '#5eead4', textTransform: 'uppercase' }}>◆ Quick start</div>
+              <div style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 20, fontWeight: 400, color: '#f0ebe2', marginTop: 4 }}>Recipe templates for typical cables</div>
+            </div>
+            <button onClick={() => setSection('sim')} style={{ background: 'transparent', border: '1px solid #5eead4', color: '#5eead4', padding: '6px 14px', borderRadius: 3, fontFamily: 'JetBrains Mono, monospace', fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase', cursor: 'pointer' }}>
+              → Open Process Sim
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginTop: 8 }}>
+            {[
+              { name: 'Cat 6A S/FTP', spec: '100 Ω · 23 AWG · 500 MHz' },
+              { name: 'Cat 8',        spec: '100 Ω · 22 AWG · 2 GHz' },
+              { name: 'USB4 / TB4',   spec: '90 Ω diff · 30 AWG · 20 GHz' },
+              { name: 'RG-58',        spec: '50 Ω · 20 AWG · 1 GHz' },
+              { name: 'RG-6',         spec: '75 Ω · 18 AWG · 3 GHz' },
+              { name: 'LMR-400',      spec: '50 Ω · 10 AWG · 5.8 GHz' },
+            ].map((t, i) => (
+              <div key={i} style={{ background: '#0a0d0f', border: '1px solid #252e33', borderRadius: 3, padding: 10 }}>
+                <div style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 14, fontWeight: 500, color: '#fbbf24' }}>{t.name}</div>
+                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', marginTop: 4 }}>{t.spec}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* WHAT'S NEW */}
+        <section style={{ marginTop: 32, padding: 18, background: '#12171a', border: '1px solid #252e33', borderRadius: 4 }}>
+          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 3, color: '#c97b3f', textTransform: 'uppercase', marginBottom: 10 }}>◆ Recently added</div>
+          <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 8, fontSize: 13, color: '#a7b0b6' }}>
+            <HsNewItem accent="#e89357">
+              <strong style={{ color: '#fbbf24' }}>Tape Suckout Sim</strong> — multi-layer Bragg-notch designer with mm/inch toggle, cable cross-section visualization, spiral SPC flatwire shield (8 bobbins, gap-only).
+            </HsNewItem>
+            <HsNewItem accent="#5eead4">
+              <strong style={{ color: '#fbbf24' }}>Build recipe upgrade</strong> — pair binder wrap + per-pair foil + outer foil/braid steps on every Vendor recipe; horizontal cross-section build flow with proportional ϕ chips.
+            </HsNewItem>
+            <HsNewItem accent="#a78bfa">
+              <strong style={{ color: '#fbbf24' }}>Process Sim auto-fix</strong> — hill-climbing optimizer mutates wall, lay, AWG, materials, braid until verdict = PASS.
+            </HsNewItem>
+            <HsNewItem accent="#84cc16">
+              <strong style={{ color: '#fbbf24' }}>Library expansion</strong> — 38 cable presets including QSFP28/QSFP-DD DAC, InfiniBand HDR/NDR, PCIe Gen5 SlimSAS, USB4 passive, with linked datasheets.
+            </HsNewItem>
+          </ul>
+        </section>
+
+        <div style={{ marginTop: 36, paddingTop: 20, borderTop: '1px solid #252e33', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', textTransform: 'uppercase', letterSpacing: 2, textAlign: 'center' }}>
+          v1 prototype · every formula local · no telemetry · click any panel to dive in
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HsPrimaryCTA({ onClick, label }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: '#c97b3f',
+        color: '#0a0d0f',
+        border: 'none',
+        padding: '10px 18px',
+        borderRadius: 3,
+        fontFamily: 'JetBrains Mono, monospace',
+        fontSize: 12,
+        textTransform: 'uppercase',
+        letterSpacing: 1.5,
+        fontWeight: 600,
+        cursor: 'pointer',
+      }}
+    >
+      {label} →
+    </button>
+  );
+}
+function HsSecondaryCTA({ onClick, label }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'transparent',
+        color: '#a7b0b6',
+        border: '1px solid #384249',
+        padding: '10px 18px',
+        borderRadius: 3,
+        fontFamily: 'JetBrains Mono, monospace',
+        fontSize: 12,
+        textTransform: 'uppercase',
+        letterSpacing: 1.5,
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+function HsStatTile({ value, label, sub, color }) {
+  return (
+    <div style={{ background: '#0a0d0f', padding: 14 }}>
+      <div style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 28, fontWeight: 500, color, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#a7b0b6', textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 6 }}>{label}</div>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: '#6b7479', marginTop: 2 }}>{sub}</div>
+    </div>
+  );
+}
+function HsToolGlyph({ kind, color }) {
+  const size = 22;
+  if (kind === 'sim') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M3 7h4l2 4 2-8 2 12 2-6h6" />
+    </svg>
+  );
+  if (kind === 'vna') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3v18" opacity="0.4" />
+      <path d="M5 14c2-2 4-2 6 0s4 2 6 0 2 0 2 0" />
+    </svg>
+  );
+  if (kind === 'calc') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round">
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M8 7h8M8 11h2M12 11h2M16 11h0M8 15h2M12 15h2M16 15h0M8 19h2M12 19h6" />
+    </svg>
+  );
+  if (kind === 'wave') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M2 12c2-4 3-4 5 0s3 4 5 0 3-4 5 0 3 4 5 0" />
+    </svg>
+  );
+  if (kind === 'lay') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M4 6c4 0 4 12 8 12s4-12 8-12" />
+      <path d="M4 12c4 0 4 12 8 12s4-12 8-12" opacity="0.5" />
+    </svg>
+  );
+  if (kind === 'shield') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round">
+      <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z" />
+      <path d="M9 12l2 2 4-4" opacity="0.6" />
+    </svg>
+  );
+  if (kind === 'atten') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M3 21l4-4 4 2 4-6 6 3" />
+      <path d="M3 21h18M3 3v18" opacity="0.4" />
+    </svg>
+  );
+  if (kind === 'suckout') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M2 12h4l1.5-3 1 6 1-9 1 6 1.5-3h11" />
+    </svg>
+  );
+  if (kind === 'next') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M3 12c0 0 3-6 9-6s9 6 9 6-3 6-9 6-9-6-9-6z" />
+      <path d="M9 12l3-3M9 12l3 3M15 12l-3-3M15 12l-3 3" opacity="0.6" />
+    </svg>
+  );
+  if (kind === 'eye') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round">
+      <path d="M2 12c3-5 7-7 10-7s7 2 10 7c-3 5-7 7-10 7s-7-2-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+  if (kind === 'cost') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v10M9 9h5a2 2 0 0 1 0 4h-4a2 2 0 0 0 0 4h6" />
+    </svg>
+  );
+  if (kind === 'library') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round">
+      <rect x="3" y="3" width="6" height="18" />
+      <rect x="11" y="6" width="5" height="15" />
+      <path d="M19 4l3 14-4 1-3-14z" />
+    </svg>
+  );
+  return null;
+}
+function HsNewItem({ accent, children }) {
+  return (
+    <li style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <span style={{ color: accent, marginTop: 4, fontSize: 8 }}>●</span>
+      <span style={{ flex: 1, lineHeight: 1.55 }}>{children}</span>
+    </li>
+  );
+}
+
+// Decorative coax cross-section badge for the hero
+function CoaxBadge() {
+  return (
+    <svg width="200" height="200" viewBox="0 0 200 200" style={{ display: 'block' }}>
+      <defs>
+        <linearGradient id="hs-coax-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#c97b3f" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="#5eead4" stopOpacity="0.08" />
+        </linearGradient>
+        <pattern id="hs-coax-braid" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#c97b3f" strokeWidth="1.2" strokeOpacity="0.7" />
+          <line x1="3" y1="0" x2="3" y2="6" stroke="#e89357" strokeWidth="0.8" strokeOpacity="0.7" />
+        </pattern>
+      </defs>
+      <circle cx="100" cy="100" r="92" fill="url(#hs-coax-grad)" stroke="#c97b3f" strokeOpacity="0.5" strokeWidth="1" />
+      {/* Jacket */}
+      <circle cx="100" cy="100" r="80" fill="#1a2226" stroke="#384249" strokeWidth="1" />
+      {/* Braid */}
+      <circle cx="100" cy="100" r="68" fill="url(#hs-coax-braid)" stroke="#c97b3f" strokeOpacity="0.4" strokeWidth="0.8" />
+      {/* Foil */}
+      <circle cx="100" cy="100" r="60" fill="#a7b0b6" fillOpacity="0.65" stroke="#a7b0b6" strokeWidth="0.5" />
+      {/* Dielectric */}
+      <circle cx="100" cy="100" r="52" fill="#0a0d0f" stroke="#384249" strokeWidth="0.5" />
+      {/* Conductor */}
+      <circle cx="100" cy="100" r="22" fill="#c97b3f" stroke="#e89357" strokeWidth="1" />
+      {/* Highlight on conductor */}
+      <circle cx="92" cy="92" r="6" fill="#fbbf24" fillOpacity="0.6" />
+      {/* Pulse dot at center */}
+      <circle cx="100" cy="100" r="3" fill="#fbbf24" style={{ animation: 'hsPulse 2s ease-in-out infinite' }} />
+      {/* Annotation tick */}
+      <path d="M100 8 L100 18 M120 18 L100 18" stroke="#5eead4" strokeWidth="0.6" />
+      <text x="124" y="22" fontFamily="JetBrains Mono, monospace" fontSize="9" fill="#5eead4">JACKET</text>
+      <path d="M100 192 L100 182 M80 182 L100 182" stroke="#fbbf24" strokeWidth="0.6" />
+      <text x="76" y="178" fontFamily="JetBrains Mono, monospace" fontSize="9" fill="#fbbf24" textAnchor="end">CONDUCTOR</text>
+    </svg>
+  );
+}
+
 function ProgressionView() {
   const [stage, setStage] = useState(2);
 
@@ -6360,7 +6770,8 @@ function TopNav({ active, onChange }) {
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const items = [
-    { id: 'progression', label: 'Progression', icon: Cable },
+    { id: 'home', label: 'Home', icon: Cable },
+    { id: 'progression', label: 'Progression', icon: GitBranch },
     { id: 'm1', label: 'Conductor', icon: Atom },
     { id: 'm2', label: 'Twisted Pair', icon: Layers },
     { id: 'm3', label: 'Bundle', icon: Box },
@@ -6473,7 +6884,7 @@ function TopNav({ active, onChange }) {
    App
    ============================================================ */
 export default function CableApp() {
-  const [section, setSection] = useState('progression');
+  const [section, setSection] = useState('home');
   const [recipeProduct, setRecipeProduct] = useState(null);
 
   const openRecipe = (product) => {
@@ -6637,10 +7048,11 @@ export default function CableApp() {
       `}</style>
 
       {section !== 'recipe' && <TopNav active={section} onChange={setSection} />}
-      {section !== 'recipe' && <Hero />}
+      {section !== 'recipe' && section !== 'home' && <Hero />}
 
       <main className="max-w-6xl mx-auto px-4 md:px-12 py-12">
         {section === 'recipe' && <BuildRecipePage product={recipeProduct} onBack={closeRecipe} />}
+        {section === 'home' && <HomeView setSection={setSection} />}
         {section === 'progression' && <ProgressionView />}
         {section === 'm1' && <ModuleConductor />}
         {section === 'm2' && <ModuleTwistedPair />}
