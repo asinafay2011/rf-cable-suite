@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect, createContext, useContext } from "react";
 import FloatingAgent from "../components/FloatingAgent.jsx";
 import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
+import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
 
 const RF_SYSTEM_PROMPT = `You are a senior RF cable engineer embedded in the RF Cable Engineering Suite. You have access to calculation tools — use them whenever a numeric answer is requested instead of relying on memorized constants.
 
@@ -1749,7 +1750,12 @@ export default function RFCableSuite() {
         <main style={S.main}>
           {tab === "ask" && <AskView queuedPrompt={queuedPrompt} clearQueued={() => setQueuedPrompt(null)} openInLibrary={openInLibrary} loadIntoDesign={loadCableIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} setToolPreset={setToolPreset} />}
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
-          {tab === "library" && <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} onPrint={(id) => setPrintSetup({ type: "cable", id })} />}
+          {tab === "library" && (
+            <>
+              <CustomCablesPanel side="rf" accentColor="#d97706" />
+              <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} onPrint={(id) => setPrintSetup({ type: "cable", id })} />
+            </>
+          )}
           {tab === "connectors" && <ConnectorView />}
           {tab === "link" && <LinkView openInLibrary={openInLibrary} onPrint={() => setPrintSetup({ type: "link" })} toolPreset={toolPreset} clearToolPreset={clearToolPreset} />}
           {tab === "tools" && <ToolsView toolPreset={toolPreset} clearToolPreset={clearToolPreset} />}

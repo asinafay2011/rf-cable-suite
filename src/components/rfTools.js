@@ -1,4 +1,5 @@
 // Tools exposed to the RF agent. Pure-math + small DBs, client-side dispatch.
+import { getCustomRfCables, addCustomRfCable, deleteCustomRfCable } from './customCableStore.js'
 
 // ── RF cable database (50 Ω + 75 Ω) ─────────────────────
 export const RF_CABLE_DB = {
@@ -177,6 +178,43 @@ export const RF_TOOLS = [
     },
   },
   {
+    name: 'add_cable',
+    description:
+      'Save a new cable spec to the user\'s LOCAL library (browser localStorage). Survives close/reopen on this device. Use when the user gives you a datasheet or spec for a cable that\'s not in the built-in DB and asks you to remember it. Use a clear id (e.g. "rg-9", "company-spec-cable-A"). Required fields: id, name, z0; recommended: vf, od_mm, atten_db_per_100ft (object: { freq_mhz: dB }).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Unique slug identifier (e.g., "rg-9"). Lowercased automatically.' },
+        name: { type: 'string', description: 'Display name (e.g., "RG-9/U")' },
+        z0: { type: 'number', description: 'Characteristic impedance in Ω (typical 50 or 75)' },
+        vf: { type: 'number', description: 'Velocity factor as fraction (e.g., 0.66 for solid PE)' },
+        od_mm: { type: 'number', description: 'Cable outer diameter in mm' },
+        fmax_ghz: { type: 'number', description: 'Maximum operating frequency in GHz' },
+        atten_db_per_100ft: {
+          type: 'object',
+          description: 'Object mapping frequency (MHz) to attenuation (dB/100ft). Example: { "100": 4.4, "1000": 16.0 }',
+          additionalProperties: { type: 'number' },
+        },
+        notes: { type: 'string', description: 'Free-form construction / application notes' },
+      },
+      required: ['id', 'name', 'z0'],
+    },
+  },
+  {
+    name: 'list_custom_cables',
+    description: 'List all user-added (local) RF cables saved on this device. Use when the user asks "what custom cables do I have?" or wants to review their additions.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'delete_cable',
+    description: 'Remove a previously-saved custom cable from the local library. Cannot delete built-in cables.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Cable id to delete' } },
+      required: ['id'],
+    },
+  },
+  {
     name: 'mismatch_loss',
     description:
       'Compute mismatch loss (dB) given two VSWRs (source and load) or directly the reflection coefficient.',
@@ -196,9 +234,32 @@ export function dispatchRfTool(name, input) {
   try {
     switch (name) {
       case 'lookup_rf_cable': {
-        const matches = searchDB(RF_CABLE_DB, input.query)
-        if (matches.length === 0) return { matches: [], available_ids: Object.keys(RF_CABLE_DB), note: `No match for "${input.query}".` }
+        const custom = getCustomRfCables()
+        const combined = { ...RF_CABLE_DB, ...custom }
+        const matches = searchDB(combined, input.query)
+        if (matches.length === 0) return { matches: [], available_ids: Object.keys(combined), note: `No match for "${input.query}".` }
         return { matches: matches.slice(0, 6) }
+      }
+      case 'add_cable': {
+        const { id, name, z0, vf, od_mm, fmax_ghz, atten_db_per_100ft, notes } = input
+        if (!id || !name || !(z0 > 0)) throw new Error('id, name, and z0 (>0) are required')
+        const result = addCustomRfCable({ id, name, z0, vf, od_mm, fmax_ghz, atten_db_per_100ft, notes })
+        return {
+          ok: true,
+          id: result.id,
+          stored_at: 'browser localStorage (this device only)',
+          note: 'Visible in the RF Library tab and searchable via lookup_rf_cable. Use Library → Export to share with team.',
+        }
+      }
+      case 'list_custom_cables': {
+        const map = getCustomRfCables()
+        const list = Object.values(map)
+        return { count: list.length, cables: list }
+      }
+      case 'delete_cable': {
+        if (!input.id) throw new Error('id required')
+        const ok = deleteCustomRfCable(input.id)
+        return ok ? { ok: true, deleted: input.id } : { ok: false, error: `No custom cable with id "${input.id}". Use list_custom_cables to see what\'s saved.` }
       }
       case 'lookup_connector': {
         const matches = searchDB(CONNECTOR_DB, input.query)
@@ -207,7 +268,8 @@ export function dispatchRfTool(name, input) {
       }
       case 'compute_attenuation': {
         const { cable_id, freq_mhz, length_ft } = input
-        const cable = RF_CABLE_DB[cable_id]
+        const merged = { ...RF_CABLE_DB, ...getCustomRfCables() }
+        const cable = merged[cable_id]
         if (!cable) throw new Error(`Unknown cable_id "${cable_id}". Use lookup_rf_cable.`)
         if (!(freq_mhz > 0 && length_ft > 0)) throw new Error('freq_mhz and length_ft must be positive')
         const dbPer100 = interpAtten(cable.atten_db_per_100ft, freq_mhz)
@@ -232,7 +294,7 @@ export function dispatchRfTool(name, input) {
         let p = tx_dbm
         stages.push({ stage: 'TX', delta_db: 0, power_dbm: num(p, 2) })
         if (tx_cable_id && tx_cable_ft > 0) {
-          const c = RF_CABLE_DB[tx_cable_id]
+          const c = ({ ...RF_CABLE_DB, ...getCustomRfCables() })[tx_cable_id]
           if (!c) throw new Error(`Unknown tx_cable_id "${tx_cable_id}"`)
           const il = (interpAtten(c.atten_db_per_100ft, freq_mhz) / 100) * tx_cable_ft
           p -= il
@@ -259,7 +321,7 @@ export function dispatchRfTool(name, input) {
           stages.push({ stage: `RX antenna gain ${rx_antenna_gain_dbi} dBi`, delta_db: num(rx_antenna_gain_dbi, 2), power_dbm: num(p, 2) })
         }
         if (rx_cable_id && rx_cable_ft > 0) {
-          const c = RF_CABLE_DB[rx_cable_id]
+          const c = ({ ...RF_CABLE_DB, ...getCustomRfCables() })[rx_cable_id]
           if (!c) throw new Error(`Unknown rx_cable_id "${rx_cable_id}"`)
           const il = (interpAtten(c.atten_db_per_100ft, freq_mhz) / 100) * rx_cable_ft
           p -= il

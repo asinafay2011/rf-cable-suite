@@ -8,6 +8,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import FloatingAgent from '../components/FloatingAgent.jsx';
 import { CABLE_TOOLS, dispatchCableTool } from '../components/cableTools.js';
 import VNATest from '../components/VNATest.jsx';
+import CustomCablesPanel from '../components/CustomCablesPanel.jsx';
 import { parseTouchstone, returnLossDb, vswr, s11Summary } from '../components/touchstone.js';
 import { computeTDR, peakReflection } from '../components/fft.js';
 
@@ -5951,7 +5952,12 @@ export default function CableApp() {
         {section === 'eye' && <EyeDiagram />}
         {section === 'cost' && <CostCalc />}
         {section === 'lay' && <LayDesigner />}
-        {section === 'library' && <ProductLibrary onOpenRecipe={openRecipe} />}
+        {section === 'library' && (
+          <>
+            <CustomCablesPanel side="cable" accentColor="#c97b3f" />
+            <ProductLibrary onOpenRecipe={openRecipe} />
+          </>
+        )}
         {section === 'catalog' && <Catalog onOpenRecipe={openRecipe} />}
         {section === 'more' && <FurtherModules />}
       </main>

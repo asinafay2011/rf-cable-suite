@@ -1,4 +1,5 @@
 // Tools exposed to the Cable agent. Pure-math + small DB, client-side dispatch.
+import { getCustomCableCables, addCustomCableCable, deleteCustomCableCable } from './customCableStore.js'
 
 // ── Compact cable database (key high-speed / RF coax + datacable specs) ────
 // Sources: Belden / Times Microwave / CommScope datasheets, Glenair Series 963.
@@ -42,13 +43,14 @@ export const CABLE_DB = {
     notes: 'Solid Cu outer conductor. Used for SMA jumpers up to 18 GHz.' },
 }
 
-// Search the DB by partial name / family match
+// Search the DB by partial name / family match (built-in + custom merged)
 export function lookupCableDB(query) {
   if (!query) return []
   const q = query.toLowerCase().replace(/\s+/g, '').replace(/-/g, '')
+  const merged = { ...CABLE_DB, ...getCustomCableCables() }
   const results = []
-  for (const [id, c] of Object.entries(CABLE_DB)) {
-    const haystack = (id + ' ' + c.name + ' ' + c.family).toLowerCase().replace(/\s+/g, '').replace(/-/g, '')
+  for (const [id, c] of Object.entries(merged)) {
+    const haystack = (id + ' ' + (c.name || '') + ' ' + (c.family || '')).toLowerCase().replace(/\s+/g, '').replace(/-/g, '')
     if (haystack.includes(q)) results.push({ id, ...c })
   }
   return results
@@ -176,6 +178,44 @@ export const CABLE_TOOLS = [
     },
   },
   {
+    name: 'add_cable',
+    description:
+      'Save a new cable spec to the user\'s LOCAL library (browser localStorage). Survives close/reopen on this device. Use when the user gives you a datasheet or spec for a cable you want to remember. Required: id, name, z0; recommended: family, vf, cap_pf_ft, od_mm, atten_db_per_100ft (object: { freq_mhz: dB }), notes.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Unique slug identifier (e.g., "company-spec-A"). Lowercased automatically.' },
+        name: { type: 'string', description: 'Display name (e.g., "Brian Spec Cable A")' },
+        family: { type: 'string', description: 'Family / category for grouping (e.g., "RG · 50 Ω", "Datacable · 100 Ω diff")' },
+        z0: { type: 'number', description: 'Characteristic impedance in Ω' },
+        vf: { type: 'number', description: 'Velocity factor as fraction' },
+        cap_pf_ft: { type: 'number', description: 'Capacitance per foot in pF' },
+        od_mm: { type: 'number', description: 'Cable outer diameter in mm' },
+        atten_db_per_100ft: {
+          type: 'object',
+          description: 'Object mapping frequency (MHz) to attenuation (dB/100ft). Example: { "100": 4.4, "1000": 16.0 }',
+          additionalProperties: { type: 'number' },
+        },
+        notes: { type: 'string', description: 'Free-form construction / application notes' },
+      },
+      required: ['id', 'name', 'z0'],
+    },
+  },
+  {
+    name: 'list_custom_cables',
+    description: 'List all user-added (local) cables saved on this device.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'delete_cable',
+    description: 'Remove a previously-saved custom cable from the local library. Cannot delete built-in cables.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Cable id to delete' } },
+      required: ['id'],
+    },
+  },
+  {
     name: 'lay_for_skew',
     description:
       'Inverse of pair_lay_skew: given a target intra-pair skew (ps/m) and an expected εr mismatch, compute the maximum pair lay length that meets the target. Use when the user asks "what lay length do I need for ≤ X ps/m skew?".',
@@ -284,9 +324,32 @@ export function dispatchCableTool(name, input) {
         }
         return { matches: matches.slice(0, 6) };
       }
+      case 'add_cable': {
+        const { id, name, z0, family, vf, cap_pf_ft, od_mm, atten_db_per_100ft, notes } = input;
+        if (!id || !name || !(z0 > 0)) throw new Error('id, name, and z0 (>0) are required');
+        const result = addCustomCableCable({ id, name, z0, family, vf, cap_pf_ft, od_mm, atten_db_per_100ft, notes });
+        return {
+          ok: true,
+          id: result.id,
+          stored_at: 'browser localStorage (this device only)',
+          note: 'Searchable via lookup_cable. Survives close/reopen on this device.',
+        };
+      }
+      case 'list_custom_cables': {
+        const map = getCustomCableCables();
+        const list = Object.values(map);
+        return { count: list.length, cables: list };
+      }
+      case 'delete_cable': {
+        if (!input.id) throw new Error('id required');
+        const ok = deleteCustomCableCable(input.id);
+        return ok ? { ok: true, deleted: input.id } : { ok: false, error: `No custom cable with id "${input.id}". Use list_custom_cables to see what's saved.` };
+      }
       case 'compute_attenuation': {
         const { cable_id, freq_mhz, length_ft } = input;
-        const cable = CABLE_DB[cable_id];
+        // Combined DB so attenuation works for custom cables too
+        const merged = { ...CABLE_DB, ...getCustomCableCables() };
+        const cable = merged[cable_id];
         if (!cable) throw new Error(`Unknown cable_id "${cable_id}". Use lookup_cable first.`);
         if (!(freq_mhz > 0 && length_ft > 0)) throw new Error('freq_mhz and length_ft must be positive');
         // Interpolate dB/100ft using √f scaling between adjacent data points.
