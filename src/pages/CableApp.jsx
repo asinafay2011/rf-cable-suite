@@ -4902,50 +4902,182 @@ function StageXS({ kind, size = 56 }) {
   return null;
 }
 
+// Estimate the OD progression through every manufacturing stage. All numbers
+// are first-order — assumes typical wall thicknesses and layer densities so the
+// engineer sees realistic deltas, not exact spec sheet numbers.
+function estimateBuildODs(product, c) {
+  const awgN = parseInt((product.awg.match(/\d+/) || ['24'])[0]);
+  const condOD = 0.005 * Math.pow(92, (36 - awgN) / 39) * 25.4; // mm
+  // Stranded constructions stay at ~1.15× single-strand OD
+  const isStranded = /stranded|7\/|19\//i.test(product.awg);
+  const strandOD = isStranded ? condOD * 1.15 : condOD;
+  // Solve insulation OD from target single-wire Z (≈ Z_diff/2 for differential pair, full Z for coax)
+  const er = c.isFEP ? 2.05 : c.isFoam ? 1.55 : 2.30;
+  const targetZ = product.type === 'coax' ? parseFloat((product.z || '50').match(/\d+/)?.[0] || '50') : 50;
+  const Dd = Math.pow(10, (targetZ * Math.sqrt(er)) / 138);
+  const insOD = strandOD * Math.max(1.4, Dd);
+  // Twisted pair: 2 wires touching ≈ 2× insulated OD with 5% slack
+  const pairOD = 2 * insOD * 1.05;
+  // Pair binder wrap: helical tape adds ~50 µm radial
+  const pairWrapOD = pairOD + 0.10;
+  // Per-pair foil: 25 µm Al + 12 µm PET ≈ 80 µm radial
+  const pairFoilOD = pairWrapOD + 0.16;
+  // 4-pair bundle: 4 pairs around an X-spline ≈ 2.4× pair OD (2.7 if foiled, more space)
+  const innerPairOD = c.hasPairFoil ? pairFoilOD : c.hasPairWrap ? pairWrapOD : pairOD;
+  const bundleOD = product.type === '4pair' ? innerPairOD * 2.45 : innerPairOD;
+  // Outer foil ≈ 80 µm radial
+  const outerFoilOD = bundleOD + 0.16;
+  // Outer braid: 2× braid wire diameter (typ 0.16 mm wire) on each side
+  const braidOD = (c.hasOuterFoil ? outerFoilOD : bundleOD) + 0.32;
+  // Jacket: typical 0.4-0.6 mm wall (use 0.5 mm)
+  const beforeJacket = c.hasOuterBraid ? braidOD : c.hasOuterFoil ? outerFoilOD : bundleOD;
+  const finalOD = beforeJacket + 1.0;
+  return {
+    cond: condOD,
+    strand: strandOD,
+    ins: insOD,
+    pair: pairOD,
+    pairWrap: pairWrapOD,
+    pairFoil: pairFoilOD,
+    bundle: bundleOD,
+    outerFoil: outerFoilOD,
+    braid: braidOD,
+    finalOD,
+  };
+}
+
+function fmtOD(mm) {
+  if (mm == null || isNaN(mm)) return '—';
+  return mm < 1 ? `ϕ${mm.toFixed(3)} mm` : `ϕ${mm.toFixed(2)} mm`;
+}
+
 function BuildFlowDiagram({ recipe, product }) {
   const c = recipe.construction;
+  const od = estimateBuildODs(product, c);
+
   const stages = [];
-  stages.push({ kind: 'conductor', label: 'Conductor', sub: 'Cu / SPC strand' });
-  if (/stranded|7\/|19\//i.test(product.awg)) stages.push({ kind: 'stranded', label: 'Strand', sub: '7/N or 19/N' });
-  stages.push({ kind: 'insulated', label: 'Insulation', sub: c.isFEP ? 'FEP / PFA' : c.isFoam ? 'Foamed PE' : 'Solid PE' });
-  if (product.type === '4pair' || product.type === 'twinax' || product.type === 'starquad') {
-    stages.push({ kind: 'pair', label: 'Twisted pair', sub: 'Lay 6-17 mm' });
+  stages.push({ kind: 'conductor', label: 'Conductor', mat: /SPC|silver/i.test(product.awg) ? 'Silver-plated Cu' : /TC|tinned/i.test(product.awg) ? 'Tinned Cu' : 'Bare ETP Cu', spec: product.awg, od: od.cond });
+  if (/stranded|7\/|19\//i.test(product.awg)) {
+    stages.push({ kind: 'stranded', label: 'Stranding', mat: '7/N or 19/N bunch', spec: 'lay 12-18× d', od: od.strand });
   }
-  if (c.hasPairWrap) stages.push({ kind: 'pair-wrap', label: 'Pair wrap', sub: c.hasPairFoil ? 'Polyester binder' : 'PTFE tape' });
-  if (c.hasPairFoil) stages.push({ kind: 'pair-foil', label: 'Pair foil', sub: 'Al/PET + drain' });
-  if (product.type === '4pair') stages.push({ kind: 'bundle', label: '4-pair bundle', sub: 'X-spline core' });
-  if (c.hasOuterFoil) stages.push({ kind: 'bundle-foil', label: 'Outer foil', sub: 'Bundle-level Al/PET' });
-  if (c.hasOuterBraid) stages.push({ kind: 'braid', label: 'Outer braid', sub: 'TC / SPC, 85-95% K' });
-  stages.push({ kind: 'jacket', label: 'Jacket', sub: c.isFEP ? 'FEP / plenum' : 'PVC / LSZH' });
+  stages.push({ kind: 'insulated', label: 'Insulation', mat: c.isFEP ? 'FEP / PFA' : c.isFoam ? 'Foamed PE' : 'Solid PE', spec: `εᵣ ${c.isFEP ? '2.05' : c.isFoam ? '1.55' : '2.30'}`, od: od.ins });
+  if (product.type === '4pair' || product.type === 'twinax' || product.type === 'starquad') {
+    stages.push({ kind: 'pair', label: 'Twisted pair', mat: 'Pair lay', spec: 'lay 6-17 mm', od: od.pair, z: product.z });
+  }
+  if (c.hasPairWrap) stages.push({ kind: 'pair-wrap', label: 'Pair wrap', mat: c.hasPairFoil ? 'Polyester (Mylar)' : 'PTFE tape', spec: '12-50 µm, 25% lap', od: od.pairWrap });
+  if (c.hasPairFoil) stages.push({ kind: 'pair-foil', label: 'Pair foil', mat: 'Al/PET 25 µm', spec: 'longitudinal + drain', od: od.pairFoil });
+  if (product.type === '4pair') stages.push({ kind: 'bundle', label: '4-pair bundle', mat: 'X-spline core', spec: 'lays 11/13/15/17 mm', od: od.bundle });
+  if (c.hasOuterFoil) stages.push({ kind: 'bundle-foil', label: 'Outer foil', mat: 'Al/PET 25 µm', spec: 'bundle-level wrap', od: od.outerFoil });
+  if (c.hasOuterBraid) stages.push({ kind: 'braid', label: 'Outer braid', mat: '36-40 AWG TC/SPC', spec: 'K ≥ 85% (SCTE 51)', od: od.braid });
+  stages.push({ kind: 'jacket', label: 'Jacket', mat: c.isFEP ? 'FEP plenum' : 'PVC / LSZH', spec: 'wall 0.4-0.6 mm', od: od.finalOD, isFinal: true });
+
+  // Scale icons proportionally to OD growth so the cable visually grows.
+  // Cap so the conductor is still visible (min 28 px) and final fits in the card (max 64 px).
+  const minOD = Math.min(...stages.map((s) => s.od));
+  const maxOD = Math.max(...stages.map((s) => s.od));
+  const iconSize = (mm) => {
+    if (maxOD === minOD) return 48;
+    const t = (mm - minOD) / (maxOD - minOD);
+    return Math.round(28 + t * 36); // 28→64 px
+  };
 
   return (
     <div className="mb-6">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#5eead4]">
           ◆ Cross-section build flow · {stages.length} stage{stages.length === 1 ? '' : 's'}
         </div>
-        <div className="font-mono text-[10px] text-[#6b7479] hidden md:block">
-          ⤳ scroll to inspect
+        <div className="font-mono text-[10px] text-[#6b7479]">
+          OD growth: <span className="text-[#fbbf24]">{fmtOD(od.cond)}</span> → <span className="text-[#c97b3f]">{fmtOD(od.finalOD)}</span>
+          <span className="ml-2 text-[#5eead4]">({(od.finalOD / od.cond).toFixed(1)}×)</span>
         </div>
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-2 border border-[#252e33] bg-[#12171a] p-3 rounded">
-        {stages.map((s, i) => (
-          <React.Fragment key={i}>
-            <div className="flex flex-col items-center gap-1 shrink-0 w-[88px] md:w-[100px]">
-              <div className="bg-[#0a0d0f] border border-[#252e33] rounded p-1 flex items-center justify-center" style={{ width: 64, height: 64 }}>
-                <StageXS kind={s.kind} size={56} />
+
+      {/* OD growth ruler — visual scale of how thick the cable becomes */}
+      <div className="mb-3">
+        <div className="relative h-7 bg-[#0a0d0f] border border-[#252e33] rounded overflow-hidden">
+          <div
+            className="absolute left-0 top-0 bottom-0"
+            style={{
+              width: '100%',
+              background: `linear-gradient(to right, #c97b3f 0%, #c97b3f ${(od.cond / od.finalOD) * 100}%, #fbbf24 ${(od.ins / od.finalOD) * 100}%, #5eead4 ${(od.bundle / od.finalOD) * 100}%, #1a2226 100%)`,
+              opacity: 0.25,
+            }}
+          />
+          {stages.map((s, i) => {
+            const left = (s.od / od.finalOD) * 100;
+            return (
+              <div key={i} className="absolute top-0 bottom-0 w-px bg-[#384249]" style={{ left: `${left}%` }} title={`${s.label}: ${fmtOD(s.od)}`}>
+                <div className="absolute -top-0.5 -translate-x-1/2 w-1.5 h-1.5 rounded-full" style={{ background: s.isFinal ? '#c97b3f' : '#5eead4', left: 0 }} />
               </div>
-              <div className="font-mono text-[10px] text-[#fbbf24] text-center leading-tight">{s.label}</div>
-              <div className="font-mono text-[9px] text-[#6b7479] text-center leading-tight">{s.sub}</div>
-            </div>
-            {i < stages.length - 1 && (
-              <div className="flex items-center shrink-0 text-[#384249]" style={{ height: 64 }}>
-                →
-              </div>
-            )}
-          </React.Fragment>
-        ))}
+            );
+          })}
+          <div className="absolute inset-0 flex items-center justify-center font-mono text-[9px] text-[#a7b0b6] pointer-events-none">
+            ϕ scale · {fmtOD(od.cond)} ─ {fmtOD(od.finalOD)}
+          </div>
+        </div>
       </div>
+
+      {/* Stage cards */}
+      <div
+        className="flex gap-0 overflow-x-auto pb-2 border border-[#252e33] bg-[#12171a] rounded"
+        style={{
+          backgroundImage: 'linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px)',
+          backgroundSize: '12px 12px',
+        }}
+      >
+        {stages.map((s, i) => {
+          const sz = iconSize(s.od);
+          return (
+            <React.Fragment key={i}>
+              <div className="flex flex-col items-stretch shrink-0 w-[120px] md:w-[140px] p-2.5 border-r border-[#252e33]" style={{ borderRightStyle: i === stages.length - 1 ? 'none' : 'solid' }}>
+                {/* step number */}
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-mono text-[9px] text-[#c97b3f] tracking-wider">{String(i + 1).padStart(2, '0')}</span>
+                  {s.isFinal && <span className="font-mono text-[8px] text-[#5eead4] bg-[#0d1f1d] border border-[#2f7a6e] px-1 rounded">FINAL</span>}
+                </div>
+                {/* SVG cross-section */}
+                <div
+                  className="relative bg-[#0a0d0f] border border-[#252e33] rounded mx-auto flex items-center justify-center"
+                  style={{ width: 80, height: 80 }}
+                >
+                  <StageXS kind={s.kind} size={sz} />
+                  {/* dimension annotation top-right */}
+                  <div className="absolute -top-1 -right-1 px-1 py-0.5 font-mono text-[8px] text-[#fbbf24] bg-[#0a0d0f] border border-[#384249] rounded">
+                    {fmtOD(s.od)}
+                  </div>
+                </div>
+                {/* label */}
+                <div className="font-mono text-[10px] text-[#fbbf24] text-center leading-tight mt-2 font-medium">{s.label}</div>
+                <div className="font-mono text-[9px] text-[#a7b0b6] text-center leading-tight mt-0.5">{s.mat}</div>
+                <div className="font-mono text-[9px] text-[#6b7479] text-center leading-tight mt-0.5">{s.spec}</div>
+                {s.z && (
+                  <div className="font-mono text-[9px] text-[#5eead4] text-center leading-tight mt-1 bg-[#0d1f1d] border border-[#2f7a6e] rounded py-0.5">
+                    Z {s.z}
+                  </div>
+                )}
+              </div>
+              {i < stages.length - 1 && (
+                <div className="flex items-center justify-center shrink-0 w-3 text-[#384249] -mx-1.5 z-10" style={{ minHeight: 80 }}>
+                  ▸
+                </div>
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
+
+      {/* Summary line + caveats */}
+      <div className="mt-2 flex items-center justify-between flex-wrap gap-2 font-mono text-[10px] text-[#6b7479]">
+        <div>
+          ⓘ ODs are first-order estimates from AWG + εᵣ + standard wall assumptions. Use the recipe BOM for sourcing specs.
+        </div>
+        <div className="flex items-center gap-3">
+          <span>Δ <span className="text-[#fbbf24]">{((od.finalOD - od.cond)).toFixed(2)} mm</span></span>
+          <span>Final ϕ <span className="text-[#c97b3f]">{od.finalOD.toFixed(2)} mm</span></span>
+        </div>
+      </div>
+
       {!c.hasPairFoil && !c.hasOuterFoil && (
         <div className="mt-2 text-[11px] text-[#a7b0b6] bg-[#1a1612] border border-[#384249] px-3 py-2 rounded">
           <span className="text-[#fbbf24] font-medium">U/UTP variant</span> — this build has <span className="text-[#f87171]">no foil shield</span> and <span className="text-[#f87171]">no per-pair wrap</span>. Sister products in the S/FTP / U/FTP family add per-pair foil + binder steps and an outer braid.
