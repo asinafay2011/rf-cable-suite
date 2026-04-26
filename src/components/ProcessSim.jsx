@@ -418,6 +418,33 @@ export default function ProcessSim() {
     window.dispatchEvent(new CustomEvent('processsim:state', { detail }))
   }) // run on every render so it stays in sync with sim output
 
+  // Listen for agent-applied presets and route them into the corresponding stage of the
+  // simulator instead of teleporting the user away to the standalone Braid / Z₀ Calc tab.
+  useEffect(() => {
+    const onApply = (e) => {
+      const { section, params } = e.detail || {}
+      if (!params) return
+      if (section === 'braid') {
+        setRecipe((r) => ({
+          ...r,
+          shield: {
+            ...r.shield,
+            braid_enabled: true,
+            braid_N: params.N ?? r.shield.braid_N,
+            braid_P: params.P ?? r.shield.braid_P,
+            braid_d_mm: params.d ?? r.shield.braid_d_mm,
+            braid_PR: params.PR ?? r.shield.braid_PR,
+            braid_material: params.material ?? r.shield.braid_material,
+          },
+        }))
+        toast.success(`Applied "${e.detail.label || 'preset'}" to outer shield (stage ⑧)`)
+      }
+      // Future: handle 'calc' / 'lay' presets here too
+    }
+    window.addEventListener('cable-suite:apply-preset', onApply)
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply)
+  }, [toast])
+
   const checks = useMemo(() => {
     const c = []
     const z_off = Math.abs(sim.jacket.z_diff - std.z0_diff)

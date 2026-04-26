@@ -6167,7 +6167,11 @@ export default function CableApp() {
           extra: section === 'sim' ? formatProcessSimContext(processSimState) : undefined,
         }}
         toolToSection={CABLE_TOOL_TO_SECTION}
-        onJumpToSection={setSection}
+        onJumpToSection={(target) => {
+          // Process Sim consumes every preset locally (braid → stage ⑧, etc.) — don't tab-hop.
+          if (section === 'sim') return;
+          setSection(target);
+        }}
       />
     </div>
   );
