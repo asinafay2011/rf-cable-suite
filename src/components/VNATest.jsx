@@ -83,21 +83,31 @@ export default function VNATest() {
     }
   }
 
-  const loadDemo = () => {
-    // Wire A: clean 33ft, VF 66.5%
-    const a = synthTouchstone({
-      name: 'demo_wireA_clean.s1p',
-      length_ft: 33,
-      vf: 0.665,
-      defects: [], // no in-cable defects
-    })
-    // Wire B: 33ft with kink at 12ft, VF 65.0% (1.5pp lower than A)
-    const b = synthTouchstone({
-      name: 'demo_wireB_defect.s1p',
-      length_ft: 33,
-      vf: 0.650,
-      defects: [{ at_ft: 12, rho: 0.12 }],
-    })
+  const DEMOS = [
+    {
+      id: 'good',
+      label: 'Good pair',
+      hint: 'matched VF, no defects → EXCELLENT',
+      build: () => ({
+        a: synthTouchstone({ name: 'demo_good_wireA.s1p', length_ft: 33, vf: 0.6650, defects: [] }),
+        b: synthTouchstone({ name: 'demo_good_wireB.s1p', length_ft: 33, vf: 0.6648, defects: [] }),
+      }),
+    },
+    {
+      id: 'bad',
+      label: 'Bad pair',
+      hint: 'kink @ 12 ft + 1.5 pp VF mismatch → POOR',
+      build: () => ({
+        a: synthTouchstone({ name: 'demo_bad_wireA_clean.s1p', length_ft: 33, vf: 0.665, defects: [] }),
+        b: synthTouchstone({ name: 'demo_bad_wireB_defect.s1p', length_ft: 33, vf: 0.650, defects: [{ at_ft: 12, rho: 0.12 }] }),
+      }),
+    },
+  ]
+
+  const loadDemo = (id) => {
+    const demo = DEMOS.find((d) => d.id === id)
+    if (!demo) return
+    const { a, b } = demo.build()
     setWireA(a)
     setWireB(b)
     setExpectedLength(33)
@@ -121,15 +131,24 @@ export default function VNATest() {
           intra-pair skew when the two are twisted into a differential pair. Single tab covers the full workflow:
           measure → QC each → predict pair quality before twisting.
         </p>
-        <div className="flex flex-wrap gap-2 pt-1">
-          <button
-            onClick={loadDemo}
-            className="px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider rounded border bg-transparent flex items-center gap-1.5 hover:bg-[#1f1610] transition-colors"
-            style={{ color: C.amber, borderColor: C.amber + '60' }}
-          >
-            <Sparkles size={12} />
-            Load demo (clean Wire A + defective Wire B, 1.5 pp VF mismatch)
-          </button>
+        <div className="flex flex-wrap gap-2 pt-1 items-center">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479] mr-1">Try a demo:</span>
+          {DEMOS.map((d) => (
+            <button
+              key={d.id}
+              onClick={() => loadDemo(d.id)}
+              className="px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider rounded border bg-transparent flex items-center gap-1.5 hover:bg-[#1f1610] transition-colors"
+              style={{
+                color: d.id === 'good' ? C.teal : C.amber,
+                borderColor: (d.id === 'good' ? C.teal : C.amber) + '60',
+              }}
+              title={d.hint}
+            >
+              <Sparkles size={12} />
+              {d.label}
+              <span className="text-[#6b7479] normal-case tracking-normal">— {d.hint}</span>
+            </button>
+          ))}
           {(wireA || wireB) && (
             <button
               onClick={clearAll}
