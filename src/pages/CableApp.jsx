@@ -9,6 +9,7 @@ import FloatingAgent from '../components/FloatingAgent.jsx';
 import { CABLE_TOOLS, dispatchCableTool } from '../components/cableTools.js';
 import VNATest from '../components/VNATest.jsx';
 import CustomCablesPanel from '../components/CustomCablesPanel.jsx';
+import CompanyDefaultsPanel from '../components/CompanyDefaultsPanel.jsx';
 import ProcessSim from '../components/ProcessSim.jsx';
 import { useIsMobile } from '../components/useIsMobile.js';
 import { Menu, X as XIcon } from 'lucide-react';
@@ -90,7 +91,15 @@ Proactive behavior:
    • Z₀ / impedance → \`propose_z0_preset\` (applies to Z₀ Calc tab or Process Sim stage ③ insulation)
    • Pair / lay design → \`propose_pair_preset\` (applies to Lay Design tab or Process Sim stages ④ / ⑦)
    The user never needs to type values into sliders — clicking Apply pushes them in. When the user is on Process Sim, the apply lands inside the simulator without changing tabs.
-- If the user has a PDF datasheet, ask them to paste the relevant text or attach a screenshot — PDFs aren't directly readable.`;
+- If the user has a PDF datasheet, ask them to paste the relevant text or attach a screenshot — PDFs aren't directly readable.
+
+Multi-tool orchestration (chain calls in one turn whenever the engineer's question implies multiple steps):
+- "Quote a 50 m Cat 6A cable" → \`get_company_defaults\` (read Cu price + jacket pref) → \`lookup_cable\` → \`compute_attenuation\` → \`bom_generator\`. ONE response, all tool calls in parallel where possible.
+- "Should I switch from solid PE to foamed PE?" → \`calc_z0_coax\` for both εr values → \`compute_attenuation\` for both → \`sensitivity_analysis\` if relevant. Then summarise the trade.
+- "Save this datasheet as our spec" → call \`add_cable\` AND \`set_company_defaults\` if the spec implies factory standardisation.
+- ALWAYS call \`get_company_defaults\` at the start of cost / quoting / material questions. Use the values you read instead of generic defaults.
+- When the user states a stable factory fact ("Cu is $11/kg here", "we always use FEP", "max line speed 850 m/min"), call \`set_company_defaults\` immediately to persist it — don't just acknowledge in text.
+- Prefer parallel tool calls (multiple tool_use blocks in one turn) when the calls are independent. Only chain sequentially when one call's output feeds the next.`;
 
 const CABLE_STARTERS = [
   'Compute Z₀ for D=2.95mm, d=0.91mm, foamed PE εr=1.55',
@@ -248,6 +257,10 @@ const CABLE_TOOL_TO_SECTION = {
   propose_braid_preset:  { id: 'braid', label: 'Braid' },
   propose_z0_preset:     { id: 'calc',  label: 'Z₀ Calc' },
   propose_pair_preset:   { id: 'lay',   label: 'Lay Design' },
+  propose_tdr_scenario:  { id: 'tdr',   label: 'TDR Sim' },
+  propose_atten_preset:  { id: 'atten', label: 'Atten' },
+  propose_eye_preset:    { id: 'eye',   label: 'Eye' },
+  propose_cost_preset:   { id: 'cost',  label: 'Cost' },
   compute_attenuation:   { id: 'atten', label: 'Atten' },
   pair_lay_skew:         { id: 'lay',   label: 'Lay Design' },
   lay_for_skew:          { id: 'lay',   label: 'Lay Design' },
@@ -1585,6 +1598,28 @@ function Catalog({ onOpenRecipe }) {
 function TDRSim() {
   const SEGMENTS = 8;
   const [defects, setDefects] = useState(Array(SEGMENTS).fill('ideal'));
+
+  // Listen for agent-applied presets from FloatingAgent's "Apply" buttons.
+  // params = { defects: ['kink', 'ideal', ...] } or { index, type } for a single segment.
+  useEffect(() => {
+    const onApply = (e) => {
+      const { section, params } = e.detail || {};
+      if (section !== 'tdr' || !params) return;
+      if (Array.isArray(params.defects)) {
+        const arr = params.defects.slice(0, SEGMENTS);
+        while (arr.length < SEGMENTS) arr.push('ideal');
+        setDefects(arr);
+      } else if (Number.isInteger(params.index) && params.type) {
+        setDefects((prev) => {
+          const next = [...prev];
+          if (params.index >= 0 && params.index < SEGMENTS) next[params.index] = params.type;
+          return next;
+        });
+      }
+    };
+    window.addEventListener('cable-suite:apply-preset', onApply);
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply);
+  }, []);
 
   const types = {
     ideal: { label: 'Clean', delta: 0, color: '#171d20', desc: 'Nominal Z₀ — no discontinuity' },
@@ -3351,6 +3386,20 @@ function AttenPlot() {
     }
   };
 
+  // Agent presets (section='atten'): { d, er, tand } for the conductor + dielectric.
+  useEffect(() => {
+    const onApply = (e) => {
+      const { section, params } = e.detail || {};
+      if (section !== 'atten' || !params) return;
+      if (params.d != null) setD(parseFloat(params.d));
+      if (params.er != null) setEr(parseFloat(params.er));
+      if (params.tand != null) setTand(parseFloat(params.tand));
+      setPreset('custom');
+    };
+    window.addEventListener('cable-suite:apply-preset', onApply);
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply);
+  }, []);
+
   const handleParam = (setter) => (val) => {
     setter(val);
     setPreset('custom');
@@ -3697,6 +3746,18 @@ function NEXTViz() {
   const [activePair, setActivePair] = useState(0);
   const [layMode, setLayMode] = useState('varied');
 
+  // Agent presets (section='next'): { layMode: 'identical' | 'slight' | 'varied', activePair: 0..3 }.
+  useEffect(() => {
+    const onApply = (e) => {
+      const { section, params } = e.detail || {};
+      if (section !== 'next' || !params) return;
+      if (params.layMode) setLayMode(params.layMode);
+      if (Number.isInteger(params.activePair)) setActivePair(params.activePair);
+    };
+    window.addEventListener('cable-suite:apply-preset', onApply);
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply);
+  }, []);
+
   const layTables = {
     identical: { name: 'Identical (worst case)', vals: [13, 13, 13, 13] },
     slight: { name: 'Slight variation', vals: [12, 13, 14, 15] },
@@ -3871,6 +3932,20 @@ function EyeDiagram() {
   const [cableBW, setCableBW] = useState(3);
   const [jitter, setJitter] = useState(15);
   const [noise, setNoise] = useState(20);
+
+  // Agent presets (section='eye'): { bitRate, cableBW, jitter, noise } in their respective units.
+  useEffect(() => {
+    const onApply = (e) => {
+      const { section, params } = e.detail || {};
+      if (section !== 'eye' || !params) return;
+      if (params.bitRate != null) setBitRate(parseFloat(params.bitRate));
+      if (params.cableBW != null) setCableBW(parseFloat(params.cableBW));
+      if (params.jitter != null) setJitter(parseFloat(params.jitter));
+      if (params.noise != null) setNoise(parseFloat(params.noise));
+    };
+    window.addEventListener('cable-suite:apply-preset', onApply);
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply);
+  }, []);
 
   const T_bit = 1000 / bitRate; // ps
   const tau = 1000 / (2 * Math.PI * cableBW); // ps
@@ -4068,6 +4143,21 @@ function CostCalc() {
   const [cuPrice, setCuPrice] = useState(9.5);
   const [cpk, setCpk] = useState(1.33);
   const [lineSpeed, setLineSpeed] = useState(120);
+
+  // Agent presets (section='cost'): { cable, length_m, cu_price_usd_kg, cpk, line_speed_m_min }.
+  useEffect(() => {
+    const onApply = (e) => {
+      const { section, params } = e.detail || {};
+      if (section !== 'cost' || !params) return;
+      if (params.cable && cableTypes[params.cable]) setCable(params.cable);
+      if (params.length_m != null) setLength(parseFloat(params.length_m));
+      if (params.cu_price_usd_kg != null) setCuPrice(parseFloat(params.cu_price_usd_kg));
+      if (params.cpk != null) setCpk(parseFloat(params.cpk));
+      if (params.line_speed_m_min != null) setLineSpeed(parseFloat(params.line_speed_m_min));
+    };
+    window.addEventListener('cable-suite:apply-preset', onApply);
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply);
+  }, []);
 
   const awgToMM = (awg) => 0.005 * Math.pow(92, (36 - awg) / 39) * 25.4;
   const cuMassPerMeter = (awg, n) => {
@@ -6154,6 +6244,7 @@ export default function CableApp() {
         {section === 'lay' && <LayDesigner />}
         {section === 'library' && (
           <>
+            <CompanyDefaultsPanel accentColor="#c97b3f" />
             <CustomCablesPanel side="cable" accentColor="#c97b3f" />
             <ProductLibrary onOpenRecipe={openRecipe} />
           </>

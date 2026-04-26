@@ -1,46 +1,104 @@
 // Tools exposed to the Cable agent. Pure-math + small DB, client-side dispatch.
 import { getCustomCableCables, addCustomCableCable, deleteCustomCableCable } from './customCableStore.js'
+import { getCompanyDefaults, setCompanyDefaults, resetCompanyDefaults } from './companyDefaults.js'
 
 // ── Compact cable database (key high-speed / RF coax + datacable specs) ────
 // Sources: Belden / Times Microwave / CommScope datasheets, Glenair Series 963.
 // Atten[freq_mhz, dB_per_100ft]; vf as fraction; impedance Ω; capacitance pF/ft.
+// `datasheet` is an optional URL to the manufacturer datasheet PDF.
 export const CABLE_DB = {
   'rg-58':   { name: 'RG-58/U',     family: 'RG · 50 Ω', z0: 50, vf: 0.66, cap_pf_ft: 30.8, od_mm: 4.95,
     atten_db_per_100ft: { 100: 4.4, 400: 9.4, 900: 14.8, 1000: 16.0, 2400: 26.0 },
-    notes: 'General-purpose RF jumper. Stranded center, single tinned-Cu braid. Solid PE dielectric.' },
+    notes: 'General-purpose RF jumper. Stranded center, single tinned-Cu braid. Solid PE dielectric.',
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg58' },
   'rg-174':  { name: 'RG-174/U',    family: 'RG · 50 Ω', z0: 50, vf: 0.66, cap_pf_ft: 30.8, od_mm: 2.79,
     atten_db_per_100ft: { 100: 8.8, 400: 18.0, 900: 28.5, 1000: 30.0, 2400: 50.0 },
-    notes: 'Miniature RF, low power. Used for pigtails and intra-equipment.' },
+    notes: 'Miniature RF, low power. Used for pigtails and intra-equipment.',
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg174' },
+  'rg-178':  { name: 'RG-178B/U',   family: 'RG · 50 Ω · Mini', z0: 50, vf: 0.69, cap_pf_ft: 29.0, od_mm: 1.83,
+    atten_db_per_100ft: { 100: 14.0, 400: 29.0, 1000: 46.0, 3000: 84.0 },
+    notes: 'Sub-miniature, FEP/PFA dielectric. Rated to 3 GHz, used in dense module wiring.',
+    datasheet: 'https://www.pasternack.com/images/ProductPDF/RG178B-U.pdf' },
   'rg-213':  { name: 'RG-213/U',    family: 'RG · 50 Ω', z0: 50, vf: 0.66, cap_pf_ft: 30.8, od_mm: 10.3,
     atten_db_per_100ft: { 100: 1.9, 400: 4.1, 900: 6.4, 1000: 6.9, 2400: 11.5 },
-    notes: 'Higher-power RG-class. 7-strand center, double braid. Replaces RG-8.' },
+    notes: 'Higher-power RG-class. 7-strand center, double braid. Replaces RG-8.',
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg213' },
+  'rg-316':  { name: 'RG-316/U',    family: 'RG · 50 Ω · Mini', z0: 50, vf: 0.69, cap_pf_ft: 29.0, od_mm: 2.49,
+    atten_db_per_100ft: { 100: 9.0, 400: 18.5, 1000: 31.0, 3000: 60.0 },
+    notes: 'FEP-insulated mini coax. High-temp version of RG-174. Common test-bench jumper.',
+    datasheet: 'https://www.pasternack.com/images/ProductPDF/RG316-U.pdf' },
   'lmr-100': { name: 'LMR-100A',    family: 'LMR · Wireless', z0: 50, vf: 0.66, cap_pf_ft: 25.0, od_mm: 2.79,
     atten_db_per_100ft: { 100: 7.4, 400: 15.6, 900: 24.1, 1000: 25.5, 2400: 39.5 },
-    notes: 'Low-loss flexible 100 series. Better than RG-174 in same form factor.' },
+    notes: 'Low-loss flexible 100 series. Better than RG-174 in same form factor.',
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-100A.pdf' },
+  'lmr-200': { name: 'LMR-200',     family: 'LMR · Wireless', z0: 50, vf: 0.83, cap_pf_ft: 24.5, od_mm: 4.95,
+    atten_db_per_100ft: { 100: 3.9, 400: 8.0, 900: 12.0, 1000: 12.7, 2400: 20.5 },
+    notes: 'Replaces RG-58 in WiFi/cellular jumpers. Foam-PE.',
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-200.pdf' },
   'lmr-240': { name: 'LMR-240',     family: 'LMR · Wireless', z0: 50, vf: 0.84, cap_pf_ft: 24.2, od_mm: 6.10,
     atten_db_per_100ft: { 100: 3.0, 400: 6.4, 900: 9.9, 1000: 10.5, 2400: 16.5 },
-    notes: 'Lower-loss alternative to RG-58. Solid foam-PE, foil + braid.' },
+    notes: 'Lower-loss alternative to RG-58. Solid foam-PE, foil + braid.',
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-240.pdf' },
   'lmr-400': { name: 'LMR-400',     family: 'LMR · Wireless', z0: 50, vf: 0.85, cap_pf_ft: 23.9, od_mm: 10.29,
     atten_db_per_100ft: { 100: 1.5, 400: 3.0, 900: 4.6, 1000: 4.8, 2400: 7.6 },
-    notes: 'Industry-standard low-loss outdoor cable. Foam-PE dielectric, Al foil + tinned-Cu braid.' },
+    notes: 'Industry-standard low-loss outdoor cable. Foam-PE dielectric, Al foil + tinned-Cu braid.',
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-400.pdf' },
   'lmr-600': { name: 'LMR-600',     family: 'LMR · Wireless', z0: 50, vf: 0.87, cap_pf_ft: 23.0, od_mm: 14.99,
     atten_db_per_100ft: { 100: 0.96, 400: 1.96, 900: 3.0, 1000: 3.1, 2400: 5.0 },
-    notes: 'Long-run low-loss for tower-top installs.' },
-  'heliax-ldf4-50a': { name: 'Heliax LDF4-50A', family: 'Heliax · Rigid', z0: 50, vf: 0.88, cap_pf_ft: 22.8, od_mm: 12.7,
+    notes: 'Long-run low-loss for tower-top installs.',
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-600.pdf' },
+  'lmr-900': { name: 'LMR-900',     family: 'LMR · Wireless', z0: 50, vf: 0.87, cap_pf_ft: 22.7, od_mm: 22.10,
+    atten_db_per_100ft: { 100: 0.66, 400: 1.36, 1000: 2.16, 2400: 3.6 },
+    notes: 'Heavy backbone feedline. Used for distributed antenna systems (DAS).',
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-900.pdf' },
+  'heliax-ldf4-50a': { name: 'Heliax LDF4-50A (1/2")', family: 'Heliax · Rigid', z0: 50, vf: 0.88, cap_pf_ft: 22.8, od_mm: 12.7,
     atten_db_per_100ft: { 100: 0.66, 400: 1.36, 900: 2.07, 1000: 2.18, 2400: 3.5 },
-    notes: 'Foam-PE, corrugated Cu outer. Industry workhorse for 1/2" feedline.' },
+    notes: 'Foam-PE, corrugated Cu outer. Industry workhorse for 1/2" feedline.',
+    datasheet: 'https://www.commscope.com/globalassets/digizuite/2719-ldf4-50a-external.pdf' },
+  'heliax-ldf5-50a': { name: 'Heliax LDF5-50A (7/8")', family: 'Heliax · Rigid', z0: 50, vf: 0.89, cap_pf_ft: 22.4, od_mm: 22.0,
+    atten_db_per_100ft: { 100: 0.36, 400: 0.74, 1000: 1.20, 2400: 1.94 },
+    notes: '7/8" hardline. Used for cellular base-station feedline runs >50 m.',
+    datasheet: 'https://www.commscope.com/globalassets/digizuite/2723-ldf5-50a-external.pdf' },
   'rg-59':   { name: 'RG-59/U',     family: 'RG · 75 Ω · Video', z0: 75, vf: 0.66, cap_pf_ft: 20.5, od_mm: 6.15,
     atten_db_per_100ft: { 100: 3.6, 400: 7.5, 900: 11.4, 1000: 12.0, 2400: 19.5 },
-    notes: 'Video / CATV / CCTV. Solid PE.' },
+    notes: 'Video / CATV / CCTV. Solid PE.',
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg59' },
+  'rg-6':    { name: 'RG-6/U (CATV)', family: 'RG · 75 Ω · CATV', z0: 75, vf: 0.83, cap_pf_ft: 16.2, od_mm: 6.86,
+    atten_db_per_100ft: { 100: 2.0, 400: 4.0, 900: 5.7, 1000: 6.0, 2400: 9.8 },
+    notes: 'Standard residential satellite / CATV drop. Foam-PE, Al foil + braid.',
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg6' },
+  'rg-11':   { name: 'RG-11/U',     family: 'RG · 75 Ω · CATV', z0: 75, vf: 0.84, cap_pf_ft: 16.5, od_mm: 10.30,
+    atten_db_per_100ft: { 100: 1.4, 400: 3.0, 1000: 5.5, 2400: 9.5 },
+    notes: 'Trunk/distribution version of RG-6 — lower loss, longer runs.',
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg11' },
   'cat6a-sftp': { name: 'Cat 6A S/FTP', family: 'Datacable · 100 Ω diff', z0: 100, vf: 0.65, cap_pf_ft: 16.0, od_mm: 7.5,
     atten_db_per_100ft: { 100: 5.5, 250: 9.6, 500: 13.5 },
-    notes: '4-pair shielded twisted pair. 26-23 AWG. PoE++ capable. Foil-shielded pairs + outer braid.' },
+    notes: '4-pair shielded twisted pair. 26-23 AWG. PoE++ capable. Foil-shielded pairs + outer braid.',
+    datasheet: 'https://www.belden.com/products/cable/copper/category/category-6a' },
   'cat8':    { name: 'Cat 8 S/FTP', family: 'Datacable · 100 Ω diff', z0: 100, vf: 0.71, cap_pf_ft: 14.0, od_mm: 8.0,
     atten_db_per_100ft: { 100: 4.7, 500: 11.5, 1000: 17.0, 2000: 25.5 },
-    notes: '40 GBASE-T, 30 m max. 22 AWG, foil per pair + overall braid.' },
+    notes: '40 GBASE-T, 30 m max. 22 AWG, foil per pair + overall braid.',
+    datasheet: 'https://www.belden.com/products/cable/copper/category/category-8' },
+  'cat5e':   { name: 'Cat 5e UTP',  family: 'Datacable · 100 Ω diff', z0: 100, vf: 0.65, cap_pf_ft: 17.0, od_mm: 5.6,
+    atten_db_per_100ft: { 100: 6.5, 250: 11.0 },
+    notes: 'Legacy 1 GbE workhorse. 24 AWG UTP. Cheap, not for >100 MHz channels.',
+    datasheet: 'https://www.belden.com/products/cable/copper/category/category-5e' },
+  'cat6':    { name: 'Cat 6 UTP',   family: 'Datacable · 100 Ω diff', z0: 100, vf: 0.65, cap_pf_ft: 16.5, od_mm: 6.5,
+    atten_db_per_100ft: { 100: 5.7, 250: 9.4 },
+    notes: '23 AWG UTP, suitable for 1 GbE up to 100 m and 10 GbE to ~37 m.',
+    datasheet: 'https://www.belden.com/products/cable/copper/category/category-6' },
+  'usb4-passive': { name: 'USB4 / TB4 Passive', family: 'Datacable · 100 Ω diff (× 2)', z0: 100, vf: 0.78, cap_pf_ft: 13.5, od_mm: 4.6,
+    atten_db_per_100ft: { 5000: 60.0, 10000: 95.0, 20000: 145.0 },
+    notes: '40 Gbps, 2 differential pairs + DP/sideband. Passive cable max ~0.8 m at 40 G.',
+    datasheet: 'https://www.usb.org/document-library/usb4-specification' },
   'sma-141': { name: 'UT-141 Semi-Rigid', family: 'Semi-rigid', z0: 50, vf: 0.70, cap_pf_ft: 28.0, od_mm: 3.58,
     atten_db_per_100ft: { 1000: 14.0, 6000: 36.0, 18000: 67.0 },
-    notes: 'Solid Cu outer conductor. Used for SMA jumpers up to 18 GHz.' },
+    notes: 'Solid Cu outer conductor. Used for SMA jumpers up to 18 GHz.',
+    datasheet: 'https://www.minicircuits.com/pdfs/UT141.pdf' },
+  'sma-085': { name: 'UT-085 Semi-Rigid', family: 'Semi-rigid', z0: 50, vf: 0.70, cap_pf_ft: 28.0, od_mm: 2.20,
+    atten_db_per_100ft: { 1000: 22.0, 6000: 56.0, 18000: 100.0, 33000: 138.0 },
+    notes: 'Smaller semi-rigid for K-connector / 2.92 mm assemblies. To 33 GHz.',
+    datasheet: 'https://www.minicircuits.com/pdfs/UT085.pdf' },
 }
 
 // Search the DB by partial name / family match (built-in + custom merged)
@@ -197,6 +255,7 @@ export const CABLE_TOOLS = [
           additionalProperties: { type: 'number' },
         },
         notes: { type: 'string', description: 'Free-form construction / application notes' },
+        datasheet: { type: 'string', description: 'Optional URL to the manufacturer datasheet PDF or product page.' },
       },
       required: ['id', 'name', 'z0'],
     },
@@ -341,6 +400,100 @@ export const CABLE_TOOLS = [
       required: ['target_skew_ps_per_m', 'delta_er'],
     },
   },
+  {
+    name: 'propose_tdr_scenario',
+    description:
+      "Propose a TDR Sim defect pattern (8 segments). Each segment is 'ideal' | 'kink' | 'crush' | 'conn' | 'splice'. The user clicks Apply on the resulting tool pill and the TDR Sim tab loads the pattern for visualisation. Use when the user wants to *see* what a kind of fault looks like on a TDR trace.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'Short option name e.g. "Crush at midspan", "Bad connector launches"' },
+        defects: { type: 'array', items: { type: 'string' }, description: 'Length-8 array of segment types' },
+        rationale: { type: 'string', description: 'One-sentence trade-off explanation' },
+      },
+      required: ['label', 'defects'],
+    },
+  },
+  {
+    name: 'propose_atten_preset',
+    description:
+      'Propose an Attenuation-plot preset { d (mm), εr, tan δ }. The user clicks Apply on the tool pill and the Atten Plot tab loads the curve. Use when the user wants to compare materials or sizes for a given attenuation target.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'Short option name e.g. "Cat 6A solid PE", "USB4 foamed FEP"' },
+        d: { type: 'number', description: 'Conductor diameter (mm)' },
+        er: { type: 'number', description: 'Dielectric εr' },
+        tand: { type: 'number', description: 'Loss tangent (e.g., 3.5e-4 for foamed PE)' },
+        rationale: { type: 'string', description: 'One-sentence trade-off explanation' },
+      },
+      required: ['label', 'd', 'er', 'tand'],
+    },
+  },
+  {
+    name: 'propose_eye_preset',
+    description:
+      'Propose an Eye-diagram preset { bitRate (Gbps), cableBW (GHz), jitter (ps p-p), noise (mV-equivalent ×1000) }. The user clicks Apply on the tool pill and the Eye tab redraws.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'Short option name e.g. "10G clean", "USB4 worst-case"' },
+        bitRate: { type: 'number', description: 'Bit rate in Gbps (slider range 1–25)' },
+        cableBW: { type: 'number', description: 'Effective channel −3 dB bandwidth in GHz' },
+        jitter: { type: 'number', description: 'Total jitter in ps peak-peak' },
+        noise: { type: 'number', description: 'Noise level scaled (slider range 0–50)' },
+        rationale: { type: 'string', description: 'One-sentence trade-off explanation' },
+      },
+      required: ['label', 'bitRate', 'cableBW'],
+    },
+  },
+  {
+    name: 'propose_cost_preset',
+    description:
+      'Propose a Cost-Calc preset { cable_id, length_m, cu_price_usd_kg, cpk, line_speed_m_min }. The user clicks Apply on the tool pill and the Cost tab refreshes. Pull cu_price from get_company_defaults if you have it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'Short option name e.g. "Cat 6A 1000 m baseline"' },
+        cable: { type: 'string', description: 'Cost-tab cable id: cat6a | cat8 | usb32 | spw | starquad' },
+        length_m: { type: 'number', description: 'Length in metres' },
+        cu_price_usd_kg: { type: 'number', description: 'Copper rod price USD/kg' },
+        cpk: { type: 'number', description: 'Process capability index target (1.0–2.0 typical)' },
+        line_speed_m_min: { type: 'number', description: 'Line speed assumption m/min' },
+        rationale: { type: 'string', description: 'One-sentence trade-off explanation' },
+      },
+      required: ['label'],
+    },
+  },
+  {
+    name: 'get_company_defaults',
+    description:
+      "Read the engineer's persistent company-wide defaults stored on this device. Includes copper / SPC / FEP price per kg, preferred jacket / conductor / dielectric materials, max line speed and anneal temp, default tolerances, and free-form company name + notes. Call this BEFORE quoting cost, picking materials, or doing process-feasibility checks so your answer matches the engineer's factory.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_company_defaults',
+    description:
+      'Write/merge company-wide defaults to local storage. Only the keys you pass are updated; omit a key to leave it alone. Use when the engineer says "remember Cu is $X/kg here" or "we always use FEP" — capture once, reuse forever. Save only stable factory facts; do not save ephemeral conversation context.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cu_price_usd_kg:        { type: 'number', description: 'Copper rod price USD per kg' },
+        spc_price_usd_kg:       { type: 'number', description: 'Silver-plated copper price USD per kg' },
+        fep_price_usd_kg:       { type: 'number', description: 'FEP pellet price USD per kg' },
+        preferred_jacket:       { type: 'string', description: 'pvc | lszh | tpu | pur | fep_jkt' },
+        preferred_conductor:    { type: 'string', description: 'cu | spc | tc | npc' },
+        preferred_dielectric:   { type: 'string', description: 'pe_solid | pe_foamed | ptfe | fep | fep_foamed | pfa | eptfe' },
+        max_line_speed_m_min:   { type: 'number', description: 'Plant ceiling for extruder line speed (m/min)' },
+        max_anneal_c:           { type: 'number', description: 'Plant ceiling for conductor annealing temperature (°C)' },
+        z0_tol_pct:             { type: 'number', description: 'Default Z₀ tolerance window (%)' },
+        od_tol_mm:              { type: 'number', description: 'Default outer-diameter tolerance (mm)' },
+        company_name:           { type: 'string', description: 'Company / brand name' },
+        factory_location:       { type: 'string', description: 'Factory location (city / country)' },
+        notes:                  { type: 'string', description: 'Free-form notes the agent should remember about this site' },
+      },
+    },
+  },
 ];
 
 // ── helpers ─────────────────────────────────────────────
@@ -438,9 +591,9 @@ export function dispatchCableTool(name, input) {
         return { matches: matches.slice(0, 6) };
       }
       case 'add_cable': {
-        const { id, name, z0, family, vf, cap_pf_ft, od_mm, atten_db_per_100ft, notes } = input;
+        const { id, name, z0, family, vf, cap_pf_ft, od_mm, atten_db_per_100ft, notes, datasheet } = input;
         if (!id || !name || !(z0 > 0)) throw new Error('id, name, and z0 (>0) are required');
-        const result = addCustomCableCable({ id, name, z0, family, vf, cap_pf_ft, od_mm, atten_db_per_100ft, notes });
+        const result = addCustomCableCable({ id, name, z0, family, vf, cap_pf_ft, od_mm, atten_db_per_100ft, notes, datasheet });
         return {
           ok: true,
           id: result.id,
@@ -578,6 +731,53 @@ export function dispatchCableTool(name, input) {
           _section: 'lay',
         };
       }
+      case 'propose_tdr_scenario': {
+        const { label, defects, rationale } = input;
+        if (!Array.isArray(defects)) throw new Error('defects must be an array');
+        const allowed = ['ideal', 'kink', 'crush', 'conn', 'splice'];
+        const cleaned = defects.slice(0, 8).map((s) => allowed.includes(s) ? s : 'ideal');
+        while (cleaned.length < 8) cleaned.push('ideal');
+        return {
+          label,
+          inputs: { defects: cleaned },
+          rationale: rationale || undefined,
+          _apply_preset: { defects: cleaned },
+          _section: 'tdr',
+        };
+      }
+      case 'propose_atten_preset': {
+        const { label, d, er, tand, rationale } = input;
+        if (!(d > 0 && er > 0 && tand >= 0)) throw new Error('d, er must be positive; tand non-negative');
+        return {
+          label,
+          inputs: { d, er, tand },
+          rationale: rationale || undefined,
+          _apply_preset: { d, er, tand },
+          _section: 'atten',
+        };
+      }
+      case 'propose_eye_preset': {
+        const { label, bitRate, cableBW, jitter, noise, rationale } = input;
+        if (!(bitRate > 0 && cableBW > 0)) throw new Error('bitRate and cableBW must be positive');
+        return {
+          label,
+          inputs: { bitRate, cableBW, jitter, noise },
+          rationale: rationale || undefined,
+          _apply_preset: { bitRate, cableBW, jitter, noise },
+          _section: 'eye',
+        };
+      }
+      case 'propose_cost_preset': {
+        const { label, cable, length_m, cu_price_usd_kg, cpk, line_speed_m_min, rationale } = input;
+        if (!label) throw new Error('label required');
+        return {
+          label,
+          inputs: { cable, length_m, cu_price_usd_kg, cpk, line_speed_m_min },
+          rationale: rationale || undefined,
+          _apply_preset: { cable, length_m, cu_price_usd_kg, cpk, line_speed_m_min },
+          _section: 'cost',
+        };
+      }
       case 'sensitivity_analysis': {
         const { vary, from, to, steps = 11, D, d, er } = input;
         if (!['D', 'd', 'er'].includes(vary)) throw new Error('vary must be "D", "d", or "er"');
@@ -708,6 +908,13 @@ export function dispatchCableTool(name, input) {
           max_lay_inch: num(lay_mm / 25.4, 4),
           notes: lay_mm < 5 ? 'Required lay is shorter than 5 mm — consider tighter εr control instead of tighter lay.' : (lay_mm > 25 ? 'Lay > 25 mm is unusually loose; check manufacturability.' : 'Within typical lay-length range (5–25 mm).'),
         };
+      }
+      case 'get_company_defaults': {
+        return { defaults: getCompanyDefaults(), stored_at: 'browser localStorage (this device only)' };
+      }
+      case 'set_company_defaults': {
+        const updated = setCompanyDefaults(input || {});
+        return { ok: true, defaults: updated, note: 'Saved to browser localStorage. Future sessions will see these values.' };
       }
       default:
         return { error: `Unknown tool: ${name}` };

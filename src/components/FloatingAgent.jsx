@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown, Eye, EyeOff, Image as ImageIcon, X as XIcon, Paperclip, Download, Mic, MicOff, HelpCircle, Globe } from 'lucide-react'
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { useIsMobile } from './useIsMobile.js'
 
 const MODEL_DEFAULT = 'claude-sonnet-4-6'
@@ -1072,6 +1073,11 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
           ) : null}
         </button>
 
+        {/* Inline chart for tool results that carry plottable data */}
+        {!partial && !parsedResult?.error && (
+          <ToolChart name={name} result={parsedResult} accent={accent} />
+        )}
+
         {/* Inline Apply button when the tool result carries a preset */}
         {canApplyPreset && (
           <div className="flex items-center justify-between px-2.5 py-1.5 border-t" style={{ borderColor: '#1a2226', background: '#0a0d0f' }}>
@@ -1126,6 +1132,111 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
       </div>
     </div>
   )
+}
+
+// Detect tool result shapes that have plottable data and render a small chart.
+// Returns null when nothing chart-worthy is found, so the caller can skip the slot.
+function ToolChart({ name, result, accent }) {
+  if (!result || typeof result !== 'object') return null
+
+  // sensitivity_analysis → result.sweep = [{ <vary>: x, z0_ohm: y }, ...]
+  if (Array.isArray(result.sweep) && result.sweep.length > 1) {
+    const xKey = Object.keys(result.sweep[0]).find((k) => k !== 'z0_ohm' && k !== 'error')
+    const yKey = Object.keys(result.sweep[0]).find((k) => k !== xKey && k !== 'error')
+    if (xKey && yKey) {
+      const data = result.sweep.filter((p) => p[yKey] != null)
+      return (
+        <ChartFrame title={`${yKey} vs ${xKey}`}>
+          <ResponsiveContainer width="100%" height={140}>
+            <LineChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
+              <XAxis dataKey={xKey} stroke="#6b7479" tick={{ fontSize: 9 }} tickLine={false} />
+              <YAxis stroke="#6b7479" tick={{ fontSize: 9 }} tickLine={false} domain={['auto', 'auto']} />
+              <Tooltip contentStyle={tooltipStyle} labelFormatter={(v) => `${xKey}=${v}`} />
+              {[50, 75, 100].map((t) => <ReferenceLine key={t} y={t} stroke="#384249" strokeDasharray="2 2" />)}
+              <Line type="monotone" dataKey={yKey} stroke={accent} strokeWidth={1.5} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartFrame>
+      )
+    }
+  }
+
+  // compare_cables → result.rows = [{ id, name, z0, atten_db, ... }]
+  if (Array.isArray(result.rows) && result.rows.length > 0 && result.rows[0].atten_db != null) {
+    const data = result.rows.map((r) => ({ name: r.name || r.id, IL: r.atten_db_total ?? r.atten_db, ΔvsBase: r.delta_db || 0 }))
+    return (
+      <ChartFrame title={`Insertion loss across cables`}>
+        <ResponsiveContainer width="100%" height={140}>
+          <BarChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
+            <XAxis dataKey="name" stroke="#6b7479" tick={{ fontSize: 9 }} tickLine={false} interval={0} angle={-15} textAnchor="end" />
+            <YAxis stroke="#6b7479" tick={{ fontSize: 9 }} tickLine={false} unit=" dB" />
+            <Tooltip contentStyle={tooltipStyle} />
+            <Bar dataKey="IL" fill={accent} />
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartFrame>
+    )
+  }
+
+  // link_budget → result.breakdown = [{ stage, dbm }, ...]
+  if (Array.isArray(result.breakdown) && result.breakdown.length > 1 && result.breakdown[0].dbm != null) {
+    return (
+      <ChartFrame title={`Link budget per stage`}>
+        <ResponsiveContainer width="100%" height={140}>
+          <LineChart data={result.breakdown} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
+            <XAxis dataKey="stage" stroke="#6b7479" tick={{ fontSize: 9 }} tickLine={false} interval={0} />
+            <YAxis stroke="#6b7479" tick={{ fontSize: 9 }} tickLine={false} unit=" dBm" />
+            <Tooltip contentStyle={tooltipStyle} />
+            <Line type="stepAfter" dataKey="dbm" stroke={accent} strokeWidth={1.5} dot={{ r: 2 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </ChartFrame>
+    )
+  }
+
+  // compute_attenuation → result.atten_db_per_100ft as a single value, no chart.
+  // But cable lookup with atten table → result.atten_db_per_100ft = { freq: dB }
+  const attenTable = result.atten_db_per_100ft || result.cable?.atten_db_per_100ft
+  if (attenTable && typeof attenTable === 'object' && Object.keys(attenTable).length >= 2) {
+    const data = Object.entries(attenTable)
+      .map(([f, db]) => ({ f: parseFloat(f), db: parseFloat(db) }))
+      .filter((p) => !isNaN(p.f) && !isNaN(p.db))
+      .sort((a, b) => a.f - b.f)
+    if (data.length >= 2) {
+      return (
+        <ChartFrame title={`Attenuation table (dB/100ft vs MHz)`}>
+          <ResponsiveContainer width="100%" height={140}>
+            <LineChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
+              <XAxis dataKey="f" stroke="#6b7479" tick={{ fontSize: 9 }} tickLine={false} scale="log" domain={['auto', 'auto']} type="number" unit=" MHz" />
+              <YAxis stroke="#6b7479" tick={{ fontSize: 9 }} tickLine={false} unit=" dB" />
+              <Tooltip contentStyle={tooltipStyle} labelFormatter={(v) => `${v} MHz`} />
+              <Line type="monotone" dataKey="db" stroke={accent} strokeWidth={1.5} dot={{ r: 2 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartFrame>
+      )
+    }
+  }
+
+  return null
+}
+
+function ChartFrame({ title, children }) {
+  return (
+    <div className="border-t" style={{ borderColor: '#1a2226', background: '#0a0d0f', padding: '8px 10px' }}>
+      <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479] mb-1">{title}</div>
+      {children}
+    </div>
+  )
+}
+
+const tooltipStyle = {
+  background: '#0a0d0f',
+  border: '1px solid #252e33',
+  borderRadius: 3,
+  fontSize: 11,
+  fontFamily: 'JetBrains Mono, monospace',
+  color: '#f0ebe2',
 }
 
 function summarizeInput(input) {

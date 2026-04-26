@@ -1,5 +1,6 @@
 // Tools exposed to the RF agent. Pure-math + small DBs, client-side dispatch.
 import { getCustomRfCables, addCustomRfCable, deleteCustomRfCable } from './customCableStore.js'
+import { getCompanyDefaults, setCompanyDefaults, resetCompanyDefaults } from './companyDefaults.js'
 
 // ── Material properties database ────────────────────────
 export const MATERIAL_DB = {
@@ -75,29 +76,68 @@ export const STANDARDS_DB = {
 }
 
 // ── RF cable database (50 Ω + 75 Ω) ─────────────────────
+// `datasheet` is an optional URL to the manufacturer datasheet PDF.
 export const RF_CABLE_DB = {
   'rg-58':   { name: 'RG-58/U',      z0: 50, vf: 0.66, od_mm: 4.95, fmax_ghz: 1.0,
-    atten_db_per_100ft: { 30: 2.5, 100: 4.4, 450: 9.9, 900: 14.8, 1000: 16.0, 2400: 26.0 } },
+    atten_db_per_100ft: { 30: 2.5, 100: 4.4, 450: 9.9, 900: 14.8, 1000: 16.0, 2400: 26.0 },
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg58' },
   'rg-174':  { name: 'RG-174/U',     z0: 50, vf: 0.66, od_mm: 2.79, fmax_ghz: 3.0,
-    atten_db_per_100ft: { 100: 8.8, 400: 18.0, 900: 28.5, 1000: 30.0, 2400: 50.0, 3000: 56.0 } },
+    atten_db_per_100ft: { 100: 8.8, 400: 18.0, 900: 28.5, 1000: 30.0, 2400: 50.0, 3000: 56.0 },
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg174' },
   'rg-178':  { name: 'RG-178B/U',    z0: 50, vf: 0.69, od_mm: 1.83, fmax_ghz: 3.0,
-    atten_db_per_100ft: { 100: 14.0, 400: 29.0, 1000: 46.0, 3000: 84.0 } },
+    atten_db_per_100ft: { 100: 14.0, 400: 29.0, 1000: 46.0, 3000: 84.0 },
+    datasheet: 'https://www.pasternack.com/images/ProductPDF/RG178B-U.pdf' },
   'rg-213':  { name: 'RG-213/U',     z0: 50, vf: 0.66, od_mm: 10.3, fmax_ghz: 3.0,
-    atten_db_per_100ft: { 30: 1.0, 100: 1.9, 400: 4.1, 900: 6.4, 1000: 6.9, 2400: 11.5 } },
+    atten_db_per_100ft: { 30: 1.0, 100: 1.9, 400: 4.1, 900: 6.4, 1000: 6.9, 2400: 11.5 },
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg213' },
+  'rg-316':  { name: 'RG-316/U',     z0: 50, vf: 0.69, od_mm: 2.49, fmax_ghz: 3.0,
+    atten_db_per_100ft: { 100: 9.0, 400: 18.5, 1000: 31.0, 3000: 60.0 },
+    datasheet: 'https://www.pasternack.com/images/ProductPDF/RG316-U.pdf' },
+  'rg-393':  { name: 'RG-393/U',     z0: 50, vf: 0.70, od_mm: 9.91, fmax_ghz: 12.4,
+    atten_db_per_100ft: { 1000: 6.8, 5000: 16.2, 10000: 24.5, 12400: 28.0 },
+    datasheet: 'https://www.pasternack.com/images/ProductPDF/RG393-U.pdf' },
   'lmr-100': { name: 'LMR-100A',     z0: 50, vf: 0.66, od_mm: 2.79, fmax_ghz: 5.8,
-    atten_db_per_100ft: { 100: 7.4, 400: 15.6, 1000: 25.5, 2400: 39.5, 5800: 64.0 } },
+    atten_db_per_100ft: { 100: 7.4, 400: 15.6, 1000: 25.5, 2400: 39.5, 5800: 64.0 },
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-100A.pdf' },
+  'lmr-200': { name: 'LMR-200',      z0: 50, vf: 0.83, od_mm: 4.95, fmax_ghz: 5.8,
+    atten_db_per_100ft: { 100: 3.9, 400: 8.0, 1000: 12.7, 2400: 20.5, 5800: 33.0 },
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-200.pdf' },
   'lmr-240': { name: 'LMR-240',      z0: 50, vf: 0.84, od_mm: 6.10, fmax_ghz: 5.8,
-    atten_db_per_100ft: { 100: 3.0, 400: 6.4, 1000: 10.5, 2400: 16.5, 5800: 26.5 } },
+    atten_db_per_100ft: { 100: 3.0, 400: 6.4, 1000: 10.5, 2400: 16.5, 5800: 26.5 },
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-240.pdf' },
   'lmr-400': { name: 'LMR-400',      z0: 50, vf: 0.85, od_mm: 10.29, fmax_ghz: 5.8,
-    atten_db_per_100ft: { 100: 1.5, 400: 3.0, 1000: 4.8, 2400: 7.6, 5800: 12.5 } },
+    atten_db_per_100ft: { 100: 1.5, 400: 3.0, 1000: 4.8, 2400: 7.6, 5800: 12.5 },
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-400.pdf' },
   'lmr-600': { name: 'LMR-600',      z0: 50, vf: 0.87, od_mm: 14.99, fmax_ghz: 5.8,
-    atten_db_per_100ft: { 100: 0.96, 400: 1.96, 1000: 3.1, 2400: 5.0, 5800: 8.2 } },
-  'heliax-ldf4-50a': { name: 'Heliax LDF4-50A', z0: 50, vf: 0.88, od_mm: 12.7, fmax_ghz: 8.8,
-    atten_db_per_100ft: { 30: 0.36, 100: 0.66, 400: 1.36, 1000: 2.18, 2400: 3.5, 5800: 5.7 } },
+    atten_db_per_100ft: { 100: 0.96, 400: 1.96, 1000: 3.1, 2400: 5.0, 5800: 8.2 },
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-600.pdf' },
+  'lmr-900': { name: 'LMR-900',      z0: 50, vf: 0.87, od_mm: 22.10, fmax_ghz: 5.0,
+    atten_db_per_100ft: { 100: 0.66, 400: 1.36, 1000: 2.16, 2400: 3.6, 5000: 5.4 },
+    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-900.pdf' },
+  'heliax-ldf4-50a': { name: 'Heliax LDF4-50A (1/2")', z0: 50, vf: 0.88, od_mm: 12.7, fmax_ghz: 8.8,
+    atten_db_per_100ft: { 30: 0.36, 100: 0.66, 400: 1.36, 1000: 2.18, 2400: 3.5, 5800: 5.7 },
+    datasheet: 'https://www.commscope.com/globalassets/digizuite/2719-ldf4-50a-external.pdf' },
+  'heliax-ldf5-50a': { name: 'Heliax LDF5-50A (7/8")', z0: 50, vf: 0.89, od_mm: 22.0, fmax_ghz: 5.0,
+    atten_db_per_100ft: { 100: 0.36, 400: 0.74, 1000: 1.20, 2400: 1.94, 4000: 2.54 },
+    datasheet: 'https://www.commscope.com/globalassets/digizuite/2723-ldf5-50a-external.pdf' },
   'rg-59':   { name: 'RG-59/U',      z0: 75, vf: 0.66, od_mm: 6.15, fmax_ghz: 1.5,
-    atten_db_per_100ft: { 100: 3.6, 400: 7.5, 900: 11.4, 1500: 14.6 } },
-  'ut-141':  { name: 'UT-141',       z0: 50, vf: 0.70, od_mm: 3.58, fmax_ghz: 22,
-    atten_db_per_100ft: { 1000: 14.0, 6000: 36.0, 18000: 67.0, 22000: 75.0 } },
+    atten_db_per_100ft: { 100: 3.6, 400: 7.5, 900: 11.4, 1500: 14.6 },
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg59' },
+  'rg-6':    { name: 'RG-6/U (CATV)', z0: 75, vf: 0.83, od_mm: 6.86, fmax_ghz: 3.0,
+    atten_db_per_100ft: { 100: 2.0, 400: 4.0, 900: 5.7, 1000: 6.0, 2400: 9.8 },
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg6' },
+  'rg-11':   { name: 'RG-11/U (75 Ω)', z0: 75, vf: 0.84, od_mm: 10.30, fmax_ghz: 3.0,
+    atten_db_per_100ft: { 100: 1.4, 400: 3.0, 1000: 5.5, 2400: 9.5 },
+    datasheet: 'https://www.belden.com/products/cable/coaxial/rg11' },
+  'ut-141':  { name: 'UT-141 Semi-Rigid', z0: 50, vf: 0.70, od_mm: 3.58, fmax_ghz: 22,
+    atten_db_per_100ft: { 1000: 14.0, 6000: 36.0, 18000: 67.0, 22000: 75.0 },
+    datasheet: 'https://www.minicircuits.com/pdfs/UT141.pdf' },
+  'ut-085':  { name: 'UT-085 Semi-Rigid', z0: 50, vf: 0.70, od_mm: 2.20, fmax_ghz: 33,
+    atten_db_per_100ft: { 1000: 22.0, 6000: 56.0, 18000: 100.0, 33000: 138.0 },
+    datasheet: 'https://www.minicircuits.com/pdfs/UT085.pdf' },
+  'sucoflex-104': { name: 'Sucoflex 104 (HF Test)', z0: 50, vf: 0.77, od_mm: 6.50, fmax_ghz: 26.5,
+    atten_db_per_100ft: { 1000: 7.7, 10000: 26.5, 18000: 36.4, 26500: 45.7 },
+    datasheet: 'https://www.hubersuhner.com/en/documents-repository/technologies/pdf/data-sheets-rf/sucoflex-104.pdf' },
 }
 
 // ── Connector database ─────────────────────────────────
@@ -269,6 +309,7 @@ export const RF_TOOLS = [
           additionalProperties: { type: 'number' },
         },
         notes: { type: 'string', description: 'Free-form construction / application notes' },
+        datasheet: { type: 'string', description: 'Optional URL to the manufacturer datasheet PDF or product page.' },
       },
       required: ['id', 'name', 'z0'],
     },
@@ -485,6 +526,35 @@ export const RF_TOOLS = [
       },
     },
   },
+  {
+    name: 'get_company_defaults',
+    description:
+      "Read the engineer's persistent company-wide defaults stored on this device. Includes copper / SPC / FEP price per kg, preferred jacket / conductor / dielectric materials, max line speed and anneal temp, default tolerances, and free-form company name + notes. Call this BEFORE quoting cost or recommending materials so your answer matches the engineer's company.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_company_defaults',
+    description:
+      'Write/merge company-wide defaults to local storage. Only the keys you pass are updated; omit a key to leave it alone. Use when the engineer says "remember Cu is $X/kg here" or "we always use FEP" — capture once, reuse forever.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cu_price_usd_kg:        { type: 'number', description: 'Copper rod price USD per kg' },
+        spc_price_usd_kg:       { type: 'number', description: 'Silver-plated copper price USD per kg' },
+        fep_price_usd_kg:       { type: 'number', description: 'FEP pellet price USD per kg' },
+        preferred_jacket:       { type: 'string', description: 'pvc | lszh | tpu | pur | fep_jkt' },
+        preferred_conductor:    { type: 'string', description: 'cu | spc | tc | npc' },
+        preferred_dielectric:   { type: 'string', description: 'pe_solid | pe_foamed | ptfe | fep | fep_foamed | pfa | eptfe' },
+        max_line_speed_m_min:   { type: 'number', description: 'Plant ceiling for extruder line speed (m/min)' },
+        max_anneal_c:           { type: 'number', description: 'Plant ceiling for conductor annealing temperature (°C)' },
+        z0_tol_pct:             { type: 'number', description: 'Default Z₀ tolerance window (%)' },
+        od_tol_mm:              { type: 'number', description: 'Default outer-diameter tolerance (mm)' },
+        company_name:           { type: 'string', description: 'Company / brand name' },
+        factory_location:       { type: 'string', description: 'Factory location (city / country)' },
+        notes:                  { type: 'string', description: 'Free-form notes the agent should remember about this site' },
+      },
+    },
+  },
 ]
 
 // ── dispatcher ─────────────────────────────────────────
@@ -499,9 +569,9 @@ export function dispatchRfTool(name, input) {
         return { matches: matches.slice(0, 6) }
       }
       case 'add_cable': {
-        const { id, name, z0, vf, od_mm, fmax_ghz, atten_db_per_100ft, notes } = input
+        const { id, name, z0, vf, od_mm, fmax_ghz, atten_db_per_100ft, notes, datasheet } = input
         if (!id || !name || !(z0 > 0)) throw new Error('id, name, and z0 (>0) are required')
-        const result = addCustomRfCable({ id, name, z0, vf, od_mm, fmax_ghz, atten_db_per_100ft, notes })
+        const result = addCustomRfCable({ id, name, z0, vf, od_mm, fmax_ghz, atten_db_per_100ft, notes, datasheet })
         return {
           ok: true,
           id: result.id,
@@ -874,6 +944,13 @@ export function dispatchRfTool(name, input) {
             ? 'Two-port mismatch loss: |Γ_total| ≈ |Γ_A| × |Γ_B| in worst-case interference.'
             : 'Single-port mismatch using provided ρ.',
         }
+      }
+      case 'get_company_defaults': {
+        return { defaults: getCompanyDefaults(), stored_at: 'browser localStorage (this device only)' }
+      }
+      case 'set_company_defaults': {
+        const updated = setCompanyDefaults(input || {})
+        return { ok: true, defaults: updated, note: 'Saved to browser localStorage. Future sessions will see these values.' }
       }
       default:
         return { error: `Unknown tool: ${name}` }

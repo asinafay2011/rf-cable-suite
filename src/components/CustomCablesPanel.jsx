@@ -136,6 +136,16 @@ export default function CustomCablesPanel({ side = 'rf', accentColor = '#d97706'
                 )}
               </div>
               {c.notes && <div style={{ fontSize: 10, color: '#a7b0b6', marginTop: 6, fontStyle: 'italic', lineHeight: 1.4 }}>{c.notes}</div>}
+              {c.datasheet && (
+                <a
+                  href={c.datasheet}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: 'inline-block', marginTop: 6, fontSize: 10, color: accentColor, textDecoration: 'none', borderBottom: `1px dotted ${accentColor}` }}
+                >
+                  📄 Datasheet ↗
+                </a>
+              )}
             </div>
           ))}
         </div>
@@ -182,6 +192,7 @@ function CableForm({ initial, onSave, onCancel, accentColor, side }) {
       ? Object.entries(initial.atten_db_per_100ft).map(([f, db]) => `${f}, ${db}`).join('\n')
       : '',
     notes: initial.notes || '',
+    datasheet: initial.datasheet || '',
   })
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -207,6 +218,7 @@ function CableForm({ initial, onSave, onCancel, accentColor, side }) {
       fmax_ghz: form.fmax_ghz === '' ? undefined : parseFloat(form.fmax_ghz),
       atten_db_per_100ft: Object.keys(atten_db_per_100ft).length > 0 ? atten_db_per_100ft : undefined,
       notes: form.notes || undefined,
+      datasheet: form.datasheet || undefined,
     })
   }
 
@@ -266,6 +278,7 @@ function CableForm({ initial, onSave, onCancel, accentColor, side }) {
             style={inputStyle}
           />
         </Field>
+        <Input label="Datasheet URL (optional)" value={form.datasheet} onChange={set('datasheet')} placeholder="https://www.belden.com/.../rg58" />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <button type="button" onClick={onCancel} style={btn('#384249')}>Cancel</button>
           <button type="submit" style={btn(accentColor)}>Save to local library</button>

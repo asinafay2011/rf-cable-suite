@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react'
 import {
   Layers, Settings, AlertTriangle, CheckCircle2, Sparkles, RotateCcw,
   Save, Upload, Download, ChevronRight, Activity, Cable, Shield,
-  Zap, Box, GitMerge, Atom, Beaker, ScrollText, Waves,
+  Zap, Box, GitMerge, Atom, Beaker, ScrollText, Waves, Wand2, History,
 } from 'lucide-react'
 import { useToast } from './Toaster.jsx'
 
@@ -85,6 +85,126 @@ const DEFAULT_RECIPE = {
   shield: { foil: true, foil_overlap: 25, braid_enabled: true, braid_N: 24, braid_P: 7, braid_d_mm: 0.13, braid_PR: 14, braid_material: 'spc' },
   jacket: { material: 'lszh', wall_mm: 0.5 },
   test: { length_m: 100, freq_mhz: 500 },
+}
+
+// ── Recipe templates (one-click factory presets) ────────
+// Each template is a complete recipe object. Picking one in the UI calls setRecipe(...)
+// which propagates through the entire 9-stage pipeline. Compose realistic baselines,
+// not idealised PASS recipes — engineer should still iterate.
+const RECIPE_TEMPLATES = {
+  default:    { name: 'Default baseline (Cat 6A)', recipe: DEFAULT_RECIPE },
+  cat6a_sftp: {
+    name: 'Cat 6A S/FTP (foiled-pair + braid)',
+    recipe: {
+      product: { target: 'cat6a' },
+      conductor: { rod_d_mm: 8.0, target_awg: 23, material: 'spc', anneal_c: 480, line_m_min: 800 },
+      stranding: { enabled: false, strand_count: 7, lay_mm: 12 },
+      insulation: { material: 'fep_foamed', wall_mm: 0.22, line_m_min: 250, melt_c: 320 },
+      pair: { lay_mm: 13, direction: 'S', tension_n: 8 },
+      pair_wrap: { material: 'polyester', overlap_pct: 25, wall_mm: 0.04 },
+      pair_foil: { material: 'al_polyester', overlap_pct: 30, drain_wire: true, drain_awg: 28 },
+      bundle: { pair_count: 4, lay_diversity: true, filler: 'x_spline', bundle_lay_mm: 80 },
+      shield: { foil: true, foil_overlap: 25, braid_enabled: true, braid_N: 24, braid_P: 7, braid_d_mm: 0.13, braid_PR: 14, braid_material: 'spc' },
+      jacket: { material: 'lszh', wall_mm: 0.5 },
+      test: { length_m: 100, freq_mhz: 500 },
+    },
+  },
+  cat8: {
+    name: 'Cat 8 (40 GbE, 2 GHz)',
+    recipe: {
+      product: { target: 'cat8' },
+      conductor: { rod_d_mm: 8.0, target_awg: 22, material: 'spc', anneal_c: 500, line_m_min: 700 },
+      stranding: { enabled: false, strand_count: 7, lay_mm: 12 },
+      insulation: { material: 'fep_foamed', wall_mm: 0.30, line_m_min: 220, melt_c: 320 },
+      pair: { lay_mm: 9, direction: 'S', tension_n: 10 },
+      pair_wrap: { material: 'eptfe_tape', overlap_pct: 30, wall_mm: 0.04 },
+      pair_foil: { material: 'al_polyimide', overlap_pct: 30, drain_wire: true, drain_awg: 26 },
+      bundle: { pair_count: 4, lay_diversity: true, filler: 'x_spline', bundle_lay_mm: 70 },
+      shield: { foil: true, foil_overlap: 30, braid_enabled: true, braid_N: 24, braid_P: 8, braid_d_mm: 0.12, braid_PR: 16, braid_material: 'spc' },
+      jacket: { material: 'lszh', wall_mm: 0.6 },
+      test: { length_m: 30, freq_mhz: 2000 },
+    },
+  },
+  usb4: {
+    name: 'USB4 / TB4 (20 GHz, low skew)',
+    recipe: {
+      product: { target: 'usb4' },
+      conductor: { rod_d_mm: 8.0, target_awg: 30, material: 'spc', anneal_c: 460, line_m_min: 600 },
+      stranding: { enabled: true, strand_count: 7, lay_mm: 6 },
+      insulation: { material: 'fep_foamed', wall_mm: 0.18, line_m_min: 180, melt_c: 320 },
+      pair: { lay_mm: 6, direction: 'S', tension_n: 6 },
+      pair_wrap: { material: 'eptfe_tape', overlap_pct: 30, wall_mm: 0.025 },
+      pair_foil: { material: 'al_polyimide', overlap_pct: 30, drain_wire: true, drain_awg: 32 },
+      bundle: { pair_count: 4, lay_diversity: true, filler: 'x_spline', bundle_lay_mm: 40 },
+      shield: { foil: true, foil_overlap: 30, braid_enabled: true, braid_N: 16, braid_P: 6, braid_d_mm: 0.08, braid_PR: 18, braid_material: 'spc' },
+      jacket: { material: 'tpu', wall_mm: 0.4 },
+      test: { length_m: 1, freq_mhz: 10000 },
+    },
+  },
+  rg58: {
+    name: 'RG-58 (50 Ω coax)',
+    recipe: {
+      product: { target: 'rg58' },
+      conductor: { rod_d_mm: 8.0, target_awg: 20, material: 'tc', anneal_c: 460, line_m_min: 900 },
+      stranding: { enabled: true, strand_count: 19, lay_mm: 14 },
+      insulation: { material: 'pe_solid', wall_mm: 0.81, line_m_min: 250, melt_c: 200 },
+      pair: { lay_mm: 0, direction: 'S', tension_n: 0 },
+      pair_wrap: { material: 'none', overlap_pct: 0, wall_mm: 0 },
+      pair_foil: { material: 'none', overlap_pct: 0, drain_wire: false, drain_awg: 0 },
+      bundle: { pair_count: 1, lay_diversity: false, filler: 'none', bundle_lay_mm: 0 },
+      shield: { foil: false, foil_overlap: 0, braid_enabled: true, braid_N: 16, braid_P: 7, braid_d_mm: 0.16, braid_PR: 12, braid_material: 'tc' },
+      jacket: { material: 'pvc', wall_mm: 0.7 },
+      test: { length_m: 100, freq_mhz: 1000 },
+    },
+  },
+  rg6: {
+    name: 'RG-6 (75 Ω CATV)',
+    recipe: {
+      product: { target: 'custom' },
+      conductor: { rod_d_mm: 8.0, target_awg: 18, material: 'cu', anneal_c: 480, line_m_min: 1000 },
+      stranding: { enabled: false, strand_count: 1, lay_mm: 0 },
+      insulation: { material: 'pe_foamed', wall_mm: 1.85, line_m_min: 250, melt_c: 200 },
+      pair: { lay_mm: 0, direction: 'S', tension_n: 0 },
+      pair_wrap: { material: 'none', overlap_pct: 0, wall_mm: 0 },
+      pair_foil: { material: 'al_polyester', overlap_pct: 50, drain_wire: false, drain_awg: 0 },
+      bundle: { pair_count: 1, lay_diversity: false, filler: 'none', bundle_lay_mm: 0 },
+      shield: { foil: true, foil_overlap: 50, braid_enabled: true, braid_N: 16, braid_P: 4, braid_d_mm: 0.12, braid_PR: 22, braid_material: 'tc' },
+      jacket: { material: 'pvc', wall_mm: 0.6 },
+      test: { length_m: 100, freq_mhz: 1000 },
+    },
+  },
+  lmr400: {
+    name: 'LMR-400 style (50 Ω low-loss)',
+    recipe: {
+      product: { target: 'custom' },
+      conductor: { rod_d_mm: 8.0, target_awg: 10, material: 'cu', anneal_c: 500, line_m_min: 600 },
+      stranding: { enabled: false, strand_count: 1, lay_mm: 0 },
+      insulation: { material: 'pe_foamed', wall_mm: 2.30, line_m_min: 200, melt_c: 200 },
+      pair: { lay_mm: 0, direction: 'S', tension_n: 0 },
+      pair_wrap: { material: 'none', overlap_pct: 0, wall_mm: 0 },
+      pair_foil: { material: 'al_polyester', overlap_pct: 50, drain_wire: false, drain_awg: 0 },
+      bundle: { pair_count: 1, lay_diversity: false, filler: 'none', bundle_lay_mm: 0 },
+      shield: { foil: true, foil_overlap: 50, braid_enabled: true, braid_N: 16, braid_P: 5, braid_d_mm: 0.16, braid_PR: 16, braid_material: 'tc' },
+      jacket: { material: 'pvc', wall_mm: 1.0 },
+      test: { length_m: 100, freq_mhz: 2400 },
+    },
+  },
+  rg174_lowcost: {
+    name: 'RG-174 (50 Ω, jumper / low-cost)',
+    recipe: {
+      product: { target: 'custom' },
+      conductor: { rod_d_mm: 8.0, target_awg: 26, material: 'tc', anneal_c: 460, line_m_min: 900 },
+      stranding: { enabled: true, strand_count: 7, lay_mm: 8 },
+      insulation: { material: 'pe_solid', wall_mm: 0.50, line_m_min: 280, melt_c: 200 },
+      pair: { lay_mm: 0, direction: 'S', tension_n: 0 },
+      pair_wrap: { material: 'none', overlap_pct: 0, wall_mm: 0 },
+      pair_foil: { material: 'none', overlap_pct: 0, drain_wire: false, drain_awg: 0 },
+      bundle: { pair_count: 1, lay_diversity: false, filler: 'none', bundle_lay_mm: 0 },
+      shield: { foil: false, foil_overlap: 0, braid_enabled: true, braid_N: 16, braid_P: 5, braid_d_mm: 0.10, braid_PR: 14, braid_material: 'tc' },
+      jacket: { material: 'pvc', wall_mm: 0.4 },
+      test: { length_m: 100, freq_mhz: 1000 },
+    },
+  },
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -352,6 +472,100 @@ function computeIL(prev, freq_mhz, length_m) {
   return (il_per_100m / 100) * length_m
 }
 
+// ── Pipeline runner used by the auto-fix optimizer (pure, no React state) ──
+function runPipeline(recipe) {
+  const conductor = computeConductor(recipe.conductor)
+  const stranding = computeStranding(recipe.stranding, conductor)
+  const insulation = computeInsulation(recipe.insulation, stranding)
+  const pair = computePair(recipe.pair, insulation)
+  const pair_wrap = computePairWrap(recipe.pair_wrap, pair)
+  const pair_foil = computePairFoil(recipe.pair_foil, pair_wrap)
+  const bundle = computeBundle(recipe.bundle, pair_foil)
+  const shield = computeShield(recipe.shield, bundle)
+  const jacket = computeJacket(recipe.jacket, shield)
+  const il_db = computeIL(jacket, recipe.test.freq_mhz, recipe.test.length_m)
+  return { conductor, stranding, insulation, pair, pair_wrap, pair_foil, bundle, shield, jacket, il_db }
+}
+
+// Score a recipe vs the standard. Lower score = better. 0 = passes everything.
+// Each failing check contributes a normalised penalty so the optimizer can
+// gradient-descend across parameter mutations.
+function scoreRecipe(recipe) {
+  const std = STANDARDS[recipe.product.target]
+  const sim = runPipeline(recipe)
+  let score = 0
+  const z_off = Math.abs(sim.jacket.z_diff - std.z0_diff)
+  if (z_off > std.z0_tol) score += (z_off - std.z0_tol) * 2
+  const il = computeIL(sim.jacket, std.freq_il_mhz, 100)
+  if (il > std.max_il_db_per_100m) score += (il - std.max_il_db_per_100m) * 0.5
+  if (std.min_next_db > 0 && sim.jacket.next_db_estimate < std.min_next_db) {
+    score += (std.min_next_db - sim.jacket.next_db_estimate) * 0.5
+  }
+  if (std.max_skew_ps_per_m > 0 && sim.jacket.pair_skew_ps_per_m > std.max_skew_ps_per_m) {
+    score += (sim.jacket.pair_skew_ps_per_m - std.max_skew_ps_per_m) * 0.3
+  }
+  return { score, sim, std }
+}
+
+// Mutators: a tiny bag of "what would a process engineer try first" tweaks.
+// Each entry returns a NEW recipe, leaves the input untouched.
+const MUTATORS = [
+  // Insulation wall: scale up or down 10 %
+  (r) => ({ ...r, insulation: { ...r.insulation, wall_mm: clamp(r.insulation.wall_mm * 1.05, 0.10, 3.0) } }),
+  (r) => ({ ...r, insulation: { ...r.insulation, wall_mm: clamp(r.insulation.wall_mm * 0.95, 0.10, 3.0) } }),
+  // Pair lay: tighten / loosen 1 mm
+  (r) => ({ ...r, pair: { ...r.pair, lay_mm: clamp(r.pair.lay_mm - 1, 5, 25) } }),
+  (r) => ({ ...r, pair: { ...r.pair, lay_mm: clamp(r.pair.lay_mm + 1, 5, 25) } }),
+  // Conductor AWG: thinner / thicker
+  (r) => ({ ...r, conductor: { ...r.conductor, target_awg: clamp(r.conductor.target_awg - 1, 12, 40) } }),
+  (r) => ({ ...r, conductor: { ...r.conductor, target_awg: clamp(r.conductor.target_awg + 1, 12, 40) } }),
+  // Conductor material: try SPC if not already
+  (r) => r.conductor.material === 'spc' ? r : ({ ...r, conductor: { ...r.conductor, material: 'spc' } }),
+  // Insulation: try foamed PE if currently solid PE (lower εr → higher VF, lower IL)
+  (r) => r.insulation.material === 'pe_solid' ? ({ ...r, insulation: { ...r.insulation, material: 'pe_foamed' } }) : r,
+  // Insulation: try foamed FEP if currently FEP
+  (r) => r.insulation.material === 'fep' ? ({ ...r, insulation: { ...r.insulation, material: 'fep_foamed' } }) : r,
+  // Drop line speed 100 m/min (helps εr drift on foamed dielectric)
+  (r) => ({ ...r, insulation: { ...r.insulation, line_m_min: clamp(r.insulation.line_m_min - 50, 100, 400) } }),
+  // Tighten foil overlap to 30 %
+  (r) => r.pair_foil.material === 'none' ? r : ({ ...r, pair_foil: { ...r.pair_foil, overlap_pct: clamp(r.pair_foil.overlap_pct + 5, 20, 50) } }),
+  // Add picks/inch on the braid
+  (r) => ({ ...r, shield: { ...r.shield, braid_PR: clamp(r.shield.braid_PR + 1, 6, 25) } }),
+  (r) => ({ ...r, shield: { ...r.shield, braid_PR: clamp(r.shield.braid_PR - 1, 6, 25) } }),
+  // More carriers on braid
+  (r) => ({ ...r, shield: { ...r.shield, braid_N: clamp(r.shield.braid_N + 4, 8, 48) } }),
+]
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
+
+// Hill-climbing search: at each step, apply every mutator to the current best,
+// keep whichever lowers the score the most. Stop on PASS or step budget.
+// Returns { recipe, score, iterations, converged, history }
+function autoFix(initial, maxSteps = 40) {
+  let best = initial
+  let bestScore = scoreRecipe(best).score
+  const history = [{ step: 0, score: bestScore }]
+  if (bestScore <= 0.01) return { recipe: best, score: bestScore, iterations: 0, converged: true, history }
+  for (let step = 1; step <= maxSteps; step++) {
+    let stepBest = null
+    let stepBestScore = bestScore
+    for (const mut of MUTATORS) {
+      const candidate = mut(best)
+      if (!candidate) continue
+      const { score } = scoreRecipe(candidate)
+      if (score < stepBestScore - 1e-6) {
+        stepBest = candidate
+        stepBestScore = score
+      }
+    }
+    if (!stepBest) break  // no mutator improved → local minimum
+    best = stepBest
+    bestScore = stepBestScore
+    history.push({ step, score: bestScore })
+    if (bestScore <= 0.01) return { recipe: best, score: bestScore, iterations: step, converged: true, history }
+  }
+  return { recipe: best, score: bestScore, iterations: history.length - 1, converged: bestScore <= 0.01, history }
+}
+
 // ── React component ─────────────────────────────────────
 export default function ProcessSim() {
   const toast = useToast()
@@ -412,11 +626,13 @@ export default function ProcessSim() {
 
   const std = STANDARDS[recipe.product.target]
 
-  // Push current state out to listeners (agent context). Compact text + a structured object.
+  // Push current state out to listeners (agent context). Fire only when recipe / sim
+  // / std references actually change — otherwise the parent's setState triggers a
+  // re-render here, which would re-fire this effect and create an infinite loop.
   useEffect(() => {
     const detail = { recipe, sim, std }
     window.dispatchEvent(new CustomEvent('processsim:state', { detail }))
-  }) // run on every render so it stays in sync with sim output
+  }, [recipe, sim, std])
 
   // Listen for agent-applied presets and route them into the corresponding stage of the
   // simulator instead of teleporting the user away to the standalone Braid / Z₀ Calc tab.
@@ -527,6 +743,124 @@ export default function ProcessSim() {
     })
   }
   const resetRecipe = () => { setRecipe(DEFAULT_RECIPE); toast.info('Recipe reset to defaults') }
+  const loadTemplate = (id) => {
+    const t = RECIPE_TEMPLATES[id]
+    if (!t) return
+    setRecipe(t.recipe)
+    addAnnotation(`Loaded template · ${t.name}`, t.recipe)
+    toast.success(`Loaded template: ${t.name}`)
+  }
+
+  const [optimizing, setOptimizing] = useState(false)
+  const runAutoFix = () => {
+    if (allPass) { toast.info('Already passing — nothing to fix.'); return }
+    setOptimizing(true)
+    // Defer one tick so the spinner can paint before the synchronous search runs.
+    setTimeout(() => {
+      try {
+        const result = autoFix(recipe, 50)
+        setRecipe(result.recipe)
+        addAnnotation(`Auto-fix · ${result.converged ? 'PASS' : 'best-effort'} (${result.iterations} steps)`, result.recipe)
+        if (result.converged) {
+          toast.success(`Auto-fix converged in ${result.iterations} step${result.iterations === 1 ? '' : 's'} — verdict should be PASS.`)
+        } else {
+          toast.info(`Auto-fix ran ${result.iterations} steps; best score ${result.score.toFixed(2)}. Some checks may still fail — continue tuning manually or change target.`)
+        }
+      } catch (err) {
+        toast.error(`Auto-fix error: ${err.message || err}`)
+      } finally {
+        setOptimizing(false)
+      }
+    }, 30)
+  }
+
+  // ── Annotation history ────────────────────────────────────
+  // A scrollable trail of "interesting" recipe states. The user can pin a
+  // moment ("baseline before tweak") and restore later. Auto-fix and template
+  // loads also record entries so the history shows what changed and when.
+  const [annotations, setAnnotations] = useState(() => {
+    try {
+      const raw = localStorage.getItem('cablelab.process-sim-annotations')
+      if (raw) return JSON.parse(raw)
+    } catch {}
+    return []
+  })
+  const [showHistory, setShowHistory] = useState(false)
+  useEffect(() => {
+    try { localStorage.setItem('cablelab.process-sim-annotations', JSON.stringify(annotations)) } catch {}
+  }, [annotations])
+  const addAnnotation = (label, snapshot) => {
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      label,
+      timestamp: new Date().toISOString(),
+      target: (snapshot || recipe).product?.target || 'custom',
+      recipe: JSON.parse(JSON.stringify(snapshot || recipe)),
+    }
+    setAnnotations((list) => [entry, ...list].slice(0, 50))
+  }
+  const restoreAnnotation = (id) => {
+    const entry = annotations.find((a) => a.id === id)
+    if (!entry) return
+    setRecipe(entry.recipe)
+    toast.success(`Restored "${entry.label}"`)
+  }
+  const deleteAnnotation = (id) => {
+    setAnnotations((list) => list.filter((a) => a.id !== id))
+  }
+  const clearAnnotations = () => {
+    if (!window.confirm('Clear all recipe history?')) return
+    setAnnotations([])
+    toast.info('History cleared')
+  }
+  const pinCurrent = () => {
+    const label = window.prompt('Pin this recipe as…', `Manual snapshot · ${std.name}`)
+    if (!label) return
+    addAnnotation(label, recipe)
+    toast.success('Recipe pinned to history')
+  }
+
+  // ── Diff explainer ────────────────────────────────────────
+  // Compare current recipe to the most recent annotation. Surface key metric
+  // deltas (Z₀, IL, mass, cost) so the engineer can see what their last tweak
+  // bought them. Empty when there is no baseline yet.
+  const baseline = annotations[0]
+  const diffSummary = useMemo(() => {
+    if (!baseline) return null
+    const baseSim = runPipeline(baseline.recipe)
+    const baseStd = STANDARDS[baseline.recipe.product?.target || 'cat6a']
+    const cur = sim.jacket
+    const base = baseSim.jacket
+    const fmt = (n, d = 2) => (n == null || isNaN(n) ? '—' : n.toFixed(d))
+    const arrow = (delta, eps) => Math.abs(delta) < eps ? '·' : (delta > 0 ? '↑' : '↓')
+    const rows = [
+      { key: 'Z₀ diff', cur: cur.z_diff, base: base.z_diff, unit: 'Ω', good: 'closer-to-target', target: std.z0_diff, eps: 0.05, decimals: 1 },
+      { key: 'IL @ 100m', cur: computeIL(cur, std.freq_il_mhz, 100), base: computeIL(base, baseStd.freq_il_mhz, 100), unit: 'dB', good: 'lower', eps: 0.05, decimals: 1 },
+      { key: 'NEXT', cur: cur.next_db_estimate, base: base.next_db_estimate, unit: 'dB', good: 'higher', eps: 0.1, decimals: 1 },
+      { key: 'Skew', cur: cur.pair_skew_ps_per_m, base: base.pair_skew_ps_per_m, unit: 'ps/m', good: 'lower', eps: 0.5, decimals: 1 },
+      { key: 'Mass', cur: cur.mass_g_per_m, base: base.mass_g_per_m, unit: 'g/m', good: 'lower', eps: 0.5, decimals: 0 },
+      { key: 'Cost/m', cur: cur.cost_per_m, base: base.cost_per_m, unit: '$', good: 'lower', eps: 0.005, decimals: 3 },
+      { key: 'Final OD', cur: cur.final_od_mm, base: base.final_od_mm, unit: 'mm', good: 'neutral', eps: 0.01, decimals: 2 },
+    ]
+    return rows.map((r) => {
+      const delta = r.cur - r.base
+      const a = arrow(delta, r.eps)
+      // Interpret directional improvement
+      let mood = 'neutral'
+      if (a !== '·') {
+        if (r.good === 'lower')           mood = delta < 0 ? 'good' : 'bad'
+        else if (r.good === 'higher')     mood = delta > 0 ? 'good' : 'bad'
+        else if (r.good === 'closer-to-target') {
+          const wasOff = Math.abs(r.base - r.target)
+          const nowOff = Math.abs(r.cur - r.target)
+          mood = nowOff < wasOff ? 'good' : 'bad'
+        }
+      }
+      return { ...r, delta, arrow: a, mood, fmt: fmt(r.cur, r.decimals), baseFmt: fmt(r.base, r.decimals), deltaFmt: fmt(delta, r.decimals) }
+    })
+  }, [sim, baseline, std])
+
+  const anyDiff = diffSummary && diffSummary.some((r) => r.arrow !== '·')
 
   return (
     <div className="space-y-6">
@@ -547,6 +881,20 @@ export default function ProcessSim() {
       {/* Target picker + recipe controls */}
       <div className="bg-[#12171a] border border-[#252e33] rounded p-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479] mb-1 flex items-center gap-1">
+              <Sparkles size={10} /> Template
+            </div>
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) { loadTemplate(e.target.value); e.target.value = '' } }}
+              className="bg-[#0a0d0f] border border-[#5eead4]/30 rounded px-2 py-1 text-[12px] font-mono text-[#5eead4] focus:outline-none focus:border-[#5eead4]"
+              title="Load a complete factory baseline recipe in one click"
+            >
+              <option value="">Load preset…</option>
+              {Object.entries(RECIPE_TEMPLATES).map(([id, t]) => <option key={id} value={id}>{t.name}</option>)}
+            </select>
+          </div>
           <div>
             <div className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479] mb-1">Target standard</div>
             <select
@@ -575,6 +923,12 @@ export default function ProcessSim() {
           </div>
         </div>
         <div className="flex gap-2">
+          <button onClick={pinCurrent} title="Save the current recipe to history with a label." className="px-2 py-1.5 text-[11px] font-mono uppercase rounded border bg-transparent flex items-center gap-1 text-[#a7b0b6] hover:text-[#5eead4]" style={{ borderColor: C.border }}>
+            <Save size={11} /> Pin
+          </button>
+          <button onClick={() => setShowHistory((v) => !v)} title="Show / hide the recipe history sidebar." className="px-2 py-1.5 text-[11px] font-mono uppercase rounded border bg-transparent flex items-center gap-1 text-[#a7b0b6] hover:text-[#5eead4]" style={{ borderColor: showHistory ? C.teal + '60' : C.border, color: showHistory ? C.teal : '#a7b0b6' }}>
+            <History size={11} /> History {annotations.length > 0 ? `(${annotations.length})` : ''}
+          </button>
           <button onClick={resetRecipe} className="px-2 py-1.5 text-[11px] font-mono uppercase rounded border bg-transparent flex items-center gap-1 text-[#a7b0b6] hover:text-[#f87171]" style={{ borderColor: C.border }}>
             <RotateCcw size={11} /> Reset
           </button>
@@ -587,6 +941,49 @@ export default function ProcessSim() {
           </label>
         </div>
       </div>
+
+      {showHistory && (
+        <div className="bg-[#12171a] border border-[#252e33] rounded p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#5eead4] flex items-center gap-2">
+              <History size={11} /> Recipe history · {annotations.length} entr{annotations.length === 1 ? 'y' : 'ies'}
+            </div>
+            {annotations.length > 0 && (
+              <button onClick={clearAnnotations} className="text-[10px] font-mono uppercase tracking-wider text-[#6b7479] hover:text-[#f87171]">
+                Clear all
+              </button>
+            )}
+          </div>
+          {annotations.length === 0 ? (
+            <div className="text-[11px] text-[#6b7479] italic py-3 text-center">
+              No history yet. Click <span style={{ color: C.teal }}>Pin</span> to bookmark the current recipe, or load a template / run Auto-fix — those are recorded automatically.
+            </div>
+          ) : (
+            <ul className="space-y-1 max-h-64 overflow-y-auto pr-1">
+              {annotations.map((a) => (
+                <li key={a.id} className="flex items-center gap-2 text-[11px] py-1 px-2 rounded hover:bg-[#171d20] group">
+                  <button
+                    onClick={() => restoreAnnotation(a.id)}
+                    className="flex-1 text-left truncate"
+                    title={`${a.label}\n${new Date(a.timestamp).toLocaleString()}`}
+                  >
+                    <span style={{ color: C.copperBright }}>{a.label}</span>
+                    <span className="text-[#6b7479] ml-2">· {new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span className="text-[#6b7479] ml-2">· {a.target}</span>
+                  </button>
+                  <button
+                    onClick={() => deleteAnnotation(a.id)}
+                    title="Remove from history"
+                    className="opacity-0 group-hover:opacity-100 text-[#6b7479] hover:text-[#f87171] text-[10px] font-mono"
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Output specs panel — shown FIRST so user always sees the verdict */}
       <div className="bg-[#12171a] border rounded p-4" style={{ borderColor: allPass ? C.teal + '60' : someFail ? C.red + '60' : C.amber + '60' }}>
@@ -602,6 +999,22 @@ export default function ProcessSim() {
           <Stat label="Cost / m" value={`$${sim.jacket.cost_per_m.toFixed(2)}`} accent={C.amber} />
           <Stat label="Total yield" value={`${sim.total_yield_pct.toFixed(1)}%`} accent={sim.total_yield_pct < 80 ? C.red : C.teal} />
           <Stat label="Test result" value={`${sim.il_db.toFixed(1)} dB IL`} sub={`@ ${recipe.test.freq_mhz} MHz · ${recipe.test.length_m} m`} accent={C.copper} />
+          <div className="ml-auto">
+            <button
+              onClick={runAutoFix}
+              disabled={optimizing || allPass}
+              title={allPass ? 'Already passing — nothing to fix' : 'Run a hill-climbing search that mutates wall thickness, lay, AWG, materials, and braid until all checks pass.'}
+              className="px-3 py-2 text-[11px] font-mono uppercase tracking-wider rounded border flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{
+                borderColor: allPass ? C.teal + '60' : C.copper + '80',
+                background: optimizing ? C.copper + '20' : 'transparent',
+                color: allPass ? C.teal : C.copperBright,
+              }}
+            >
+              {optimizing ? <Activity size={12} className="animate-pulse" /> : <Wand2 size={12} />}
+              {optimizing ? 'Optimising…' : 'Auto-fix'}
+            </button>
+          </div>
         </div>
         <ul className="space-y-1 text-[12px]">
           {checks.map((c, i) => (
@@ -612,6 +1025,43 @@ export default function ProcessSim() {
           ))}
         </ul>
       </div>
+
+      {baseline && anyDiff && (
+        <div className="bg-[#12171a] border border-[#252e33] rounded p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#5eead4]">
+              ◆ Diff vs <span style={{ color: C.copperBright }}>{baseline.label}</span>
+            </div>
+            <button
+              onClick={() => restoreAnnotation(baseline.id)}
+              className="text-[10px] font-mono uppercase tracking-wider text-[#6b7479] hover:text-[#5eead4]"
+              title="Restore the baseline recipe"
+            >
+              Revert
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {diffSummary.map((r) => {
+              const moodColor = r.mood === 'good' ? C.teal : r.mood === 'bad' ? C.red : '#a7b0b6'
+              return (
+                <div key={r.key} className="flex flex-col bg-[#0a0d0f] border border-[#252e33] rounded p-2">
+                  <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">{r.key}</div>
+                  <div className="text-[12px] font-mono mt-0.5" style={{ color: moodColor }}>
+                    {r.baseFmt} → <span className="font-medium">{r.fmt}</span> {r.unit}
+                  </div>
+                  <div className="text-[10px] font-mono text-[#6b7479]">
+                    {r.arrow !== '·' ? (
+                      <>
+                        {r.arrow} {r.delta > 0 ? '+' : ''}{r.deltaFmt} {r.unit}
+                      </>
+                    ) : 'no change'}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Manufacturing flow — vertical timeline with per-stage cross-section + status */}
       <div className="relative">

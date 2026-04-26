@@ -4,6 +4,7 @@ import { Menu, X as XIcon } from "lucide-react";
 import FloatingAgent from "../components/FloatingAgent.jsx";
 import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
 import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
+import CompanyDefaultsPanel from "../components/CompanyDefaultsPanel.jsx";
 import { useIsMobile } from "../components/useIsMobile.js";
 
 const RF_SYSTEM_PROMPT = `You are a senior RF cable engineer embedded in the RF Cable Engineering Suite. You have access to calculation tools — use them whenever a numeric answer is requested instead of relying on memorized constants.
@@ -33,7 +34,15 @@ Proactive behavior:
 - When the user pastes a cable spec (datasheet excerpt, manufacturer table, etc.), ask if they want you to call \`add_cable\` to save it to their local library.
 - When the user mentions an upcoming measurement, link, or radio link with concrete numbers, offer to run \`link_budget\` / \`compute_attenuation\` / \`compare_cables\` without being asked.
 - When the user asks "which cable for…", run \`cable_selector\` instead of just listing options from memory.
-- If the user has a PDF datasheet, instruct them to either paste the relevant text into the chat or attach a screenshot of the relevant page (the agent's image tool can read it). PDFs themselves are not directly readable here.`;
+- If the user has a PDF datasheet, instruct them to either paste the relevant text into the chat or attach a screenshot of the relevant page (the agent's image tool can read it). PDFs themselves are not directly readable here.
+
+Multi-tool orchestration (chain calls in one turn whenever the engineer's question implies multiple steps):
+- "Plan a 2.4 GHz link to my AP 100 m away" → \`get_company_defaults\` (read preferred materials / pricing) → \`free_space_path_loss\` AND \`compute_attenuation\` for both cables in parallel → \`link_budget\` to combine. ONE response, parallel tool_use blocks where independent.
+- "Compare LMR-400 vs RG-213 for a 50 m run" → \`lookup_rf_cable\` for both → \`compare_cables\` → \`compute_attenuation\` if specific freq/length given.
+- "Save this datasheet" → \`add_cable\`. If the spec implies factory standardisation, also \`set_company_defaults\`.
+- ALWAYS call \`get_company_defaults\` first when the user asks about cost, BOM, or picking materials. Use the values you read.
+- When the user states a stable factory fact ("Cu is $11/kg here", "we always use SPC"), call \`set_company_defaults\` immediately to persist it.
+- Prefer parallel tool calls (multiple tool_use blocks in one turn) when calls are independent. Chain sequentially only when one feeds the next.`;
 
 const RF_STARTERS = [
   'Build link budget: 30 dBm @ 2.4 GHz, 100 m, RX -85 dBm, 10 ft LMR-400 each side',
@@ -1831,6 +1840,7 @@ export default function RFCableSuite() {
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
           {tab === "library" && (
             <>
+              <CompanyDefaultsPanel accentColor="#d97706" />
               <CustomCablesPanel side="rf" accentColor="#d97706" />
               <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} onPrint={(id) => setPrintSetup({ type: "cable", id })} />
             </>
