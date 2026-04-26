@@ -579,18 +579,45 @@ export default function FloatingAgent({
   const view = buildView(messages, streamBlocks)
 
   return (
+    <>
+      {/* Mobile backdrop — tap to dismiss. Page peeks through above the sheet. */}
+      {isMobile && (
+        <div
+          className="fixed inset-0 z-[89] bg-black/40 backdrop-blur-[2px]"
+          onClick={() => setOpen(false)}
+          style={{ animation: 'agentBackdropIn 0.2s ease-out' }}
+        />
+      )}
+      <style>{`
+        @keyframes agentBackdropIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes agentSheetUp {
+          from { transform: translateY(100%); }
+          to { transform: translateY(0); }
+        }
+      `}</style>
     <div
-      className={`fixed z-[90] flex flex-col bg-[#0a0d0f] border border-[#252e33] shadow-2xl backdrop-blur-md overflow-hidden ${
+      className={`fixed z-[90] flex flex-col bg-[#0a0d0f] border-[#252e33] shadow-2xl overflow-hidden ${
         isMobile
-          ? 'inset-0 rounded-none'  // bottom-sheet style: full screen on mobile
-          : 'bottom-4 left-4 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] rounded-md'
+          ? 'left-0 right-0 bottom-0 rounded-t-2xl border-t border-l border-r'  // bottom-sheet on mobile
+          : 'bottom-4 left-4 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] rounded-md border'
       }`}
       style={isMobile
-        ? { fontFamily }
+        ? { fontFamily, top: 'max(env(safe-area-inset-top, 0px), 56px)', animation: 'agentSheetUp 0.28s cubic-bezier(0.32, 0.72, 0.0, 1)' }
         : { fontFamily, width: size.w, height: size.h, userSelect: resizing ? 'none' : undefined }
       }
     >
-      {/* Resize handles — desktop only (mobile uses fixed full-screen bottom-sheet) */}
+      {/* Mobile drag handle — visual cue + tap-to-dismiss */}
+      {isMobile && (
+        <button
+          onClick={() => setOpen(false)}
+          className="w-full flex items-center justify-center pt-2 pb-1.5 active:bg-[#1f1610]"
+          title="Tap to close"
+          aria-label="Close chat"
+        >
+          <span className="block w-12 h-1 rounded-full bg-[#384249]" />
+        </button>
+      )}
+      {/* Resize handles — desktop only (mobile uses fixed bottom-sheet) */}
       {!isMobile && (
         <>
           <div
@@ -708,17 +735,25 @@ export default function FloatingAgent({
           )}
           <button
             onClick={() => setOpen(false)}
-            className="p-1.5 text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded transition-colors"
+            className={`text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded transition-colors ${isMobile ? 'px-2.5 py-1.5 flex items-center gap-1' : 'p-1.5'}`}
             title="Minimize"
+            style={isMobile ? { color: accent, borderColor: accent + '50', borderWidth: 1, borderStyle: 'solid' } : undefined}
           >
-            <Minimize2 size={13} />
+            {isMobile ? (
+              <>
+                <XIcon size={14} />
+                <span className="text-[10px] font-mono uppercase tracking-wider">Done</span>
+              </>
+            ) : (
+              <Minimize2 size={13} />
+            )}
           </button>
         </div>
       </div>
 
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-3 py-3 space-y-3 text-[13px] leading-relaxed"
+        className={`flex-1 overflow-y-auto px-3 py-3 space-y-3 leading-relaxed ${isMobile ? 'text-[14.5px]' : 'text-[13px]'}`}
       >
         {view.length === 0 && !loading && (
           <div className="space-y-3">
@@ -901,6 +936,7 @@ export default function FloatingAgent({
         </div>
       </div>
     </div>
+    </>
   )
 }
 
