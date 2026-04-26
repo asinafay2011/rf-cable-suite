@@ -480,33 +480,56 @@ export default function FloatingAgent({
   const [voiceOn, setVoiceOn] = useState(false)
   const voiceSupported = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
 
+  const voiceManualStopRef = useRef(false)
   const toggleVoice = () => {
     if (!voiceSupported) {
       setError('Voice input is not supported in this browser. Try Chrome or Edge.')
       return
     }
     if (voiceOn) {
+      voiceManualStopRef.current = true
       recognitionRef.current?.stop()
       setVoiceOn(false)
       return
     }
+    voiceManualStopRef.current = false
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     const rec = new SR()
-    rec.continuous = false
+    rec.continuous = true        // keep listening until user clicks stop
     rec.interimResults = true
     rec.lang = 'en-US'
+    let finalTranscript = ''
     rec.onresult = (e) => {
-      const transcript = [...e.results].map((r) => r[0].transcript).join('')
-      setInput(transcript)
+      let interim = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const piece = e.results[i][0].transcript
+        if (e.results[i].isFinal) finalTranscript += piece
+        else interim += piece
+      }
+      setInput((finalTranscript + interim).trimStart())
     }
     rec.onerror = (e) => {
+      // 'no-speech' and 'aborted' are normal — user paused or stopped, not actual errors
+      if (e.error === 'no-speech' || e.error === 'aborted') return
       setError(`Voice error: ${e.error || 'unknown'}`)
+      voiceManualStopRef.current = true
       setVoiceOn(false)
     }
-    rec.onend = () => setVoiceOn(false)
+    rec.onend = () => {
+      // Auto-restart unless user clicked the mic to stop
+      if (!voiceManualStopRef.current) {
+        try { rec.start() } catch { setVoiceOn(false) }
+      } else {
+        setVoiceOn(false)
+      }
+    }
     recognitionRef.current = rec
-    rec.start()
-    setVoiceOn(true)
+    try {
+      rec.start()
+      setVoiceOn(true)
+    } catch (err) {
+      setError(`Voice start failed: ${err.message || err}`)
+    }
   }
 
   if (!open) {
