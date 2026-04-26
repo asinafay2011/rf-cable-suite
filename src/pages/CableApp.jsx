@@ -1129,6 +1129,262 @@ function CoaxBadge() {
   );
 }
 
+/* ============================================================
+   TabIntro — compact contextual banner for each section.
+   Replaces the global marketing Hero on all tabs except home / recipe
+   (which have their own intros), and skipped on tabs whose internal
+   component already renders a polished header (sim, suckout, vna).
+   ============================================================ */
+const TAB_INTROS = {
+  progression: {
+    eyebrow: 'Manufacturing flow · M1 → M2 → M3',
+    title: 'Watch a cable build itself, layer by layer',
+    desc: 'Step through every manufacturing stage — single insulated wire → twisted pair → 4-pair bundle. Each layer adds structure that controls Z₀, εᵣ, NEXT, and skew.',
+    accent: '#c97b3f',
+    icon: GitBranch,
+  },
+  m1: {
+    eyebrow: 'Module 1 · Conductor',
+    title: 'The single insulated wire',
+    desc: 'Cu / SPC strand + dielectric extruded coaxially. εᵣ sets v_p and Z₀ baseline; concentricity drives Z₀ tolerance.',
+    accent: '#c97b3f',
+    icon: Atom,
+  },
+  m2: {
+    eyebrow: 'Module 2 · Twisted Pair',
+    title: 'How twist controls Z, NEXT, and skew',
+    desc: 'Two insulated wires twisted at lay length L: differential mode propagates, common mode is rejected. Skew comes from εᵣ asymmetry between the two wires.',
+    accent: '#c97b3f',
+    icon: Layers,
+  },
+  m3: {
+    eyebrow: 'Module 3 · 4-pair Bundle',
+    title: 'Assemble the bundle around an X-spline',
+    desc: '4 pairs in quadrants with cross-spline filler. Lay diversity (typ. 11 / 13 / 15 / 17 mm) decorrelates pair-to-pair NEXT.',
+    accent: '#c97b3f',
+    icon: Box,
+  },
+  calc: {
+    eyebrow: 'Z₀ Calc · Coax + diff impedance',
+    title: 'Live impedance from geometry + εᵣ',
+    desc: 'Coax: Z₀ = 138/√εᵣ · log₁₀(D/d). Differential pair: Wadell formulas. Solve forward (geometry → Z₀) or inverse (Z₀ + εᵣ → D/d).',
+    formula: 'Z₀ = 138/√εᵣ · log₁₀(D/d)',
+    accent: '#fbbf24',
+    icon: Calculator,
+  },
+  tdr: {
+    eyebrow: 'TDR Sim · Time-domain reflectometry',
+    title: 'Toggle defects, see them on a Z(x) trace',
+    desc: 'TDR injects a step pulse and watches the reflection. Kinks (L↑), crushes (C↑), connectors, and splices each have a characteristic Z signature.',
+    accent: '#7dd3fc',
+    icon: Activity,
+  },
+  vna: {
+    eyebrow: 'VNA Lab · Touchstone analysis',
+    title: 'Drop in a .s1p / .s2p for full S-parameter analysis',
+    desc: 'Compute return loss, VSWR, group delay, and TDR via inverse FFT. Compare two wires for pair skew. Three demo files included.',
+    accent: '#5eead4',
+    icon: FlaskConical,
+  },
+  braid: {
+    eyebrow: 'Braid Coverage · SCTE 51',
+    title: 'Optical coverage K from N, P, d, D, PR',
+    desc: 'K = (2F − F²) · 100 % where F = (P · PR · d) / sin α. Target ≥ 85 % general, ≥ 95 % EMI-critical. Apply agent presets in one click.',
+    formula: 'K = (2F − F²) · 100 %',
+    accent: '#a78bfa',
+    icon: Shield,
+  },
+  atten: {
+    eyebrow: 'Attenuation Plot · skin + dielectric loss',
+    title: 'See how attenuation grows with frequency',
+    desc: 'Skin-effect loss ∝ √f. Dielectric loss ∝ f · tan δ. Plot both contributions across 1 MHz – 10 GHz for any geometry / material combination.',
+    accent: '#84cc16',
+    icon: Zap,
+  },
+  next: {
+    eyebrow: 'NEXT · Pair-to-pair crosstalk',
+    title: 'Why lay diversity decorrelates pairs',
+    desc: 'Different pair lays prevent in-phase addition of capacitive / inductive coupling. Power-sum NEXT (PSANEXT) aggregates the worst three aggressors.',
+    accent: '#cbd5e1',
+    icon: Radio,
+  },
+  eye: {
+    eyebrow: 'Eye Diagram · BER prediction',
+    title: 'Bit rate, BW, jitter, and noise → eye opening',
+    desc: 'Overlay many bit transitions to visualise timing margin and amplitude noise. Closed eye = bit errors. Drag sliders to see what kills the link.',
+    accent: '#fb923c',
+    icon: Eye,
+  },
+  cost: {
+    eyebrow: 'Cost Calc · 1 km bill of materials',
+    title: 'Cu mass, jacket, shield, labor — total $',
+    desc: 'Cost roll-up with copper price, line speed, and CPK target. Compare construction trade-offs and see what really moves the unit cost.',
+    accent: '#facc15',
+    icon: Coins,
+  },
+  lay: {
+    eyebrow: 'Lay Designer · 4-pair compatibility',
+    title: 'Pick lay lengths that pass NEXT and bend radius',
+    desc: 'Validate a 4-pair lay set against intra-pair skew, NEXT decorrelation, and bend-radius constraints. Apply agent presets in one click.',
+    accent: '#a78bfa',
+    icon: Settings,
+  },
+  library: {
+    eyebrow: 'Vendor Library · 38 presets',
+    title: 'RG, LMR, Heliax, Cat, USB4, DAC, semi-rigid',
+    desc: 'Browse vendor cables with linked datasheets. Add your own custom cables and company defaults — they persist on this device, no telemetry.',
+    accent: '#5eead4',
+    icon: Boxes,
+  },
+  catalog: {
+    eyebrow: 'Glenair Series 963 · Reference catalog',
+    title: 'High-speed mil-spec database',
+    desc: 'Build recipes for the Glenair Series 963 SpeedLine cable family — used in aerospace, mil-spec, and avionics.',
+    accent: '#fbbf24',
+    icon: Library,
+  },
+  more: {
+    eyebrow: 'Modules 4-10 · Advanced topics',
+    title: 'Shielding, jacket, hipot, BER, qualification',
+    desc: 'Deep dives into shielded constructions, jacket selection, dielectric withstand, and end-of-line qualification testing.',
+    accent: '#a7b0b6',
+    icon: BookOpen,
+  },
+};
+
+// Tabs whose internal component already renders a polished header — skip
+// the contextual banner for these to avoid double-headers.
+const SKIP_TAB_INTRO = new Set(['sim', 'suckout', 'vna']);
+
+function TabIntro({ section }) {
+  const data = TAB_INTROS[section];
+  if (!data || SKIP_TAB_INTRO.has(section)) return null;
+  const Icon = data.icon;
+
+  return (
+    <section
+      style={{
+        position: 'relative',
+        padding: '24px 0',
+        marginBottom: 28,
+        borderBottom: '1px solid #252e33',
+        animation: 'tabIntroFade 0.4s ease-out',
+      }}
+    >
+      <style>{`
+        @keyframes tabIntroFade {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: none; }
+        }
+      `}</style>
+
+      {/* Subtle accent glow on the left edge */}
+      <div
+        style={{
+          position: 'absolute',
+          left: -12,
+          top: 24,
+          bottom: 24,
+          width: 3,
+          background: data.accent,
+          borderRadius: 2,
+          opacity: 0.7,
+        }}
+      />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+        {/* Icon tile */}
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: 6,
+            background: data.accent + '14',
+            border: `1px solid ${data.accent}55`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            position: 'relative',
+          }}
+        >
+          <Icon size={26} style={{ color: data.accent }} />
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: 6,
+              border: `1px solid ${data.accent}30`,
+              animation: 'tabIntroFade 1.2s ease-out',
+              pointerEvents: 'none',
+            }}
+          />
+        </div>
+
+        {/* Title block */}
+        <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+          <div
+            className="font-mono"
+            style={{
+              fontSize: 10,
+              letterSpacing: 2.5,
+              color: data.accent,
+              textTransform: 'uppercase',
+              marginBottom: 4,
+            }}
+          >
+            ◆ {data.eyebrow}
+          </div>
+          <h2
+            style={{
+              fontFamily: 'Bricolage Grotesque, sans-serif',
+              fontSize: 'clamp(20px, 3vw, 26px)',
+              fontWeight: 400,
+              color: '#f0ebe2',
+              margin: 0,
+              lineHeight: 1.15,
+              letterSpacing: '-0.005em',
+            }}
+          >
+            {data.title}
+          </h2>
+          <p
+            style={{
+              fontSize: 13,
+              color: '#a7b0b6',
+              marginTop: 6,
+              marginBottom: 0,
+              lineHeight: 1.55,
+              maxWidth: 760,
+            }}
+          >
+            {data.desc}
+          </p>
+        </div>
+
+        {/* Optional formula chip */}
+        {data.formula && (
+          <div
+            style={{
+              padding: '10px 14px',
+              background: '#0a0d0f',
+              border: `1px solid ${data.accent}40`,
+              borderRadius: 4,
+              fontFamily: 'JetBrains Mono, monospace',
+              fontSize: 12,
+              color: data.accent,
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {data.formula}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ProgressionView() {
   const [stage, setStage] = useState(2);
 
@@ -7048,7 +7304,7 @@ export default function CableApp() {
       `}</style>
 
       {section !== 'recipe' && <TopNav active={section} onChange={setSection} />}
-      {section !== 'recipe' && section !== 'home' && <Hero />}
+      {section !== 'recipe' && section !== 'home' && <TabIntro section={section} />}
 
       <main className="max-w-6xl mx-auto px-4 md:px-12 py-12">
         {section === 'recipe' && <BuildRecipePage product={recipeProduct} onBack={closeRecipe} />}
