@@ -85,17 +85,17 @@ const PRESETS = {
     ],
   },
   spiral_spc_shield: {
-    label: 'Spiral SPC flatwire shield · 1.0 mm × 12% gap',
+    label: 'Spiral SPC shield · 1.0 mm × 8 bobbins × 12% gap',
     stack: [
       { kind: 'ptfe', width: 6.0, overlap: 50, count: 6 },
-      { kind: 'spiral', width: 1.0, overlap: -12, count: 1, strands: 1, material: 'spc' },
+      { kind: 'spiral', width: 1.0, overlap: -12, count: 1, bobbins: 8, material: 'spc' },
     ],
   },
   spiral_double_shield: {
     label: 'Spiral SPC + foil + braid (mil-spec coax)',
     stack: [
       { kind: 'ptfe', width: 6.0, overlap: 50, count: 8 },
-      { kind: 'spiral', width: 1.5, overlap: -10, count: 1, strands: 2, material: 'spc' },
+      { kind: 'spiral', width: 1.5, overlap: -10, count: 1, bobbins: 8, material: 'spc' },
       { kind: 'foil', width: 10.0, overlap: 25, count: 1 },
       { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1 },
     ],
@@ -105,23 +105,31 @@ const PRESETS = {
 // ─────────── Helpers ───────────
 function newLayer(kind = 'ptfe') {
   if (kind === 'braid') return { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1 }
-  // Spiral wrap = SPC / Cu / TC flatwire ribbon helically wound as a shield
-  // (NOT PTFE tape).  Typical: 0.5-2 mm wide, 10-13 % gap, 1-4 parallel strands,
-  // material defaults to silver-plated copper (SPC).
-  if (kind === 'spiral') return { kind: 'spiral', width: 1.0, overlap: -10, count: 1, strands: 1, material: 'spc' }
+  // Spiral wrap = SPC / Cu / TC FLATWIRE ribbon helically wound as a shield.
+  // Each bobbin lays ONE strand; factory machines run up to 8 bobbins in a
+  // vertical bobbin-holder that rotates around the cable as it's pulled.
+  // The holder's rotation speed controls the lay (pitch).
+  // Spiral wraps NEVER overlap each other — adjacent ribbons are laid
+  // side-by-side with a small gap (or just touching).  Overlap is therefore
+  // restricted to the range −50% (big gap) … 0% (touching).
+  if (kind === 'spiral') return { kind: 'spiral', width: 1.0, overlap: -10, count: 1, bobbins: 8, material: 'spc' }
   return { kind, width: kind === 'foil' ? 10 : 12, overlap: 25, count: 1 }
 }
 function pitchOf(layer, cableOD) {
   if (layer.kind === 'braid') {
     return 25.4 / Math.max(2, layer.picksPerIn)
   }
-  // Only spiral wrap has parallel-applicator multiplicity in this model
-  // (N flatwire strands offset 1/N axially → period scales by 1/N).  Tape
-  // layers (PTFE / Foil) are modelled as a single applicator per layer —
-  // engineers add MORE LAYERS instead of multi-bobbin to spread the notch.
-  const N = layer.kind === 'spiral' ? Math.max(1, layer.strands || 1) : 1
-  // overlap can be NEGATIVE (gap). Allow range -50 .. 95 %
-  const o = Math.max(-0.5, Math.min(0.95, layer.overlap / 100))
+  // Only spiral wrap has parallel-applicator multiplicity (N bobbins on a
+  // common vertical holder, each laying one flatwire ribbon offset 1/N
+  // axially → period scales by 1/N). Tape layers (PTFE / Foil) are modelled
+  // as a single applicator — engineers spread their notch by adding MORE
+  // LAYERS with different widths, not multi-bobbin per layer.
+  const N = layer.kind === 'spiral' ? Math.max(1, Math.min(8, layer.bobbins || 1)) : 1
+  // overlap can be NEGATIVE (gap). Tape allows -50 … 90 %; spiral is clamped
+  // to -50 … 0 % since spiral ribbons can't physically overlap each other.
+  const overlapMin = layer.kind === 'spiral' ? -0.5 : -0.5
+  const overlapMax = layer.kind === 'spiral' ? 0 : 0.95
+  const o = Math.max(overlapMin, Math.min(overlapMax, layer.overlap / 100))
   const circ = Math.PI * Math.max(0.5, cableOD)
   const sinG = Math.min(0.95, layer.width / circ)
   const cosG = Math.sqrt(1 - sinG * sinG)
@@ -192,16 +200,16 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
       ns.forEach((n) => {
         // Depth model:
         //  • count = identical stacked wraps → linear depth scaling
-        //  • strands (spiral only) = N flatwire ribbons in parallel — each
+        //  • bobbins (spiral only) = N flatwire bobbins on a common holder — each
         //    contributes a smaller perturbation, so depth reduces ~1/N
         //  • gap (overlap < 0) = air gap between tape edges → DEEPER (clean
         //    contrast). overlap > 0 = double-thick seam = also deep but
         //    less than gap. We model as: 1 + |overlap|·0.5  with gap ×1.5
         const o = (layer.overlap ?? 25) / 100
         const gapFactor = o < 0 ? 1 + Math.abs(o) * 1.5 : 1 + o * 0.3
-        const Nstrands = layer.kind === 'spiral' ? Math.max(1, layer.strands || 1) : 1
-        const strandFactor = 1 / Nstrands
-        const baseDepth = (notchDepth * Math.max(1, layer.count) * gapFactor * strandFactor) / n.order
+        const Nbobbins = layer.kind === 'spiral' ? Math.max(1, Math.min(8, layer.bobbins || 1)) : 1
+        const bobbinFactor = 1 / Nbobbins
+        const baseDepth = (notchDepth * Math.max(1, layer.count) * gapFactor * bobbinFactor) / n.order
         list.push({
           ...n,
           depth: baseDepth,
@@ -511,14 +519,15 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
       <div className="bg-[#12171a] border border-[#252e33] rounded p-4 space-y-2 text-[12px] leading-relaxed" style={{ color: C.textDim }}>
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: C.teal }}>Reference</div>
         <div className="font-mono" style={{ color: C.amber }}>tape (PTFE / Foil): P = W · (1 − overlap) · cos(γ)   where sin(γ) = W / (π · OD)</div>
-        <div className="font-mono" style={{ color: C.amber }}>spiral wrap (SPC / Cu / TC flatwire): P = W · (1 − overlap) · cos(γ) / N<sub>strands</sub></div>
+        <div className="font-mono" style={{ color: C.amber }}>spiral wrap (SPC / Cu / TC flatwire): P = W · (1 − overlap) · cos(γ) / N<sub>bobbins</sub></div>
         <div className="font-mono" style={{ color: C.amber }}>braid: P = 25.4 / picks_per_inch</div>
         <div className="font-mono" style={{ color: C.amber }}>f<sub>n</sub> = n · c · VF / (2 · P)  ≈  n · 150 000 · VF / P<sub>mm</sub>  [MHz]</div>
         <div>
           • Each layer adds its OWN pitch-driven notch — independent contributions.
           <br />• N identical wraps stack the SAME notch ~N× deeper. Different widths across layers produce DIFFERENT notches, each shallower — the standard "spread the suckout" trick. Add MORE LAYERS for the spread, not multi-bobbin per layer.
-          <br />• <span style={{ color: C.copperBright }}>Spiral wrap (SPC / Cu / TC flatwire):</span> 0.5-2 mm wide ribbon helically wound as a SHIELD layer, NOT a dielectric. Typical 10-13% gap. 1-4 parallel STRANDS (each offset axially by 1/N) push the notch frequency up by ~N×. Used in MIL-DTL-17 RG-class shields, VITA-58 high-flex coax, and as an under-braid layer in phase-stable assemblies.
-          <br />• <span style={{ color: C.amber }}>Negative overlap (gap):</span> a 10-13% gap leaves bare dielectric (or open metal between flatwire turns), increasing impedance contrast → notch DEEPER. Engineers use small gaps deliberately so the spiral pattern controls placement while the gap controls depth.
+          <br />• <span style={{ color: C.copperBright }}>Spiral wrap (SPC / Cu / TC flatwire):</span> 0.5-2 mm wide ribbon helically wound as a SHIELD layer, NOT a dielectric. Each bobbin lays ONE strand; factory machines run up to 8 bobbins on a vertical bobbin-holder that rotates around the cable as it's pulled. The holder's rotation speed sets the lay (pitch). 8 bobbins push the notch frequency ~8× higher than a single bobbin. Used in MIL-DTL-17 RG-class shields, VITA-58 high-flex coax, and as an under-braid layer in phase-stable assemblies.
+          <br />• Spiral wraps physically <span style={{ color: C.copperBright }}>cannot overlap each other</span> — adjacent ribbons are laid side-by-side with a small gap (or just touching). The Gap slider is therefore clamped to 0 … −50 % (no positive overlap allowed).
+          <br />• <span style={{ color: C.amber }}>Gap (10-13% typical):</span> bare dielectric showing between flatwire turns increases impedance contrast → notch DEEPER. Engineers use small gaps deliberately so the bobbin count controls notch placement while the gap controls depth.
           <br />• Foil shield notches typically appear shallower than dielectric notches; braid shield notches even shallower (1-3 dB) but at 1/PR pitch.
         </div>
       </div>
@@ -758,8 +767,9 @@ function LayerRow({ layer, idx, cableOD, vf, color, units = 'mm', onUpdate, onRe
           {isSpiral && (
             <>
               <CompactSlider label="Width" value={layer.width} onChange={(v) => onUpdate({ width: v })} min={0.2} max={5} step={0.1} units={units} length />
-              <CompactSlider label={(layer.overlap ?? 0) < 0 ? 'Gap' : 'Overlap'} value={layer.overlap} onChange={(v) => onUpdate({ overlap: v })} min={-50} max={50} step={1} unit="%" />
-              <CompactSlider label="Strands" value={layer.strands ?? 1} onChange={(v) => onUpdate({ strands: Math.max(1, Math.round(v)) })} min={1} max={6} step={1} unit="" />
+              {/* Spiral wraps physically can't overlap — clamp to gap range only */}
+              <CompactSlider label="Gap" value={layer.overlap} onChange={(v) => onUpdate({ overlap: Math.min(0, v) })} min={-50} max={0} step={1} unit="%" />
+              <CompactSlider label="Bobbins" value={layer.bobbins ?? 1} onChange={(v) => onUpdate({ bobbins: Math.max(1, Math.min(8, Math.round(v))) })} min={1} max={8} step={1} unit="heads" />
             </>
           )}
           {isBraid && (
