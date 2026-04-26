@@ -87,8 +87,15 @@ const DEFAULT_RECIPE = {
   test: { length_m: 100, freq_mhz: 500 },
 }
 
-// ── Stage compute functions ─────────────────────────────
+// ── Helpers ─────────────────────────────────────────────
 function awgToMm(awg) { return 0.127 * Math.pow(92, (36 - awg) / 39) }
+function mmIn(mm, mmDecimals = 3) {
+  if (mm == null || isNaN(mm)) return '—'
+  const inchDecimals = mmDecimals + 1
+  return `${mm.toFixed(mmDecimals)} mm / ${(mm / 25.4).toFixed(inchDecimals)}″`
+}
+
+// ── Stage compute functions ─────────────────────────────
 
 function computeConductor(p) {
   const d = awgToMm(p.target_awg)
@@ -519,7 +526,7 @@ export default function ProcessSim() {
               {allPass ? 'PASS' : someFail ? 'FAIL' : 'MARGINAL'}
             </div>
           </div>
-          <Stat label="Final OD" value={`${sim.jacket.final_od_mm.toFixed(2)} mm`} accent={C.copper} />
+          <Stat label="Final OD" value={mmIn(sim.jacket.final_od_mm, 2)} accent={C.copper} />
           <Stat label="Mass" value={`${sim.jacket.mass_g_per_m.toFixed(0)} g/m`} accent={C.copper} />
           <Stat label="Cost / m" value={`$${sim.jacket.cost_per_m.toFixed(2)}`} accent={C.amber} />
           <Stat label="Total yield" value={`${sim.total_yield_pct.toFixed(1)}%`} accent={sim.total_yield_pct < 80 ? C.red : C.teal} />
@@ -546,7 +553,7 @@ export default function ProcessSim() {
             <Knob label="Line m/min" value={recipe.conductor.line_m_min} onChange={(v) => update('conductor.line_m_min')(parseFloat(v))} type="number" />
           </KnobRow>
           <Outputs items={[
-            ['Strand Ø', `${sim.conductor.strand_d_mm.toFixed(3)} mm`],
+            ['Strand Ø', mmIn(sim.conductor.strand_d_mm, 3)],
             ['Mass', `${sim.conductor.mass_g_per_m.toFixed(2)} g/m`],
             ['DC R', `${(sim.conductor.dc_R_per_m * 1000).toFixed(2)} mΩ/m`],
             ['Cost', `$${sim.conductor.cost_per_m.toFixed(3)}/m`],
@@ -564,7 +571,7 @@ export default function ProcessSim() {
             </>}
           </KnobRow>
           <Outputs items={[
-            ['Conductor Ø', `${sim.stranding.conductor_d_mm.toFixed(3)} mm`],
+            ['Conductor Ø', mmIn(sim.stranding.conductor_d_mm, 3)],
             ['Mass', `${sim.stranding.mass_g_per_m.toFixed(2)} g/m`],
             ['Cost', `$${sim.stranding.cost_per_m.toFixed(3)}/m`],
             ['Yield', `${sim.stranding.yield_pct.toFixed(1)}%`],
@@ -580,7 +587,7 @@ export default function ProcessSim() {
             <Knob label="Melt °C" value={recipe.insulation.melt_c} onChange={(v) => update('insulation.melt_c')(parseFloat(v))} type="number" />
           </KnobRow>
           <Outputs items={[
-            ['Insulated Ø', `${sim.insulation.insulated_d_mm.toFixed(3)} mm`],
+            ['Insulated Ø', mmIn(sim.insulation.insulated_d_mm, 3)],
             ['εr (effective)', sim.insulation.er_effective.toFixed(3)],
             ['C', `${sim.insulation.cap_pf_per_m.toFixed(1)} pF/m`],
             ['Mass', `${sim.insulation.mass_g_per_m.toFixed(2)} g/m`],
@@ -597,7 +604,7 @@ export default function ProcessSim() {
             <Knob label="Tension (N)" value={recipe.pair.tension_n} onChange={(v) => update('pair.tension_n')(parseFloat(v))} type="number" />
           </KnobRow>
           <Outputs items={[
-            ['Pair Ø', `${sim.pair.pair_od_mm.toFixed(3)} mm`],
+            ['Pair Ø', mmIn(sim.pair.pair_od_mm, 3)],
             ['Z₀ diff', `${sim.pair.z_diff.toFixed(1)} Ω`],
             ['Skew', `${sim.pair.skew_ps_per_m.toFixed(1)} ps/m`],
             ['Yield', `${sim.pair.yield_pct.toFixed(1)}%`],
@@ -614,7 +621,7 @@ export default function ProcessSim() {
             </>}
           </KnobRow>
           <Outputs items={[
-            ['Wrapped Ø', `${sim.pair_wrap.wrapped_pair_od_mm.toFixed(3)} mm`],
+            ['Wrapped Ø', mmIn(sim.pair_wrap.wrapped_pair_od_mm, 3)],
             ['Wrap εr', sim.pair_wrap.wrap?.er || '—'],
             ['Mass total', `${sim.pair_wrap.mass_g_per_m.toFixed(2)} g/m`],
             ['Cost', `$${sim.pair_wrap.cost_per_m.toFixed(3)}/m`],
@@ -633,7 +640,7 @@ export default function ProcessSim() {
             </>}
           </KnobRow>
           <Outputs items={[
-            ['Shielded pair Ø', `${sim.pair_foil.shielded_pair_od_mm.toFixed(3)} mm`],
+            ['Shielded pair Ø', mmIn(sim.pair_foil.shielded_pair_od_mm, 3)],
             ['Pair Zt @ 100MHz', `${sim.pair_foil.pair_zt_mohm_per_m.toFixed(0)} mΩ/m`],
             ['Mass total', `${sim.pair_foil.mass_g_per_m.toFixed(2)} g/m`],
             ['Cost', `$${sim.pair_foil.cost_per_m.toFixed(3)}/m`],
@@ -650,7 +657,7 @@ export default function ProcessSim() {
             <Knob label="Bundle lay (mm)" value={recipe.bundle.bundle_lay_mm} onChange={(v) => update('bundle.bundle_lay_mm')(parseFloat(v))} type="number" />
           </KnobRow>
           <Outputs items={[
-            ['Bundle Ø', `${sim.bundle.bundle_d_mm.toFixed(2)} mm`],
+            ['Bundle Ø', mmIn(sim.bundle.bundle_d_mm, 2)],
             ['NEXT estimate', `${sim.bundle.next_db_estimate.toFixed(1)} dB`],
             ['Mass', `${sim.bundle.mass_g_per_m.toFixed(0)} g/m`],
             ['Cost', `$${sim.bundle.cost_per_m.toFixed(2)}/m`],
@@ -673,7 +680,7 @@ export default function ProcessSim() {
             </>}
           </KnobRow>
           <Outputs items={[
-            ['Shielded Ø', `${sim.shield.shielded_d_mm.toFixed(2)} mm`],
+            ['Shielded Ø', mmIn(sim.shield.shielded_d_mm, 2)],
             ['Coverage K', `${sim.shield.coverage_pct.toFixed(1)}%`],
             ['Zt @ 100MHz', `${sim.shield.zt_mohm_per_m.toFixed(0)} mΩ/m`],
             ['Mass', `${sim.shield.mass_g_per_m.toFixed(0)} g/m`],
@@ -688,7 +695,7 @@ export default function ProcessSim() {
             <Knob label="Wall (mm)" value={recipe.jacket.wall_mm} onChange={(v) => update('jacket.wall_mm')(parseFloat(v))} type="number" step="0.05" />
           </KnobRow>
           <Outputs items={[
-            ['Final OD', `${sim.jacket.final_od_mm.toFixed(2)} mm`],
+            ['Final OD', mmIn(sim.jacket.final_od_mm, 2)],
             ['Total mass', `${sim.jacket.mass_g_per_m.toFixed(0)} g/m`],
             ['Total cost', `$${sim.jacket.cost_per_m.toFixed(2)}/m`],
             ['Flex', sim.jacket.flex_rating],
