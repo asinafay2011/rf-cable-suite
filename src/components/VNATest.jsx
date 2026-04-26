@@ -229,18 +229,26 @@ export default function VNATest() {
 function synthTouchstone({ name, length_ft, vf, defects = [] }) {
   const fStart = 1e6, fStop = 3e9, n = 1601, c = 299792458
   const tauEnd = (2 * (length_ft / 3.28084)) / (vf * c)
+  const length_m = length_ft / 3.28084
+  // Skin-effect loss: α ≈ α0·√(f / f0) Np/m. α0 ~0.05 Np/m at 1 GHz is typical of small RG-58-class cable.
+  const alpha0 = 0.05
   const lines = [`! Demo synthetic — VF=${(vf * 100).toFixed(1)}%, length=${length_ft} ft`, '# MHz S MA R 50']
   const sBlocks = []
   const freqs = []
   for (let i = 0; i < n; i++) {
     const f = fStart + ((fStop - fStart) * i) / (n - 1)
     const w = 2 * Math.PI * f
-    let re = 0.6 * Math.cos(-w * tauEnd)
-    let im = 0.6 * Math.sin(-w * tauEnd)
+    const alpha_f = alpha0 * Math.sqrt(f / 1e9) // Np/m
+    const roundTripLoss = Math.exp(-2 * alpha_f * length_m)
+    // Open termination ρ_end = 1.0 (full reflection) attenuated by round-trip loss
+    let re = 1.0 * roundTripLoss * Math.cos(-w * tauEnd)
+    let im = 1.0 * roundTripLoss * Math.sin(-w * tauEnd)
     for (const d of defects) {
-      const tau = (2 * (d.at_ft / 3.28084)) / (vf * c)
-      re += d.rho * Math.cos(-w * tau)
-      im += d.rho * Math.sin(-w * tau)
+      const dist_m = d.at_ft / 3.28084
+      const dLoss = Math.exp(-2 * alpha_f * dist_m)
+      const tau = (2 * dist_m) / (vf * c)
+      re += d.rho * dLoss * Math.cos(-w * tau)
+      im += d.rho * dLoss * Math.sin(-w * tau)
     }
     const mag = Math.sqrt(re * re + im * im)
     const ang = Math.atan2(im, re) * 180 / Math.PI
@@ -420,14 +428,35 @@ function Verdict({ wire, thresholds, vfPercent, units, gateStart, gateEnd, accen
   const tdr = useMemo(() => computeTDR(wire.parsed.s.map((b) => b.s11), wire.parsed.freqs, vfPercent / 100, units === 'ft'), [wire, vfPercent, units])
   const peak = useMemo(() => peakReflection(tdr.distances, tdr.rho, gateStart, gateEnd), [tdr, gateStart, gateEnd])
   const peakVSWR = useMemo(() => { let max = 0; for (const b of wire.parsed.s) max = Math.max(max, vswr(b.s11)); return max }, [wire])
+  // Detect unterminated (open / short) measurement: if mean |S11| > 0.5, the cable is essentially
+  // reflecting all the RF power back. RL / VSWR thresholds were designed for terminated cables —
+  // applying them to an open-ended measurement always reads "FAIL". For QC of an open wire the only
+  // meaningful pass-fail is the in-band TDR (defects ALONG the cable).
+  const s11Stats = useMemo(() => {
+    let sum = 0, peak = 0
+    for (const b of wire.parsed.s) {
+      const m = Math.sqrt(b.s11.re * b.s11.re + b.s11.im * b.s11.im)
+      sum += m
+      if (m > peak) peak = m
+    }
+    return { mean: sum / wire.parsed.s.length, peak }
+  }, [wire])
+  // Peak |S11| close to 1 = total reflection at some frequency = unterminated cable.
+  // Terminated cable typically has peak |S11| < 0.3.
+  const unterminated = s11Stats.peak > 0.7
 
   const checks = []
-  if (summary.meanRL >= thresholds.rl_pass_db) checks.push({ ok: true, msg: `Mean RL ${summary.meanRL.toFixed(1)} dB ≥ ${thresholds.rl_pass_db} dB` })
-  else if (summary.meanRL < thresholds.rl_fail_db) checks.push({ ok: false, msg: `Mean RL ${summary.meanRL.toFixed(1)} dB below fail threshold ${thresholds.rl_fail_db} dB` })
-  else checks.push({ ok: 'warn', msg: `Mean RL ${summary.meanRL.toFixed(1)} dB — marginal` })
-  if (peakVSWR <= thresholds.vswr_pass) checks.push({ ok: true, msg: `Peak VSWR ${peakVSWR.toFixed(2)} ≤ ${thresholds.vswr_pass}` })
-  else if (peakVSWR > thresholds.vswr_fail) checks.push({ ok: false, msg: `Peak VSWR ${peakVSWR.toFixed(2)} above fail threshold ${thresholds.vswr_fail}` })
-  else checks.push({ ok: 'warn', msg: `Peak VSWR ${peakVSWR.toFixed(2)} — marginal` })
+  if (unterminated) {
+    // Skip RL/VSWR — they're meaningless for an open/short measurement.
+    checks.push({ ok: 'info', msg: `Peak |S11| = ${s11Stats.peak.toFixed(2)} → open or shorted termination detected. RL / VSWR thresholds are skipped (they assume a 50 Ω-terminated cable). Pass/fail below is driven by the TDR.` })
+  } else {
+    if (summary.meanRL >= thresholds.rl_pass_db) checks.push({ ok: true, msg: `Mean RL ${summary.meanRL.toFixed(1)} dB ≥ ${thresholds.rl_pass_db} dB` })
+    else if (summary.meanRL < thresholds.rl_fail_db) checks.push({ ok: false, msg: `Mean RL ${summary.meanRL.toFixed(1)} dB below fail threshold ${thresholds.rl_fail_db} dB` })
+    else checks.push({ ok: 'warn', msg: `Mean RL ${summary.meanRL.toFixed(1)} dB — marginal` })
+    if (peakVSWR <= thresholds.vswr_pass) checks.push({ ok: true, msg: `Peak VSWR ${peakVSWR.toFixed(2)} ≤ ${thresholds.vswr_pass}` })
+    else if (peakVSWR > thresholds.vswr_fail) checks.push({ ok: false, msg: `Peak VSWR ${peakVSWR.toFixed(2)} above fail threshold ${thresholds.vswr_fail}` })
+    else checks.push({ ok: 'warn', msg: `Peak VSWR ${peakVSWR.toFixed(2)} — marginal` })
+  }
   if (peak) {
     const ar = Math.abs(peak.rho)
     if (ar <= thresholds.reflection_pass) checks.push({ ok: true, msg: `Largest in-cable reflection |ρ|=${ar.toFixed(3)} at ${peak.distance.toFixed(2)} ${units} (clean)` })
@@ -456,6 +485,7 @@ function Verdict({ wire, thresholds, vfPercent, units, gateStart, gateEnd, accen
           <li key={i} className="flex items-start gap-2">
             {c.ok === true ? <CheckCircle2 size={13} className="mt-0.5 shrink-0" style={{ color: C.teal }} />
               : c.ok === false ? <AlertTriangle size={13} className="mt-0.5 shrink-0" style={{ color: C.red }} />
+              : c.ok === 'info' ? <Activity size={13} className="mt-0.5 shrink-0" style={{ color: C.copper }} />
               : <Activity size={13} className="mt-0.5 shrink-0" style={{ color: C.amber }} />}
             <span className="text-[#a7b0b6]">{c.msg}</span>
           </li>
