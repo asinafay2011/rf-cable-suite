@@ -84,19 +84,27 @@ const PRESETS = {
       { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1 },
     ],
   },
-  spiral_8bobbin: {
-    label: '8-bobbin spiral · 10% gap (phase-stable)',
+  ptfe_8bobbin: {
+    label: '8-bobbin PTFE · 10% gap (phase-stable dielectric)',
     stack: [
       { kind: 'ptfe', width: 6.0, overlap: -10, count: 4, bobbins: 8 },
       { kind: 'ptfe', width: 6.0, overlap: -10, count: 4, bobbins: 8 },
     ],
   },
-  spiral_8bobbin_double: {
-    label: '8-bobbin × 2 layers · 13% gap + foil',
+  spiral_spc_shield: {
+    label: 'Spiral SPC flatwire shield · 1.0 mm × 12% gap',
     stack: [
-      { kind: 'ptfe', width: 5.0, overlap: -13, count: 1, bobbins: 8 },
-      { kind: 'ptfe', width: 5.0, overlap: -13, count: 1, bobbins: 8 },
+      { kind: 'ptfe', width: 6.0, overlap: 50, count: 6, bobbins: 1 },
+      { kind: 'spiral', width: 1.0, overlap: -12, count: 1, strands: 1, material: 'spc' },
+    ],
+  },
+  spiral_double_shield: {
+    label: 'Spiral SPC + foil + braid (mil-spec coax)',
+    stack: [
+      { kind: 'ptfe', width: 6.0, overlap: 50, count: 8, bobbins: 1 },
+      { kind: 'spiral', width: 1.5, overlap: -10, count: 1, strands: 2, material: 'spc' },
       { kind: 'foil', width: 10.0, overlap: 25, count: 1, bobbins: 1 },
+      { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1 },
     ],
   },
 }
@@ -104,21 +112,26 @@ const PRESETS = {
 // ─────────── Helpers ───────────
 function newLayer(kind = 'ptfe') {
   if (kind === 'braid') return { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1, bobbins: 1 }
+  // Spiral wrap = SPC / Cu / TC flatwire ribbon helically wound as a shield
+  // (NOT PTFE tape).  Typical: 0.5-2 mm wide, 10-13 % gap, 1-4 parallel strands,
+  // material defaults to silver-plated copper (SPC).
+  if (kind === 'spiral') return { kind: 'spiral', width: 1.0, overlap: -10, count: 1, strands: 1, material: 'spc' }
   return { kind, width: kind === 'foil' ? 10 : 12, overlap: 25, count: 1, bobbins: 1 }
 }
 function pitchOf(layer, cableOD) {
-  const bobbins = Math.max(1, layer.bobbins || 1)
   if (layer.kind === 'braid') {
     return 25.4 / Math.max(2, layer.picksPerIn)
   }
+  // Multi-bobbin (PTFE/Foil) and multi-strand (Spiral wrap) both reduce the
+  // effective axial period the same way: N parallel applicators offset 1/N
+  // axially → period scales by 1/N.
+  const N = Math.max(1, layer.kind === 'spiral' ? (layer.strands || 1) : (layer.bobbins || 1))
   // overlap can be NEGATIVE (gap). Allow range -50 .. 95 %
   const o = Math.max(-0.5, Math.min(0.95, layer.overlap / 100))
   const circ = Math.PI * Math.max(0.5, cableOD)
   const sinG = Math.min(0.95, layer.width / circ)
   const cosG = Math.sqrt(1 - sinG * sinG)
-  // Multi-bobbin: N tape heads spiral simultaneously, each offset by 1/N
-  // axially → effective seam-to-seam axial period reduces by 1/N.
-  return (layer.width * (1 - o) * cosG) / bobbins
+  return (layer.width * (1 - o) * cosG) / N
 }
 function helixAngleOf(layer, cableOD) {
   if (layer.kind === 'braid') {
@@ -141,7 +154,7 @@ function notchesOf(layer, cableOD, vf, maxFreq = 60000) {
   return list
 }
 function layerLabel(kind) {
-  return kind === 'ptfe' ? 'PTFE' : kind === 'foil' ? 'Foil' : 'Braid'
+  return kind === 'ptfe' ? 'PTFE' : kind === 'foil' ? 'Foil' : kind === 'spiral' ? 'Spiral' : 'Braid'
 }
 
 // ─────────── Component ───────────
@@ -327,7 +340,7 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
               Layer stack · {stack.length} layer{stack.length === 1 ? '' : 's'} · {totalWraps} total wrap{totalWraps === 1 ? '' : 's'}
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap">
             <button
               onClick={() => addLayer('ptfe')}
               className="font-mono text-[10px] uppercase tracking-wider px-2.5 py-1.5 rounded border bg-transparent hover:bg-[#1f1610] flex items-center gap-1"
@@ -341,6 +354,13 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
               style={{ borderColor: C.amber + '60', color: C.amber }}
             >
               <Plus size={11} /> Foil
+            </button>
+            <button
+              onClick={() => addLayer('spiral')}
+              className="font-mono text-[10px] uppercase tracking-wider px-2.5 py-1.5 rounded border bg-transparent hover:bg-[#1f1610] flex items-center gap-1"
+              style={{ borderColor: C.copperBright + '70', color: C.copperBright }}
+            >
+              <Plus size={11} /> Spiral
             </button>
             <button
               onClick={() => addLayer('braid')}
@@ -495,15 +515,16 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
       {/* FORMULA + PRACTICE NOTES */}
       <div className="bg-[#12171a] border border-[#252e33] rounded p-4 space-y-2 text-[12px] leading-relaxed" style={{ color: C.textDim }}>
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: C.teal }}>Reference</div>
-        <div className="font-mono" style={{ color: C.amber }}>tape: P = W · (1 − overlap) · cos(γ) / N<sub>bobbins</sub>   where sin(γ) = W / (π · OD)</div>
+        <div className="font-mono" style={{ color: C.amber }}>tape (PTFE / Foil): P = W · (1 − overlap) · cos(γ) / N<sub>bobbins</sub>   where sin(γ) = W / (π · OD)</div>
+        <div className="font-mono" style={{ color: C.amber }}>spiral wrap (SPC / Cu flatwire): P = W · (1 − overlap) · cos(γ) / N<sub>strands</sub></div>
         <div className="font-mono" style={{ color: C.amber }}>braid: P = 25.4 / picks_per_inch</div>
         <div className="font-mono" style={{ color: C.amber }}>f<sub>n</sub> = n · c · VF / (2 · P)  ≈  n · 150 000 · VF / P<sub>mm</sub>  [MHz]</div>
         <div>
-          • Each layer adds its OWN pitch-driven notch — they're independent contributions.
-          <br />• N identical wraps stack the SAME notch ~N× deeper. <em>Worst case for engineering, best case for QC repeatability.</em>
-          <br />• N wraps with mixed widths produce N (or fewer) DIFFERENT notches, each shallower than a single equivalent stack — the standard "spread the suckout" trick.
-          <br />• <span style={{ color: C.amber }}>Multi-bobbin spiral (8-bobbin etc.):</span> N tape heads spiral simultaneously, each offset axially by 1/N → effective seam period reduces by 1/N → notch frequency goes UP by ~N×. An 8-bobbin layup pushes the notch ~8× higher than a single bobbin with the same tape. This is the standard phase-stable / mil-spec coax trick to dodge low-GHz suckouts.
-          <br />• <span style={{ color: C.amber }}>Negative overlap (gap):</span> 10-13% gap leaves bare dielectric between tape edges, increasing the impedance contrast → notch DEEPER. Engineers use small gaps deliberately so the multi-bobbin pattern controls the placement, while the gap controls the depth (managed by shield underneath).
+          • Each layer adds its OWN pitch-driven notch — independent contributions.
+          <br />• N identical wraps stack the SAME notch ~N× deeper. Different widths produce N DIFFERENT notches, each shallower — the standard "spread the suckout" trick.
+          <br />• <span style={{ color: C.amber }}>Multi-bobbin (PTFE / Foil tape):</span> N tape heads run simultaneously, each offset axially by 1/N → effective seam period reduces by 1/N → notch frequency goes UP by ~N×. An 8-bobbin PTFE wrap pushes the notch ~8× higher than a single bobbin.
+          <br />• <span style={{ color: C.copperBright }}>Spiral wrap (different from PTFE multi-bobbin):</span> a single (or 2-4 strand) SPC / Cu / TC FLATWIRE ribbon, helically wound as a SHIELD layer, NOT a dielectric. Typical 0.5-2 mm wide, 10-13% gap, somewhat thicker than foil tape (80-150 µm) so the impedance discontinuity is sharper — notch is more visible than foil. Used in MIL-DTL-17 RG-class shields, VITA-58 high-flex coax, and as an under-braid layer in phase-stable assemblies.
+          <br />• <span style={{ color: C.amber }}>Negative overlap (gap):</span> 10-13% gap leaves bare dielectric (or open metal between flatwire turns), increasing impedance contrast → notch DEEPER. Engineers use small gaps deliberately so multi-bobbin / multi-strand controls placement while the gap controls depth.
           <br />• Foil shield notches typically appear shallower than dielectric notches; braid shield notches even shallower (1-3 dB) but at 1/PR pitch.
         </div>
       </div>
@@ -537,26 +558,21 @@ function CableCrossSectionPanel({ stack, cableOD, units, accent }) {
   })
 
   // Approximate radial thickness for each wrap (visual only, not to scale).
-  // Tape: 25-50 µm, foil: 35 µm, braid: 200 µm. Scale down to a sane visual.
-  const tapeT = 0.10  // mm visual
-  const foilT = 0.10
-  const braidT = 0.40
+  // Tape: 25-50 µm, foil: 35 µm, spiral flatwire: ~100 µm, braid: 200 µm.
+  const thickFor = (kind) => kind === 'foil' ? 0.10 : kind === 'braid' ? 0.40 : kind === 'spiral' ? 0.18 : 0.10
 
   // Compute outer OD after all layers — for OD chip
-  const finalOD = wraps.reduce((od, w) => {
-    if (w.kind === 'foil') return od + 2 * foilT
-    if (w.kind === 'braid') return od + 2 * braidT
-    return od + 2 * tapeT
-  }, cableOD)
+  const finalOD = wraps.reduce((od, w) => od + 2 * thickFor(w.kind), cableOD)
 
   // Build the cumulative stages: stage 0 = bare core, stage N = after wrap N
   const stages = [{ od: cableOD, label: 'Core', wraps: [] }]
   let runningOD = cableOD
   wraps.forEach((w, i) => {
-    runningOD += 2 * (w.kind === 'foil' ? foilT : w.kind === 'braid' ? braidT : tapeT)
+    runningOD += 2 * thickFor(w.kind)
+    const kindLabel = w.kind === 'ptfe' ? 'PTFE' : w.kind === 'foil' ? 'Foil' : w.kind === 'spiral' ? 'Spiral' : 'Braid'
     stages.push({
       od: runningOD,
-      label: `+L${w.layerIdx + 1} ${w.kind === 'ptfe' ? 'PTFE' : w.kind === 'foil' ? 'Foil' : 'Braid'} #${w.wrapIdx + 1}`,
+      label: `+L${w.layerIdx + 1} ${kindLabel} #${w.wrapIdx + 1}`,
       wraps: wraps.slice(0, i + 1),
     })
   })
@@ -609,8 +625,8 @@ function CableCrossSectionPanel({ stack, cableOD, units, accent }) {
             ))}
           </div>
           <div className="mt-2 text-[10px] font-mono" style={{ color: C.textMuted }}>
-            ⓘ Each wrap shown as a colored ring. PTFE = translucent layer color · Foil = silver · Braid = crosshatch.
-            Thickness shown is visual only (real tape is 25-50 µm).
+            ⓘ Each wrap shown as a colored ring. PTFE = translucent + diagonal hatch · Foil = silver solid · Spiral = SPC/Cu flatwire (metallic + tight hatch) · Braid = orange crosshatch.
+            Thickness shown is visual only — real tape is 25-50 µm, spiral flatwire 80-150 µm, braid 150-300 µm.
           </div>
         </div>
       </div>
@@ -621,8 +637,9 @@ function CableCrossSectionPanel({ stack, cableOD, units, accent }) {
 // SVG that renders a coax cross-section with the given wrap stack
 function BigCableXS({ wraps, cableOD, size = 240 }) {
   const c = size / 2
+  const thickFor = (kind) => kind === 'foil' ? 0.10 : kind === 'braid' ? 0.40 : kind === 'spiral' ? 0.18 : 0.10
   // Total visual radius: scale so final fits within the canvas
-  const totalT = wraps.reduce((acc, w) => acc + (w.kind === 'foil' ? 0.10 : w.kind === 'braid' ? 0.40 : 0.10), 0)
+  const totalT = wraps.reduce((acc, w) => acc + thickFor(w.kind), 0)
   const finalODmm = cableOD + 2 * totalT
   const padding = 4
   const maxR = c - padding
@@ -634,12 +651,15 @@ function BigCableXS({ wraps, cableOD, size = 240 }) {
   const layers = []
   let r = coreR
   wraps.forEach((w, i) => {
-    const t = (w.kind === 'foil' ? 0.10 : w.kind === 'braid' ? 0.40 : 0.10) * mmToPx
+    const t = thickFor(w.kind) * mmToPx
     const inner = r
     const outer = r + t
-    layers.push({ inner, outer, kind: w.kind, color: colorFor(w.layerIdx), wrapIdx: w.wrapIdx, layerIdx: w.layerIdx })
+    layers.push({ inner, outer, kind: w.kind, color: colorFor(w.layerIdx), wrapIdx: w.wrapIdx, layerIdx: w.layerIdx, material: w.material })
     r = outer
   })
+
+  // Material color for spiral: SPC silvery, Cu copper, TC dull tin
+  const spiralMatColor = (mat) => mat === 'cu' ? '#c97b3f' : mat === 'tc' ? '#cbd5e1' : '#e8e8ea'
 
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
@@ -655,12 +675,19 @@ function BigCableXS({ wraps, cableOD, size = 240 }) {
         <pattern id="ptfe-hatch-z" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-35)">
           <line x1="0" y1="0" x2="0" y2="6" stroke="#ffffff" strokeOpacity="0.10" strokeWidth="0.8" />
         </pattern>
+        {/* Spiral wrap: tight diagonal lines suggesting flatwire ribbon */}
+        <pattern id="spiral-pat" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(60)">
+          <line x1="0" y1="0" x2="0" y2="4" stroke="#0a0d0f" strokeOpacity="0.55" strokeWidth="0.9" />
+        </pattern>
       </defs>
       {/* Outermost first so inner rings render on top */}
       {layers.slice().reverse().map((l, idx) => {
-        const fill = l.kind === 'foil' ? '#a7b0b6' : l.kind === 'braid' ? 'url(#braid-pat)' : l.color
-        const opacity = l.kind === 'ptfe' ? 0.55 : 0.85
-        const hatch = l.kind === 'ptfe' ? (l.wrapIdx % 2 ? 'url(#ptfe-hatch-z)' : 'url(#ptfe-hatch-s)') : null
+        let fill, opacity
+        if (l.kind === 'foil') { fill = '#a7b0b6'; opacity = 0.85 }
+        else if (l.kind === 'braid') { fill = 'url(#braid-pat)'; opacity = 0.85 }
+        else if (l.kind === 'spiral') { fill = spiralMatColor(l.material); opacity = 0.92 }
+        else { fill = l.color; opacity = 0.55 }
+        const hatch = l.kind === 'ptfe' ? (l.wrapIdx % 2 ? 'url(#ptfe-hatch-z)' : 'url(#ptfe-hatch-s)') : (l.kind === 'spiral' ? 'url(#spiral-pat)' : null)
         return (
           <g key={idx}>
             <circle cx={c} cy={c} r={l.outer} fill={fill} fillOpacity={opacity} stroke={l.color} strokeWidth="0.75" />
@@ -684,6 +711,8 @@ function LayerRow({ layer, idx, cableOD, vf, color, units = 'mm', onUpdate, onRe
   const f1 = (150000 * vf) / Math.max(0.01, P)
   const alpha = helixAngleOf(layer, cableOD)
   const isBraid = layer.kind === 'braid'
+  const isSpiral = layer.kind === 'spiral'
+  const isTape = layer.kind === 'ptfe' || layer.kind === 'foil'
   const showInch = units === 'inch'
 
   return (
@@ -691,30 +720,53 @@ function LayerRow({ layer, idx, cableOD, vf, color, units = 'mm', onUpdate, onRe
       {/* color stripe */}
       <div style={{ width: 4, background: color }} />
       <div className="flex-1 grid grid-cols-[auto_1fr_auto] gap-3 p-3 items-center">
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="font-mono text-[11px] font-medium tracking-wider" style={{ color }}>L{idx + 1}</div>
-          <select
-            value={layer.kind}
-            onChange={(e) => {
-              const newKind = e.target.value
-              const reset = newLayer(newKind)
-              onUpdate(reset)
-            }}
-            className="bg-[#0a0d0f] border border-[#252e33] rounded px-1.5 py-1 text-[11px] font-mono"
-            style={{ color: C.amber }}
-          >
-            <option value="ptfe">PTFE</option>
-            <option value="foil">Foil</option>
-            <option value="braid">Braid</option>
-          </select>
+        <div className="flex flex-col items-start gap-1 shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="font-mono text-[11px] font-medium tracking-wider" style={{ color }}>L{idx + 1}</div>
+            <select
+              value={layer.kind}
+              onChange={(e) => {
+                const newKind = e.target.value
+                const reset = newLayer(newKind)
+                onUpdate(reset)
+              }}
+              className="bg-[#0a0d0f] border border-[#252e33] rounded px-1.5 py-1 text-[11px] font-mono"
+              style={{ color: C.amber }}
+            >
+              <option value="ptfe">PTFE</option>
+              <option value="foil">Foil</option>
+              <option value="spiral">Spiral</option>
+              <option value="braid">Braid</option>
+            </select>
+          </div>
+          {isSpiral && (
+            <select
+              value={layer.material || 'spc'}
+              onChange={(e) => onUpdate({ material: e.target.value })}
+              className="bg-[#0a0d0f] border border-[#252e33] rounded px-1 py-0.5 text-[10px] font-mono"
+              style={{ color: C.copperBright }}
+              title="Flatwire material"
+            >
+              <option value="spc">SPC</option>
+              <option value="cu">Cu</option>
+              <option value="tc">TC</option>
+            </select>
+          )}
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-          {!isBraid && (
+          {isTape && (
             <>
               <CompactSlider label="Width" value={layer.width} onChange={(v) => onUpdate({ width: v })} min={0.5} max={30} step={0.5} units={units} length />
               <CompactSlider label={(layer.overlap ?? 0) < 0 ? 'Gap' : 'Overlap'} value={layer.overlap} onChange={(v) => onUpdate({ overlap: v })} min={-50} max={90} step={1} unit="%" />
               <CompactSlider label="Bobbins" value={layer.bobbins ?? 1} onChange={(v) => onUpdate({ bobbins: Math.max(1, Math.round(v)) })} min={1} max={12} step={1} unit="heads" />
+            </>
+          )}
+          {isSpiral && (
+            <>
+              <CompactSlider label="Width" value={layer.width} onChange={(v) => onUpdate({ width: v })} min={0.2} max={5} step={0.1} units={units} length />
+              <CompactSlider label={(layer.overlap ?? 0) < 0 ? 'Gap' : 'Overlap'} value={layer.overlap} onChange={(v) => onUpdate({ overlap: v })} min={-50} max={50} step={1} unit="%" />
+              <CompactSlider label="Strands" value={layer.strands ?? 1} onChange={(v) => onUpdate({ strands: Math.max(1, Math.round(v)) })} min={1} max={6} step={1} unit="ribbons" />
             </>
           )}
           {isBraid && (
