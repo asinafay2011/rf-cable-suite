@@ -713,7 +713,14 @@ export default function FloatingAgent({
         )}
 
         {view
-          .filter((item) => showTools || item.kind !== 'tool')
+          .filter((item) => {
+            if (item.kind !== 'tool') return true
+            if (showTools) return true
+            // Force-show actionable tool pills (one-click preset apply) even when "hide tools" is on
+            let r = item.result
+            if (typeof r === 'string') { try { r = JSON.parse(r) } catch {} }
+            return r?._apply_preset != null
+          })
           .map((item, i) => (
             <ViewItem
               key={i}
