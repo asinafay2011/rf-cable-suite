@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Cable, Calculator, Layers, Shield, Box, FlaskConical, BookOpen,
   ChevronRight, Activity, Ruler, Zap, Atom, Wrench, Library,
@@ -81,6 +81,7 @@ Proactive behavior:
 - When the user gives geometry numbers, automatically run \`calc_z0_coax\` and \`coax_per_unit_length\` rather than estimating from memory.
 - After a VNA Lab session (the user mentions Wire A / Wire B / pair skew results), offer \`vna_qc_report\` to generate a markdown QA report.
 - When the user asks "what dimensions for 50 Ω", run \`geometry_for_z0\` and \`sensitivity_analysis\`.
+- When the user asks for help fixing or improving braid coverage, give 2–3 named options (e.g. "Minimal change", "Best balance", "Overkill") and call \`propose_braid_preset\` ONCE PER OPTION. Each tool result becomes a one-click "Apply to Braid" button — the user does not need to type the values into sliders.
 - If the user has a PDF datasheet, ask them to paste the relevant text or attach a screenshot — PDFs aren't directly readable.`;
 
 const CABLE_STARTERS = [
@@ -174,13 +175,14 @@ function cableContextStarters(ctx) {
 }
 
 const CABLE_TOOL_TO_SECTION = {
-  calc_z0_coax:        { id: 'calc',  label: 'Z₀ Calc' },
-  calc_braid_coverage: { id: 'braid', label: 'Braid' },
-  compute_attenuation: { id: 'atten', label: 'Atten' },
-  pair_lay_skew:       { id: 'lay',   label: 'Lay Design' },
-  lay_for_skew:        { id: 'lay',   label: 'Lay Design' },
-  geometry_for_z0:     { id: 'calc',  label: 'Z₀ Calc' },
-  lookup_cable:        { id: 'library', label: 'Vendors' },
+  calc_z0_coax:          { id: 'calc',  label: 'Z₀ Calc' },
+  calc_braid_coverage:   { id: 'braid', label: 'Braid' },
+  propose_braid_preset:  { id: 'braid', label: 'Braid' },
+  compute_attenuation:   { id: 'atten', label: 'Atten' },
+  pair_lay_skew:         { id: 'lay',   label: 'Lay Design' },
+  lay_for_skew:          { id: 'lay',   label: 'Lay Design' },
+  geometry_for_z0:       { id: 'calc',  label: 'Z₀ Calc' },
+  lookup_cable:          { id: 'library', label: 'Vendors' },
 };
 
 /* ============================================================
@@ -2154,6 +2156,22 @@ function BraidCoverage() {
       setN(p.N); setP(p.P); setStrand(p.d); setCableD(p.D); setPR(p.PR);
     }
   };
+
+  // Listen for agent-applied presets (cable-suite:apply-preset event with section='braid')
+  useEffect(() => {
+    const onApply = (e) => {
+      if (e.detail?.section !== 'braid') return;
+      const p = e.detail.params || {};
+      if (p.N != null) setN(p.N);
+      if (p.P != null) setP(p.P);
+      if (p.d != null) setStrand(p.d);
+      if (p.D != null) setCableD(p.D);
+      if (p.PR != null) setPR(p.PR);
+      if (p.material) setMaterial(p.material);
+    };
+    window.addEventListener('cable-suite:apply-preset', onApply);
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply);
+  }, []);
 
   // Effective braiding diameter — what the braid actually wraps
   // For non-circular cores, the strand path circumference ≠ π·D_physical

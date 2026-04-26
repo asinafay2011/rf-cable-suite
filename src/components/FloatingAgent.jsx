@@ -980,12 +980,26 @@ function ViewItem({ item, accent, jumpTarget, onJumpToSection }) {
 
 function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSection }) {
   const [open, setOpen] = useState(false)
+  const [applied, setApplied] = useState(false)
   const inputSummary = summarizeInput(input)
   let parsedResult = result
   if (typeof result === 'string') {
     try { parsedResult = JSON.parse(result) } catch {}
   }
   const canJump = jumpTarget && onJumpToSection && !partial && !parsedResult?.error
+  // Tool result may carry a one-click preset to apply to a tab
+  const presetSection = parsedResult?._section
+  const presetData = parsedResult?._apply_preset
+  const presetLabel = parsedResult?.label
+  const canApplyPreset = presetSection && presetData && !partial && !parsedResult?.error
+  const applyPreset = () => {
+    if (onJumpToSection) onJumpToSection(presetSection)
+    window.dispatchEvent(new CustomEvent('cable-suite:apply-preset', {
+      detail: { section: presetSection, params: presetData, label: presetLabel },
+    }))
+    setApplied(true)
+    setTimeout(() => setApplied(false), 1500)
+  }
   return (
     <div className="flex justify-start">
       <div
@@ -1011,6 +1025,34 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
             <span className="text-[10px]" style={{ color: '#5eead4' }}>ok</span>
           ) : null}
         </button>
+
+        {/* Inline Apply button when the tool result carries a preset */}
+        {canApplyPreset && (
+          <div className="flex items-center justify-between px-2.5 py-1.5 border-t" style={{ borderColor: '#1a2226', background: '#0a0d0f' }}>
+            <div className="text-[11px] flex items-center gap-2">
+              {parsedResult.predicted_K_pct != null && (
+                <span style={{ color: parsedResult.verdict === 'Insufficient' ? '#f87171' : '#5eead4' }}>
+                  K = {parsedResult.predicted_K_pct}%
+                </span>
+              )}
+              {parsedResult.verdict && (
+                <span className="text-[10px] uppercase tracking-wider text-[#6b7479]">{parsedResult.verdict}</span>
+              )}
+            </div>
+            <button
+              onClick={applyPreset}
+              disabled={applied}
+              className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider rounded border hover:bg-[#1f1610] transition-colors flex items-center gap-1"
+              style={{
+                color: applied ? '#5eead4' : accent,
+                borderColor: (applied ? '#5eead4' : accent) + '60',
+                background: 'transparent',
+              }}
+            >
+              {applied ? '✓ applied' : `→ Apply${presetLabel ? ` "${presetLabel}"` : ''} to ${presetSection}`}
+            </button>
+          </div>
+        )}
         {open && (
           <div className="px-2.5 pb-2 pt-0 border-t" style={{ borderColor: '#1a2226' }}>
             <div className="text-[10px] uppercase tracking-wider text-[#6b7479] mt-2 mb-1">input</div>

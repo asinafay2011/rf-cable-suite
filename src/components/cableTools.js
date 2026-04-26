@@ -216,6 +216,25 @@ export const CABLE_TOOLS = [
     },
   },
   {
+    name: 'propose_braid_preset',
+    description:
+      'Propose a specific braid configuration (N total carriers, P ends/carrier, d strand mm, D cable mm, PR picks/inch) as a one-click apply preset. Computes the resulting coverage K%, helix angle, and fill. The user gets an "Apply" button on this tool pill that pushes the values directly into the Braid tab — no manual slider tweaking. Call this tool once per option when the user asks for braid setting suggestions.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'User-friendly option name (e.g., "Best balance", "Minimal change", "Overkill")' },
+        N: { type: 'number', description: 'Total carriers' },
+        P: { type: 'number', description: 'Ends per carrier' },
+        d_mm: { type: 'number', description: 'Strand diameter in mm' },
+        D_mm: { type: 'number', description: 'Cable diameter in mm' },
+        PR: { type: 'number', description: 'Picks per inch' },
+        material: { type: 'string', description: 'Optional: "TC" | "BC" | "SPC" | "NPC"' },
+        rationale: { type: 'string', description: 'One-sentence explanation of the trade-off this option represents' },
+      },
+      required: ['label', 'N', 'P', 'd_mm', 'D_mm', 'PR'],
+    },
+  },
+  {
     name: 'sensitivity_analysis',
     description:
       'Sweep one parameter of a coax Z₀ calculation across a range, hold the rest fixed, and return Z₀ at each step. Use to answer "how sensitive is Z₀ to εr / D / d?" or to size manufacturing tolerances.',
@@ -464,6 +483,31 @@ export function dispatchCableTool(name, input) {
           }));
         }
         return result;
+      }
+      case 'propose_braid_preset': {
+        const { label, N, P, d_mm, D_mm, PR, material, rationale } = input;
+        if (!(N > 0 && P > 0 && d_mm > 0 && D_mm > 0 && PR > 0)) throw new Error('All braid params must be positive');
+        const Cdir = N / 2;
+        const R_in = (D_mm + 2 * d_mm) / 2 / 25.4;
+        const d_in = d_mm / 25.4;
+        const alphaRad = Math.atan((2 * Math.PI * R_in * PR) / Cdir);
+        const F = (P * PR * d_in) / Math.sin(alphaRad);
+        const Fc = Math.max(0, Math.min(1, F));
+        const K = (2 * Fc - Fc * Fc) * 100;
+        const alpha_deg = (alphaRad * 180) / Math.PI;
+        const verdict = K >= 95 ? 'EMI critical' : K >= 85 ? 'High performance' : K >= 65 ? 'General purpose' : 'Insufficient';
+        return {
+          label,
+          predicted_K_pct: num(K, 1),
+          helix_angle_deg: num(alpha_deg, 1),
+          fill_factor_F: num(Fc, 3),
+          verdict,
+          rationale: rationale || undefined,
+          inputs: { N, P, d_mm, D_mm, PR, material },
+          // Magic fields the FloatingAgent UI looks for to render an Apply button:
+          _apply_preset: { N, P, d: d_mm, D: D_mm, PR, material },
+          _section: 'braid',
+        };
       }
       case 'sensitivity_analysis': {
         const { vary, from, to, steps = 11, D, d, er } = input;
