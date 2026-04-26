@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" font-family="Bricolage Grotesque, system-ui, sans-serif">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#252e33" stroke-width="0.5"/>
+    </pattern>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#c97b3f" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#0a0d0f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cable" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#c97b3f"/>
+      <stop offset="100%" stop-color="#e89357"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="#0a0d0f"/>
+  <rect width="1200" height="630" fill="url(#grid)" opacity="0.3"/>
+  <ellipse cx="960" cy="315" rx="500" ry="420" fill="url(#glow)"/>
+
+  <!-- Top tag -->
+  <text x="80" y="100" font-size="20" letter-spacing="6" fill="#c97b3f" font-family="JetBrains Mono, monospace" font-weight="600">
+    ◆ RF + HIGH-SPEED CABLE ENGINEERING
+  </text>
+
+  <!-- Main heading -->
+  <text x="80" y="200" font-size="72" font-weight="300" fill="#f0ebe2" letter-spacing="-1">
+    Coaxial Cable
+  </text>
+  <text x="80" y="290" font-size="72" font-weight="300" fill="#f0ebe2" letter-spacing="-1">
+    Workbench
+  </text>
+  <text x="80" y="380" font-size="48" font-weight="300" font-style="italic" fill="#c97b3f" letter-spacing="-0.5">
+    + AI Agent · VNA Lab
+  </text>
+
+  <!-- Subtitle -->
+  <text x="80" y="450" font-size="22" fill="#a7b0b6" font-family="Bricolage Grotesque, system-ui, sans-serif">
+    Z₀ calc · TDR analysis · pair skew prediction · cable manufacturing curriculum
+  </text>
+
+  <!-- Stats row -->
+  <g font-family="JetBrains Mono, monospace">
+    <text x="80" y="540" font-size="42" fill="#5eead4" font-weight="300">18</text>
+    <text x="80" y="568" font-size="13" fill="#6b7479" letter-spacing="2">AI TOOLS</text>
+
+    <text x="220" y="540" font-size="42" fill="#5eead4" font-weight="300">12</text>
+    <text x="220" y="568" font-size="13" fill="#6b7479" letter-spacing="2">CABLE PRESETS</text>
+
+    <text x="430" y="540" font-size="42" fill="#5eead4" font-weight="300">.s1p</text>
+    <text x="430" y="568" font-size="13" fill="#6b7479" letter-spacing="2">TOUCHSTONE READY</text>
+
+    <text x="700" y="540" font-size="42" fill="#5eead4" font-weight="300">2</text>
+    <text x="700" y="568" font-size="13" fill="#6b7479" letter-spacing="2">APPS · ONE SUITE</text>
+  </g>
+
+  <!-- Decorative cable cross-section -->
+  <g transform="translate(960, 350)">
+    <circle r="200" fill="none" stroke="#c97b3f" stroke-width="2" opacity="0.4"/>
+    <circle r="180" fill="none" stroke="#c97b3f" stroke-width="1" opacity="0.3" stroke-dasharray="4 4"/>
+    <circle r="130" fill="none" stroke="#5eead4" stroke-width="1" opacity="0.5"/>
+    <circle r="80" fill="none" stroke="#fbbf24" stroke-width="2" opacity="0.7"/>
+    <circle r="20" fill="url(#cable)"/>
+    <text x="0" y="240" font-size="14" fill="#6b7479" text-anchor="middle" font-family="JetBrains Mono, monospace" letter-spacing="2">
+      COAXIAL · 50 Ω
+    </text>
+  </g>
+
+  <!-- Bottom URL stripe -->
+  <text x="80" y="600" font-size="14" fill="#6b7479" font-family="JetBrains Mono, monospace" letter-spacing="2">
+    BRIAN-COAX-LAB.VERCEL.APP
+  </text>
+</svg>

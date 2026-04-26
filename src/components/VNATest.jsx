@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react'
-import { Upload, X, FileText, AlertTriangle, CheckCircle2, Activity, Sparkles, GitCompare } from 'lucide-react'
+import { Upload, X, FileText, AlertTriangle, CheckCircle2, Activity, Sparkles, GitCompare, HelpCircle, Printer } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from 'recharts'
 import {
   parseTouchstone,
@@ -129,8 +129,54 @@ export default function VNATest() {
     setWireA(null); setWireB(null); setError(null)
   }
 
+  const printReport = () => {
+    const prevTitle = document.title
+    document.title = `VNA-Lab-Report-${new Date().toISOString().slice(0, 10)}`
+    document.body.setAttribute('data-vna-print', '1')
+    const onAfter = () => {
+      document.title = prevTitle
+      document.body.removeAttribute('data-vna-print')
+      window.removeEventListener('afterprint', onAfter)
+    }
+    window.addEventListener('afterprint', onAfter)
+    setTimeout(() => window.print(), 100)
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 vna-print-root">
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 14mm; }
+          body { background: white !important; color: #111 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          /* Hide everything outside the VNA Lab content when printing */
+          body[data-vna-print="1"] *:not(.vna-print-root):not(.vna-print-root *) { display: none !important; }
+          body[data-vna-print="1"] .vna-print-root { display: block !important; }
+          /* Hide chrome that shouldn't appear in the PDF */
+          body[data-vna-print="1"] .vna-print-hide,
+          body[data-vna-print="1"] header.sticky,
+          body[data-vna-print="1"] .fixed.bottom-4 { display: none !important; }
+          /* Light theme overrides for readability on paper */
+          body[data-vna-print="1"] .vna-print-root,
+          body[data-vna-print="1"] .vna-print-root * {
+            color: #111 !important;
+            background: white !important;
+            border-color: #ccc !important;
+          }
+          body[data-vna-print="1"] .vna-print-root .recharts-line path { stroke: #b45309 !important; }
+          body[data-vna-print="1"] .vna-print-root .recharts-cartesian-axis-tick-value tspan { fill: #555 !important; }
+          body[data-vna-print="1"] .vna-print-root .recharts-cartesian-grid line { stroke: #ddd !important; }
+          /* Show a print-only header */
+          .vna-print-only { display: none; }
+          body[data-vna-print="1"] .vna-print-only { display: block !important; }
+        }
+      `}</style>
+
+      <div className="vna-print-only" style={{ marginBottom: 16 }}>
+        <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 2, color: '#b45309', textTransform: 'uppercase' }}>◆ VNA Lab · Single-wire QC + Pair Prediction Report</div>
+        <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>Generated {new Date().toLocaleString()} · brian-coax-lab.vercel.app</div>
+        <hr style={{ marginTop: 8, border: 'none', borderTop: '1px solid #b45309' }} />
+      </div>
+
       <header className="space-y-2">
         <div className="font-mono text-[11px] tracking-[0.2em] text-[#c97b3f] uppercase">◆ VNA Lab · Single-wire QC + Pair prediction</div>
         <h1 className="text-2xl text-[#f0ebe2] font-light tracking-tight" style={{ fontFamily: '"Bricolage Grotesque", sans-serif' }}>
@@ -141,7 +187,7 @@ export default function VNATest() {
           intra-pair skew when the two are twisted into a differential pair. Single tab covers the full workflow:
           measure → QC each → predict pair quality before twisting.
         </p>
-        <div className="flex flex-wrap gap-2 pt-1 items-center">
+        <div className="flex flex-wrap gap-2 pt-1 items-center vna-print-hide">
           <span className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479] mr-1">Try a demo:</span>
           {DEMOS.map((d) => (
             <button
@@ -159,6 +205,17 @@ export default function VNATest() {
               <span className="text-[#6b7479] normal-case tracking-normal">— {d.hint}</span>
             </button>
           ))}
+          {(wireA || wireB) && (
+            <button
+              onClick={printReport}
+              className="px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider rounded border bg-transparent flex items-center gap-1.5 text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610]"
+              style={{ borderColor: C.border }}
+              title="Print or save the current view as PDF (use 'Save as PDF' in the print dialog)"
+            >
+              <Printer size={12} />
+              Print / PDF
+            </button>
+          )}
           {(wireA || wireB) && (
             <button
               onClick={clearAll}
@@ -321,20 +378,29 @@ function FileSlot({ label, sub, accent, entry, onFile, onClear }) {
 function ControlBar({ vfPercent, setVfPercent, expectedLength, setExpectedLength, gateStart, setGateStart, gateEnd, setGateEnd, gateAuto, setGateAuto, units, setUnits, thresholds, setThresholds }) {
   return (
     <div className="bg-[#12171a] border border-[#252e33] rounded p-3 flex flex-wrap items-center gap-x-6 gap-y-3 text-[12px]">
-      <Field label="Velocity Factor (VF)">
+      <Field
+        label="Velocity Factor (VF)"
+        hint="Fraction of c at which signals propagate in the cable. VF = 1/√εᵣ. Solid PE ≈ 0.66, foamed PE ≈ 0.82–0.88, PTFE ≈ 0.69. Drives the time-to-distance conversion in TDR."
+      >
         <div className="flex items-center gap-2">
           <input type="range" min="40" max="100" step="1" value={vfPercent} onChange={(e) => setVfPercent(parseInt(e.target.value, 10))} className="w-32" />
           <span className="font-mono text-[#fbbf24] w-12">{vfPercent}%</span>
         </div>
       </Field>
-      <Field label={`Expected length (${units})`}>
-        <NumIn value={expectedLength} step="0.5" onChange={setExpectedLength} />
+      <Field
+        label={`Expected length (${units})`}
+        hint="Physical length of the cable under test. Used to place the 'cable end' marker on the TDR plot and (when 'auto' gate is on) to set the upper search bound for in-cable defect detection."
+      >
+        <NumIn value={expectedLength} step="0.5" min={0} onChange={setExpectedLength} />
       </Field>
-      <Field label={`Defect search gate (${units})`}>
+      <Field
+        label={`Defect search gate (${units})`}
+        hint="Distance window where the verdict looks for in-cable reflections. Excludes near-connector ringing (low side) and the open/short termination at the cable end (high side). Click 'auto' to tie the upper bound to 95 % of the expected length."
+      >
         <div className="flex items-center gap-1">
-          <NumIn value={gateStart} step="0.5" onChange={setGateStart} />
+          <NumIn value={gateStart} step="0.5" min={0} onChange={setGateStart} />
           <span className="text-[#6b7479]">–</span>
-          <NumIn value={gateEnd} step="0.5" onChange={setGateEnd} />
+          <NumIn value={gateEnd} step="0.5" min={0} onChange={setGateEnd} />
           <button onClick={() => setGateAuto((v) => !v)} className={`ml-1 px-1.5 py-0.5 text-[9px] uppercase tracking-wider rounded font-mono ${gateAuto ? 'bg-[#2a1d14] text-[#fbbf24] border border-[#3d2a1c]' : 'text-[#6b7479] border border-[#252e33] hover:text-[#fbbf24]'}`} title="Gate auto-tracks expected length × 0.95">auto</button>
         </div>
       </Field>
@@ -345,44 +411,80 @@ function ControlBar({ vfPercent, setVfPercent, expectedLength, setExpectedLength
           ))}
         </div>
       </Field>
-      <Field label="RL pass / fail (dB)">
+      <Field
+        label="RL pass / fail (dB)"
+        hint="Mean return loss thresholds. Higher = better match. Typical: 15 dB pass / 10 dB fail for installed cable; 20 dB / 15 dB for premium. Skipped automatically for open-ended measurements (peak |S11| > 0.7)."
+      >
         <div className="flex items-center gap-1">
-          <NumIn value={thresholds.rl_pass_db} onChange={(v) => setThresholds((t) => ({ ...t, rl_pass_db: v }))} />
+          <NumIn value={thresholds.rl_pass_db} min={0} max={60} onChange={(v) => setThresholds((t) => ({ ...t, rl_pass_db: v }))} />
           <span className="text-[#6b7479]">/</span>
-          <NumIn value={thresholds.rl_fail_db} onChange={(v) => setThresholds((t) => ({ ...t, rl_fail_db: v }))} />
+          <NumIn value={thresholds.rl_fail_db} min={0} max={60} validate={(v) => v < thresholds.rl_pass_db} onChange={(v) => setThresholds((t) => ({ ...t, rl_fail_db: v }))} />
         </div>
       </Field>
-      <Field label="VSWR pass / fail">
+      <Field
+        label="VSWR pass / fail"
+        hint="Maximum acceptable VSWR. 1.0 is perfect match. Typical: 1.5 pass / 2.0 fail for general-purpose. Skipped for open-ended measurements where VSWR → ∞ by design."
+      >
         <div className="flex items-center gap-1">
-          <NumIn value={thresholds.vswr_pass} step="0.1" onChange={(v) => setThresholds((t) => ({ ...t, vswr_pass: v }))} />
+          <NumIn value={thresholds.vswr_pass} step="0.1" min={1} max={20} onChange={(v) => setThresholds((t) => ({ ...t, vswr_pass: v }))} />
           <span className="text-[#6b7479]">/</span>
-          <NumIn value={thresholds.vswr_fail} step="0.1" onChange={(v) => setThresholds((t) => ({ ...t, vswr_fail: v }))} />
+          <NumIn value={thresholds.vswr_fail} step="0.1" min={1} max={20} validate={(v) => v > thresholds.vswr_pass} onChange={(v) => setThresholds((t) => ({ ...t, vswr_fail: v }))} />
         </div>
       </Field>
-      <Field label="Reflection peak pass / fail">
+      <Field
+        label="Reflection peak pass / fail"
+        hint="Largest |ρ| allowed within the gate (i.e., a defect inside the cable). 0 = perfect, 1 = open/short. Tighter for installation QC: 0.05 pass / 0.10 fail catches typical kinks/crushes."
+      >
         <div className="flex items-center gap-1">
-          <NumIn value={thresholds.reflection_pass} step="0.01" onChange={(v) => setThresholds((t) => ({ ...t, reflection_pass: v }))} />
+          <NumIn value={thresholds.reflection_pass} step="0.01" min={0} max={1} onChange={(v) => setThresholds((t) => ({ ...t, reflection_pass: v }))} />
           <span className="text-[#6b7479]">/</span>
-          <NumIn value={thresholds.reflection_fail} step="0.01" onChange={(v) => setThresholds((t) => ({ ...t, reflection_fail: v }))} />
+          <NumIn value={thresholds.reflection_fail} step="0.01" min={0} max={1} validate={(v) => v > thresholds.reflection_pass} onChange={(v) => setThresholds((t) => ({ ...t, reflection_fail: v }))} />
         </div>
       </Field>
     </div>
   )
 }
 
-function Field({ label, children }) {
+function Field({ label, hint, children }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479]">{label}</span>
+      <span className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479] flex items-center gap-1">
+        {label}
+        {hint && (
+          <span className="relative group">
+            <HelpCircle size={11} className="text-[#384249] hover:text-[#fbbf24] cursor-help" />
+            <span className="invisible group-hover:visible absolute left-0 top-full mt-1 z-50 w-64 p-2 bg-[#0a0d0f] border border-[#384249] rounded text-[10px] normal-case tracking-normal text-[#a7b0b6] leading-relaxed font-sans shadow-xl">
+              {hint}
+            </span>
+          </span>
+        )}
+      </span>
       {children}
     </div>
   )
 }
-function NumIn({ value, onChange, step = '1', placeholder }) {
+function NumIn({ value, onChange, step = '1', placeholder, min, max, validate }) {
+  const v = typeof value === 'number' ? value : parseFloat(value)
+  const isInvalid = (typeof v === 'number' && !isNaN(v)) && (
+    (min != null && v < min) ||
+    (max != null && v > max) ||
+    (validate && !validate(v))
+  )
   return (
-    <input type="number" step={step} value={value ?? ''} placeholder={placeholder}
+    <input
+      type="number"
+      step={step}
+      value={value ?? ''}
+      placeholder={placeholder}
       onChange={(e) => onChange(parseFloat(e.target.value))}
-      className="w-16 bg-[#0a0d0f] border border-[#252e33] rounded px-1.5 py-0.5 text-[11px] font-mono text-[#fbbf24] focus:outline-none focus:border-[#c97b3f]" />
+      className="w-16 bg-[#0a0d0f] border rounded px-1.5 py-0.5 text-[11px] font-mono text-[#fbbf24] focus:outline-none"
+      style={{
+        borderColor: isInvalid ? '#7a2020' : '#252e33',
+        boxShadow: isInvalid ? '0 0 0 1px rgba(248, 113, 113, 0.4)' : undefined,
+      }}
+      onFocus={(e) => { if (!isInvalid) e.currentTarget.style.borderColor = '#c97b3f' }}
+      onBlur={(e) => { e.currentTarget.style.borderColor = isInvalid ? '#7a2020' : '#252e33' }}
+    />
   )
 }
 

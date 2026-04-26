@@ -4,6 +4,7 @@ import AppSwitcher from './components/AppSwitcher.jsx'
 
 const RFApp = lazy(() => import('./pages/RFApp.jsx'))
 const CableApp = lazy(() => import('./pages/CableApp.jsx'))
+const AboutPage = lazy(() => import('./pages/AboutPage.jsx'))
 
 function RouteFallback() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<RFApp />} />
           <Route path="/highspeed" element={<CableApp />} />
+          <Route path="/about" element={<AboutPage />} />
         </Routes>
       </Suspense>
     </BrowserRouter>

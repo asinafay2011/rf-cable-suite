@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Radio, Cable } from 'lucide-react'
+import { Radio, Cable, BookOpen } from 'lucide-react'
 
 const baseTab =
   'flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium tracking-wide uppercase rounded-sm border transition-colors'
@@ -22,6 +22,9 @@ export default function AppSwitcher() {
       <NavLink to="/highspeed" className={cls}>
         <Cable size={13} strokeWidth={2} />
         <span>Highspeed</span>
+      </NavLink>
+      <NavLink to="/about" className={cls} title="Methodology & references">
+        <BookOpen size={13} strokeWidth={2} />
       </NavLink>
     </div>
   )
