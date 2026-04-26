@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import AppSwitcher from './components/AppSwitcher.jsx'
+import { ToastProvider } from './components/Toaster.jsx'
 
 // Hide AppSwitcher on landing page (/) and About — they have their own nav
 function ConditionalAppSwitcher() {
@@ -38,15 +39,17 @@ function RouteFallback() {
 export default function App() {
   return (
     <BrowserRouter>
-      <ConditionalAppSwitcher />
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/rf" element={<RFApp />} />
-          <Route path="/highspeed" element={<CableApp />} />
-          <Route path="/about" element={<AboutPage />} />
-        </Routes>
-      </Suspense>
+      <ToastProvider>
+        <ConditionalAppSwitcher />
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/rf" element={<RFApp />} />
+            <Route path="/highspeed" element={<CableApp />} />
+            <Route path="/about" element={<AboutPage />} />
+          </Routes>
+        </Suspense>
+      </ToastProvider>
     </BrowserRouter>
   )
 }

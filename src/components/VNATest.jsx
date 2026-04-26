@@ -1,5 +1,22 @@
-import React, { useState, useMemo, useRef } from 'react'
-import { Upload, X, FileText, AlertTriangle, CheckCircle2, Activity, Sparkles, GitCompare, HelpCircle, Printer } from 'lucide-react'
+import React, { useState, useMemo, useRef, useEffect } from 'react'
+import { Upload, X, FileText, AlertTriangle, CheckCircle2, Activity, Sparkles, GitCompare, HelpCircle, Printer, Copy, Link as LinkIcon } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { useToast } from './Toaster.jsx'
+
+// Hook: state synced to localStorage
+function usePersistedState(key, initial) {
+  const [value, setValue] = useState(() => {
+    try {
+      const raw = localStorage.getItem(key)
+      if (raw != null) return JSON.parse(raw)
+    } catch {}
+    return initial
+  })
+  useEffect(() => {
+    try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
+  }, [key, value])
+  return [value, setValue]
+}
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from 'recharts'
 import {
   parseTouchstone,
@@ -43,17 +60,66 @@ const PAIR_STANDARDS = [
 ]
 
 export default function VNATest() {
+  const toast = useToast()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [wireA, setWireA] = useState(null) // { name, parsed }
   const [wireB, setWireB] = useState(null)
-  const [vfPercent, setVfPercent] = useState(66)
-  const [expectedLength, setExpectedLength] = useState(33)
-  const [gateStart, setGateStart] = useState(0.5)
-  const [gateEnd, setGateEnd] = useState(31)
-  const [gateAuto, setGateAuto] = useState(true)
-  const [units, setUnits] = useState('ft')
-  const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS)
+
+  // URL params override localStorage on first mount, so a shared link wins
+  const urlInitial = useMemo(() => {
+    const get = (k) => searchParams.get(k)
+    const num = (k) => { const v = parseFloat(get(k)); return isNaN(v) ? null : v }
+    const init = {}
+    const vf = num('vf'); if (vf != null) init.vfPercent = vf
+    const len = num('len'); if (len != null) init.expectedLength = len
+    const gs = num('gs'); if (gs != null) init.gateStart = gs
+    const ge = num('ge'); if (ge != null) init.gateEnd = ge
+    const u = get('u'); if (u === 'ft' || u === 'm') init.units = u
+    const ga = get('ga'); if (ga === '1' || ga === '0') init.gateAuto = ga === '1'
+    return init
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const [vfPercent, setVfPercent] = usePersistedState('vna.vfPercent', urlInitial.vfPercent ?? 66)
+  const [expectedLength, setExpectedLength] = usePersistedState('vna.expectedLength', urlInitial.expectedLength ?? 33)
+  const [gateStart, setGateStart] = usePersistedState('vna.gateStart', urlInitial.gateStart ?? 0.5)
+  const [gateEnd, setGateEnd] = usePersistedState('vna.gateEnd', urlInitial.gateEnd ?? 31)
+  const [gateAuto, setGateAuto] = usePersistedState('vna.gateAuto', urlInitial.gateAuto ?? true)
+  const [units, setUnits] = usePersistedState('vna.units', urlInitial.units ?? 'ft')
+  const [thresholds, setThresholds] = usePersistedState('vna.thresholds', DEFAULT_THRESHOLDS)
   const [view, setView] = useState('a') // a | b | compare | skew
   const [error, setError] = useState(null)
+
+  // Apply URL params on mount and clear them so subsequent state changes don't fight with the URL
+  useEffect(() => {
+    if (Object.keys(urlInitial).length > 0) {
+      if (urlInitial.vfPercent != null) setVfPercent(urlInitial.vfPercent)
+      if (urlInitial.expectedLength != null) setExpectedLength(urlInitial.expectedLength)
+      if (urlInitial.gateStart != null) setGateStart(urlInitial.gateStart)
+      if (urlInitial.gateEnd != null) setGateEnd(urlInitial.gateEnd)
+      if (urlInitial.gateAuto != null) setGateAuto(urlInitial.gateAuto)
+      if (urlInitial.units != null) setUnits(urlInitial.units)
+      toast.info('Loaded settings from shared link')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const copyShareableUrl = async () => {
+    const params = new URLSearchParams()
+    params.set('vf', String(vfPercent))
+    params.set('len', String(expectedLength))
+    params.set('gs', String(gateStart))
+    params.set('ge', String(gateEnd))
+    params.set('ga', gateAuto ? '1' : '0')
+    params.set('u', units)
+    const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success('Shareable link copied — paste anywhere to load these settings')
+    } catch {
+      toast.error('Could not copy to clipboard')
+    }
+  }
 
   const handleFile = async (file, slot) => {
     setError(null)
@@ -66,7 +132,6 @@ export default function VNATest() {
       const entry = { name: file.name, parsed }
       if (slot === 'a') {
         setWireA(entry)
-        // Auto-detect cable length on Wire A load
         try {
           const tdr = computeTDR(parsed.s.map((b) => b.s11), parsed.freqs, vfPercent / 100, units === 'ft')
           const endPeak = peakReflection(tdr.distances, tdr.rho, units === 'ft' ? 1 : 0.3, Infinity)
@@ -81,6 +146,7 @@ export default function VNATest() {
       }
     } catch (err) {
       setError(`${file.name}: ${err.message}`)
+      toast.error(`Failed to parse ${file.name}: ${err.message}`)
     }
   }
 
@@ -123,6 +189,7 @@ export default function VNATest() {
     setExpectedLength(33)
     if (gateAuto) setGateEnd(31)
     setError(null)
+    toast.info(`Loaded demo: ${demo.label} — ${demo.hint}`)
   }
 
   const clearAll = () => {
@@ -140,6 +207,7 @@ export default function VNATest() {
     }
     window.addEventListener('afterprint', onAfter)
     setTimeout(() => window.print(), 100)
+    toast.info('Use "Save as PDF" in the print dialog to export as PDF')
   }
 
   return (
@@ -205,6 +273,15 @@ export default function VNATest() {
               <span className="text-[#6b7479] normal-case tracking-normal">— {d.hint}</span>
             </button>
           ))}
+          <button
+            onClick={copyShareableUrl}
+            className="px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider rounded border bg-transparent flex items-center gap-1.5 text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610]"
+            style={{ borderColor: C.border }}
+            title="Copy a URL that loads these exact settings (VF, gate, units, thresholds)"
+          >
+            <LinkIcon size={12} />
+            Copy share link
+          </button>
           {(wireA || wireB) && (
             <button
               onClick={printReport}
@@ -228,12 +305,27 @@ export default function VNATest() {
         </div>
       </header>
 
-      <div className="grid md:grid-cols-2 gap-3">
-        <FileSlot label="Wire A" sub="(DUT — primary measurement)" accent={C.copper} entry={wireA}
-          onFile={(f) => handleFile(f, 'a')} onClear={() => setWireA(null)} />
-        <FileSlot label="Wire B" sub="(pair partner — for comparison + skew prediction)" accent={C.teal} entry={wireB}
-          onFile={(f) => handleFile(f, 'b')} onClear={() => setWireB(null)} />
-      </div>
+      <MultiDropZone
+        onFiles={async (files) => {
+          if (!files || files.length === 0) return
+          if (files.length === 1) {
+            const slot = !wireA ? 'a' : !wireB ? 'b' : 'a'
+            await handleFile(files[0], slot)
+            toast.success(`Loaded ${files[0].name} as Wire ${slot.toUpperCase()}`)
+          } else {
+            await handleFile(files[0], 'a')
+            await handleFile(files[1], 'b')
+            toast.success(`Loaded both files: ${files[0].name} → A · ${files[1].name} → B`)
+          }
+        }}
+      >
+        <div className="grid md:grid-cols-2 gap-3">
+          <FileSlot label="Wire A" sub="(DUT — primary measurement)" accent={C.copper} entry={wireA}
+            onFile={(f) => handleFile(f, 'a')} onClear={() => setWireA(null)} />
+          <FileSlot label="Wire B" sub="(pair partner — for comparison + skew prediction)" accent={C.teal} entry={wireB}
+            onFile={(f) => handleFile(f, 'b')} onClear={() => setWireB(null)} />
+        </div>
+      </MultiDropZone>
 
       {error && (
         <div className="px-3 py-2 bg-[#2a1010] border border-[#7a2020] rounded text-[12px] text-[#f87171] flex items-center gap-2">
@@ -327,6 +419,43 @@ function synthTouchstone({ name, length_ft, vf, defects = [] }) {
     name,
     parsed: { format: 'MA', freqs, refZ: 50, ports: 1, s: sBlocks },
   }
+}
+
+// Wraps the two file slots and accepts 2 files dropped onto the area.
+function MultiDropZone({ children, onFiles }) {
+  const [hovering, setHovering] = useState(0)
+  const onDragEnter = (e) => { e.preventDefault(); setHovering((h) => h + 1) }
+  const onDragLeave = (e) => { e.preventDefault(); setHovering((h) => Math.max(0, h - 1)) }
+  const onDragOver = (e) => { e.preventDefault() }
+  const onDrop = async (e) => {
+    e.preventDefault()
+    setHovering(0)
+    // Only consume drop if 2+ files; single file drop falls through to FileSlot's handler
+    const files = [...(e.dataTransfer?.files || [])]
+    if (files.length >= 2) {
+      // Stop the inner FileSlot's drop handler from firing
+      e.stopPropagation()
+      onFiles(files.slice(0, 2))
+    }
+  }
+  return (
+    <div
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      className="relative"
+    >
+      {children}
+      {hovering > 0 && (
+        <div className="pointer-events-none absolute inset-0 rounded-md border-2 border-dashed flex items-center justify-center" style={{ borderColor: '#c97b3f', background: 'rgba(201, 123, 63, 0.08)' }}>
+          <div className="px-4 py-2 bg-[#0a0d0f] border border-[#c97b3f] rounded text-[12px] font-mono text-[#fbbf24] uppercase tracking-wider">
+            Drop files — 2 at once goes to Wire A + Wire B
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── File slot ───────────────────────────────────────────
@@ -535,6 +664,28 @@ function SingleWireView({ wire, accent, thresholds, vfPercent, units, gateStart,
   )
 }
 
+function CopyNum({ label, value, suffix = '', className = '', style }) {
+  const toast = useToast()
+  const onClick = async (e) => {
+    e.stopPropagation()
+    const text = `${value}${suffix}`
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success(`Copied: ${label} = ${text}`)
+    } catch { toast.error('Could not copy') }
+  }
+  return (
+    <span
+      onClick={onClick}
+      className={`cursor-pointer hover:bg-[#2a1d14] rounded px-0.5 transition-colors ${className}`}
+      style={style}
+      title={`Click to copy "${value}${suffix}"`}
+    >
+      {value}{suffix}
+    </span>
+  )
+}
+
 function Verdict({ wire, thresholds, vfPercent, units, gateStart, gateEnd, accent }) {
   const summary = useMemo(() => s11Summary(wire.parsed.s, wire.parsed.freqs), [wire])
   const tdr = useMemo(() => computeTDR(wire.parsed.s.map((b) => b.s11), wire.parsed.freqs, vfPercent / 100, units === 'ft'), [wire, vfPercent, units])
@@ -586,10 +737,10 @@ function Verdict({ wire, thresholds, vfPercent, units, gateStart, gateEnd, accen
           <div className="text-2xl font-light tracking-tight mt-0.5" style={{ color: overallColor, fontFamily: '"Bricolage Grotesque", sans-serif' }}>{overall}</div>
         </div>
         <div className="text-right text-[11px] font-mono text-[#a7b0b6] space-y-0.5">
-          <div>Worst RL: <span className="text-[#fbbf24]">{summary.worstRLDb.toFixed(1)} dB</span> @ {(summary.worstFreq / 1e6).toFixed(0)} MHz</div>
-          <div>Mean RL: <span className="text-[#fbbf24]">{summary.meanRL.toFixed(1)} dB</span></div>
-          <div>Peak VSWR: <span className="text-[#fbbf24]">{peakVSWR.toFixed(2)}</span></div>
-          {peak && <div>In-cable peak: <span className="text-[#fbbf24]">|ρ|={Math.abs(peak.rho).toFixed(3)}</span> @ {peak.distance.toFixed(2)} {units}</div>}
+          <div>Worst RL: <CopyNum label="Worst RL" value={summary.worstRLDb.toFixed(1)} suffix=" dB" style={{ color: '#fbbf24' }} /> @ <CopyNum label="freq @ worst RL" value={(summary.worstFreq / 1e6).toFixed(0)} suffix=" MHz" /></div>
+          <div>Mean RL: <CopyNum label="Mean RL" value={summary.meanRL.toFixed(1)} suffix=" dB" style={{ color: '#fbbf24' }} /></div>
+          <div>Peak VSWR: <CopyNum label="Peak VSWR" value={peakVSWR.toFixed(2)} style={{ color: '#fbbf24' }} /></div>
+          {peak && <div>In-cable peak: |ρ|=<CopyNum label="In-cable |ρ|" value={Math.abs(peak.rho).toFixed(3)} style={{ color: '#fbbf24' }} /> @ <CopyNum label="defect distance" value={peak.distance.toFixed(2)} suffix={` ${units}`} /></div>}
         </div>
       </div>
       <ul className="space-y-1 text-[12px]">
@@ -831,10 +982,22 @@ function PairSkewView({ wireA, wireB, vfPercent, units }) {
 }
 
 function Stat({ label, value, sub, accent }) {
+  const toast = useToast()
+  const onClick = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success(`Copied: ${label} = ${value}`)
+    } catch { toast.error('Could not copy') }
+  }
   return (
     <div>
       <div className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479]">{label}</div>
-      <div className="text-lg font-mono mt-0.5" style={{ color: accent }}>{value}</div>
+      <div
+        onClick={onClick}
+        className="text-lg font-mono mt-0.5 cursor-pointer hover:bg-[#2a1d14] rounded px-0.5 inline-block transition-colors"
+        style={{ color: accent }}
+        title={`Click to copy "${value}"`}
+      >{value}</div>
       {sub && <div className="text-[10px] text-[#6b7479] font-mono">{sub}</div>}
     </div>
   )
