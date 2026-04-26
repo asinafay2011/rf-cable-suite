@@ -26,6 +26,8 @@ export default function FloatingAgent({
   storageKey,
   tools,        // optional Anthropic-format tool array
   onToolUse,    // optional (name, input) => result|Promise<result>
+  onAttachData, // optional (file) => Promise<{ summary: string, chip: { name, info } } | null>
+  attachAccept = 'image/*', // file input accept pattern
 }) {
   const [open, setOpen] = useState(false)
   const modelKey = storageKey ? `${storageKey}-model` : null
@@ -63,6 +65,7 @@ export default function FloatingAgent({
   }, [sizeKey, size])
   const [resizing, setResizing] = useState(false)
   const [pendingImage, setPendingImage] = useState(null) // { mediaType, data, dataUrl }
+  const [pendingData, setPendingData] = useState(null)   // { summary, chip: { name, info } }
   const fileInputRef = useRef(null)
 
   // Show/hide tool pills toggle — default hidden for cleaner look
@@ -272,28 +275,51 @@ export default function FloatingAgent({
     const file = e.target.files?.[0]
     e.target.value = '' // reset so same file can be picked twice
     if (!file) return
-    try {
-      const img = await readImage(file)
-      setPendingImage(img)
-    } catch (err) {
-      setError(err.message || 'Could not read image')
+    // Try image first when MIME indicates image
+    if (file.type.startsWith('image/')) {
+      try {
+        const img = await readImage(file)
+        setPendingImage(img)
+        return
+      } catch (err) {
+        setError(err.message || 'Could not read image')
+        return
+      }
     }
+    // Fall back to data attachment handler if provided
+    if (onAttachData) {
+      try {
+        const result = await onAttachData(file)
+        if (result) setPendingData(result)
+      } catch (err) {
+        setError(err.message || 'Could not read file')
+      }
+      return
+    }
+    setError(`Unsupported file: ${file.name}`)
   }
 
   const send = async (textOverride) => {
     const text = (textOverride ?? input).trim()
     const img = pendingImage
-    if ((!text && !img) || loading) return
+    const data = pendingData
+    if ((!text && !img && !data) || loading) return
     setInput('')
     setError(null)
     setPendingImage(null)
+    setPendingData(null)
+
+    const composedText = [
+      data ? data.summary : null,
+      text || (img ? 'What do you see in this image?' : data ? 'Analyze this measurement and tell me anything notable.' : ''),
+    ].filter(Boolean).join('\n\n')
 
     const userContent = img
       ? [
           { type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data }, _dataUrl: img.dataUrl },
-          { type: 'text', text: text || 'What do you see in this image?' },
+          { type: 'text', text: composedText },
         ]
-      : text
+      : composedText
     let history = [...messages, { role: 'user', content: userContent }]
     setMessages(history)
     setLoading(true)
@@ -584,11 +610,31 @@ export default function FloatingAgent({
             </button>
           </div>
         )}
+        {pendingData && (
+          <div className="flex items-center gap-2 px-2 py-1.5 bg-[#12171a] border rounded" style={{ borderColor: accent + '60' }}>
+            <div className="w-10 h-10 rounded border flex items-center justify-center shrink-0" style={{ borderColor: accent + '60', background: '#0a0d0f' }}>
+              <span style={{ color: accent, fontFamily: '"JetBrains Mono", monospace', fontSize: 9, fontWeight: 700 }}>S1P</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[11px] text-[#a7b0b6] truncate" style={{ fontFamily: '"JetBrains Mono", monospace' }} title={pendingData.chip.name}>
+                {pendingData.chip.name}
+              </div>
+              <div className="text-[10px] text-[#6b7479] truncate" title={pendingData.chip.info}>{pendingData.chip.info}</div>
+            </div>
+            <button
+              onClick={() => setPendingData(null)}
+              className="p-1 text-[#6b7479] hover:text-[#f87171] rounded"
+              title="Remove attachment"
+            >
+              <XIcon size={13} />
+            </button>
+          </div>
+        )}
         <div className="flex gap-2 items-end">
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept={attachAccept}
             onChange={onPickFile}
             className="hidden"
           />
@@ -596,7 +642,7 @@ export default function FloatingAgent({
             onClick={() => fileInputRef.current?.click()}
             disabled={loading}
             className="shrink-0 p-2 text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#1f1610] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
-            title="Attach image (or paste / Ctrl+V)"
+            title={onAttachData ? 'Attach image or measurement file' : 'Attach image (or paste / Ctrl+V)'}
           >
             <Paperclip size={14} />
           </button>
@@ -607,7 +653,7 @@ export default function FloatingAgent({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKey}
             onPaste={onPaste}
-            placeholder={pendingImage ? 'Add a question (optional)…' : placeholder}
+            placeholder={pendingImage || pendingData ? 'Add a question (optional)…' : placeholder}
             className="flex-1 resize-none bg-[#12171a] border border-[#252e33] focus:outline-none rounded px-2.5 py-2 text-[13px] text-[#f0ebe2] placeholder:text-[#6b7479] max-h-[120px]"
             style={{ fontFamily: 'inherit' }}
             onFocus={(e) => (e.currentTarget.style.borderColor = accent)}
@@ -616,9 +662,9 @@ export default function FloatingAgent({
           />
           <button
             onClick={() => send()}
-            disabled={loading || (!input.trim() && !pendingImage)}
+            disabled={loading || (!input.trim() && !pendingImage && !pendingData)}
             className="shrink-0 px-3 py-2 disabled:bg-[#252e33] disabled:text-[#6b7479] disabled:cursor-not-allowed text-[#0a0d0f] rounded transition-colors flex items-center gap-1"
-            style={{ background: loading || (!input.trim() && !pendingImage) ? undefined : accent }}
+            style={{ background: loading || (!input.trim() && !pendingImage && !pendingData) ? undefined : accent }}
             onMouseEnter={(e) => {
               if (!loading && (input.trim() || pendingImage)) e.currentTarget.style.background = accentBright
             }}

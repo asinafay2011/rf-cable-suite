@@ -8,6 +8,53 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import FloatingAgent from '../components/FloatingAgent.jsx';
 import { CABLE_TOOLS, dispatchCableTool } from '../components/cableTools.js';
 import VNATest from '../components/VNATest.jsx';
+import PairSkew from '../components/PairSkew.jsx';
+import { parseTouchstone, returnLossDb, vswr, s11Summary } from '../components/touchstone.js';
+import { computeTDR, peakReflection } from '../components/fft.js';
+
+async function summarizeTouchstoneFile(file) {
+  const name = file.name || 'measurement'
+  const ext = name.toLowerCase().split('.').pop()
+  if (ext !== 's1p' && ext !== 's2p' && ext !== 's3p' && ext !== 's4p') {
+    return null // not a touchstone file — fall through
+  }
+  const text = await file.text()
+  const portsHint = ext === 's2p' ? 2 : ext === 's1p' ? 1 : undefined
+  const parsed = parseTouchstone(text, { ports: portsHint })
+  const sum = s11Summary(parsed.s, parsed.freqs)
+  let peakVSWR = 0
+  for (const b of parsed.s) peakVSWR = Math.max(peakVSWR, vswr(b.s11))
+  // TDR end-peak (assumes vf=66% — agent can clarify)
+  let tdrSummary = ''
+  try {
+    const tdr = computeTDR(parsed.s.map((b) => b.s11), parsed.freqs, 0.66, true)
+    const endPeak = peakReflection(tdr.distances, tdr.rho, 1, Infinity)
+    if (endPeak) tdrSummary = `\n- TDR end-peak (assuming VF=66%): |ρ|=${Math.abs(endPeak.rho).toFixed(3)} @ ${endPeak.distance.toFixed(2)} ft`
+    // Search for in-cable defects
+    if (endPeak) {
+      const defectPeak = peakReflection(tdr.distances, tdr.rho, 1, endPeak.distance * 0.9)
+      if (defectPeak && Math.abs(defectPeak.rho) > 0.02) {
+        tdrSummary += `\n- Largest in-cable reflection: |ρ|=${Math.abs(defectPeak.rho).toFixed(3)} @ ${defectPeak.distance.toFixed(2)} ft (possible defect)`
+      }
+    }
+  } catch {}
+  const summary =
+`[VNA Measurement: ${name}]
+- Ports: ${parsed.ports} (${parsed.ports === 1 ? 'S11 only' : 'S11/S21/S12/S22'})
+- Frequency range: ${(parsed.freqs[0] / 1e6).toFixed(2)} MHz – ${(parsed.freqs[parsed.freqs.length - 1] / 1e9).toFixed(3)} GHz
+- Points: ${parsed.s.length}
+- Reference impedance: ${parsed.refZ} Ω
+- Worst RL: ${sum.worstRLDb.toFixed(1)} dB @ ${(sum.worstFreq / 1e6).toFixed(0)} MHz
+- Mean RL: ${sum.meanRL.toFixed(1)} dB
+- Peak VSWR: ${peakVSWR.toFixed(2)}${tdrSummary}`
+  return {
+    summary,
+    chip: {
+      name,
+      info: `${parsed.ports}-port · ${parsed.s.length} pts · RL ${sum.meanRL.toFixed(1)} dB · VSWR ${peakVSWR.toFixed(2)}`,
+    },
+  }
+}
 
 const CABLE_SYSTEM_PROMPT = `You are a senior cable manufacturing engineer embedded in the High-Speed Cable Manufacturing curriculum (CABLE.LAB). You have access to calculation tools — use them whenever the user gives or asks for numeric values; do not rely on memorized constants when a tool can compute the exact answer.
 
@@ -5600,6 +5647,7 @@ function TopNav({ active, onChange }) {
     { id: 'calc', label: 'Z₀ Calc', icon: Calculator },
     { id: 'tdr', label: 'TDR Sim', icon: Activity },
     { id: 'vna', label: 'VNA Test', icon: FlaskConical },
+    { id: 'skew', label: 'Pair Skew', icon: Ruler },
     { id: 'braid', label: 'Braid', icon: Shield },
     { id: 'atten', label: 'Atten', icon: Zap },
     { id: 'next', label: 'NEXT', icon: Radio },
@@ -5806,6 +5854,7 @@ export default function CableApp() {
         {section === 'calc' && <ImpedanceCalc />}
         {section === 'tdr' && <TDRSim />}
         {section === 'vna' && <VNATest />}
+        {section === 'skew' && <PairSkew />}
         {section === 'braid' && <BraidCoverage />}
         {section === 'atten' && <AttenPlot />}
         {section === 'next' && <NEXTViz />}
@@ -5842,11 +5891,13 @@ export default function CableApp() {
         systemPrompt={CABLE_SYSTEM_PROMPT}
         starters={CABLE_STARTERS}
         roleDescription="Senior cable manufacturing engineer."
-        topics={['Z₀ formulas', 'braid coverage', 'pair lay', 'TDR', 'manufacturing flow']}
+        topics={['Z₀ formulas', 'braid coverage', 'pair lay', 'TDR', 'VNA measurements']}
         placeholder="Ask about cable design, manufacturing, formulas…"
         storageKey="cablelab-chat-history"
         tools={CABLE_TOOLS}
         onToolUse={dispatchCableTool}
+        onAttachData={summarizeTouchstoneFile}
+        attachAccept="image/*,.s1p,.s2p,.s3p,.s4p"
       />
     </div>
   );

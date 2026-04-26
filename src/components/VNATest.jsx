@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useRef } from 'react'
-import { Upload, X, FileText, AlertTriangle, CheckCircle2, Activity, Layers } from 'lucide-react'
+import React, { useState, useMemo, useRef, useEffect } from 'react'
+import { Upload, X, FileText, AlertTriangle, CheckCircle2, Activity, Layers, Wand2 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from 'recharts'
 import {
   parseTouchstone,
@@ -44,6 +44,9 @@ export default function VNATest() {
   const [reference, setReference] = useState(null)
   const [vfPercent, setVfPercent] = useState(66) // velocity factor for TDR distance scaling
   const [expectedLength, setExpectedLength] = useState(33) // cable length in current units (excludes end reflection)
+  const [gateStart, setGateStart] = useState(0.5) // distance — exclude near-connector reflection
+  const [gateEnd, setGateEnd] = useState(31)      // distance — exclude end termination
+  const [gateAuto, setGateAuto] = useState(true)  // when true, gate follows expectedLength
   const [error, setError] = useState(null)
   const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS)
   const [activePlot, setActivePlot] = useState('s11') // s11 | vswr | tdr | s21 | gd
@@ -57,8 +60,19 @@ export default function VNATest() {
       const portsHint = file.name.toLowerCase().endsWith('.s2p') ? 2 : (file.name.toLowerCase().endsWith('.s1p') ? 1 : undefined)
       const parsed = parseTouchstone(text, { ports: portsHint })
       const entry = { name: file.name, parsed }
-      if (slot === 'dut') setDut(entry)
-      else setReference(entry)
+      if (slot === 'dut') {
+        setDut(entry)
+        // Auto-detect cable length from end reflection (largest peak in TDR)
+        try {
+          const tdr = computeTDR(parsed.s.map((b) => b.s11), parsed.freqs, vfPercent / 100, units === 'ft')
+          const endPeak = peakReflection(tdr.distances, tdr.rho, units === 'ft' ? 1 : 0.3, Infinity)
+          if (endPeak && endPeak.distance > 0) {
+            const L = parseFloat(endPeak.distance.toFixed(1))
+            setExpectedLength(L)
+            if (gateAuto) setGateEnd(parseFloat((L * 0.95).toFixed(1)))
+          }
+        } catch {}
+      } else setReference(entry)
     } catch (err) {
       setError(`${file.name}: ${err.message}`)
     }
@@ -107,7 +121,16 @@ export default function VNATest() {
             vfPercent={vfPercent}
             setVfPercent={setVfPercent}
             expectedLength={expectedLength}
-            setExpectedLength={setExpectedLength}
+            setExpectedLength={(v) => {
+              setExpectedLength(v)
+              if (gateAuto) setGateEnd(parseFloat((v * 0.95).toFixed(1)))
+            }}
+            gateStart={gateStart}
+            setGateStart={(v) => { setGateStart(v); setGateAuto(false) }}
+            gateEnd={gateEnd}
+            setGateEnd={(v) => { setGateEnd(v); setGateAuto(false) }}
+            gateAuto={gateAuto}
+            setGateAuto={setGateAuto}
             units={units}
             setUnits={setUnits}
             thresholds={thresholds}
@@ -115,7 +138,7 @@ export default function VNATest() {
             ports={dut.parsed.ports}
           />
 
-          <Verdict dut={dut.parsed} thresholds={thresholds} vfPercent={vfPercent} units={units} expectedLength={expectedLength} />
+          <Verdict dut={dut.parsed} thresholds={thresholds} vfPercent={vfPercent} units={units} gateStart={gateStart} gateEnd={gateEnd} />
 
           <PlotSelector
             ports={dut.parsed.ports}
@@ -126,7 +149,7 @@ export default function VNATest() {
           <div className="bg-[#12171a] border border-[#252e33] rounded p-4">
             {activePlot === 's11' && <S11Plot dut={dut.parsed} reference={reference?.parsed} thresholds={thresholds} />}
             {activePlot === 'vswr' && <VSWRPlot dut={dut.parsed} reference={reference?.parsed} thresholds={thresholds} />}
-            {activePlot === 'tdr' && <TDRPlot dut={dut.parsed} reference={reference?.parsed} vfPercent={vfPercent} units={units} thresholds={thresholds} expectedLength={expectedLength} />}
+            {activePlot === 'tdr' && <TDRPlot dut={dut.parsed} reference={reference?.parsed} vfPercent={vfPercent} units={units} thresholds={thresholds} expectedLength={expectedLength} gateStart={gateStart} gateEnd={gateEnd} />}
             {activePlot === 's21' && dut.parsed.ports === 2 && <S21Plot dut={dut.parsed} reference={reference?.parsed} />}
             {activePlot === 'gd' && dut.parsed.ports === 2 && <GroupDelayPlot dut={dut.parsed} reference={reference?.parsed} />}
           </div>
@@ -204,7 +227,7 @@ function FileSlot({ label, accent, entry, onFile, onClear }) {
   )
 }
 
-function ControlBar({ vfPercent, setVfPercent, expectedLength, setExpectedLength, units, setUnits, thresholds, setThresholds, ports }) {
+function ControlBar({ vfPercent, setVfPercent, expectedLength, setExpectedLength, gateStart, setGateStart, gateEnd, setGateEnd, gateAuto, setGateAuto, units, setUnits, thresholds, setThresholds, ports }) {
   return (
     <div className="bg-[#12171a] border border-[#252e33] rounded p-3 flex flex-wrap items-center gap-x-6 gap-y-3 text-[12px]">
       <Field label="Velocity Factor (VF)">
@@ -219,8 +242,24 @@ function ControlBar({ vfPercent, setVfPercent, expectedLength, setExpectedLength
           <span className="font-mono text-[#fbbf24] w-12">{vfPercent}%</span>
         </div>
       </Field>
-      <Field label={`Expected length (${units}) — end reflection excluded`}>
+      <Field label={`Expected length (${units})`}>
         <NumIn value={expectedLength} step="0.5" onChange={setExpectedLength} />
+      </Field>
+      <Field label={`Defect search gate (${units})`}>
+        <div className="flex items-center gap-1">
+          <NumIn value={gateStart} step="0.5" onChange={setGateStart} />
+          <span className="text-[#6b7479]">–</span>
+          <NumIn value={gateEnd} step="0.5" onChange={setGateEnd} />
+          <button
+            onClick={() => setGateAuto((v) => !v)}
+            className={`ml-1 px-1.5 py-0.5 text-[9px] uppercase tracking-wider rounded font-mono ${
+              gateAuto ? 'bg-[#2a1d14] text-[#fbbf24] border border-[#3d2a1c]' : 'text-[#6b7479] border border-[#252e33] hover:text-[#fbbf24]'
+            }`}
+            title="Gate auto-tracks expected length × 0.95"
+          >
+            auto
+          </button>
+        </div>
       </Field>
       <Field label="Distance unit">
         <div className="flex gap-1">
@@ -283,19 +322,16 @@ function NumIn({ value, onChange, step = '1' }) {
   )
 }
 
-function Verdict({ dut, thresholds, vfPercent, units, expectedLength }) {
+function Verdict({ dut, thresholds, vfPercent, units, gateStart, gateEnd }) {
   const summary = useMemo(() => s11Summary(dut.s, dut.freqs), [dut])
   const tdr = useMemo(
     () => computeTDR(dut.s.map((b) => b.s11), dut.freqs, vfPercent / 100, units === 'ft'),
     [dut, vfPercent, units],
   )
-  // Search for defects between the connector and ~90% of expected length
-  // (excludes near-end connector reflection and the open/short termination at the far end)
-  const minSearch = units === 'ft' ? 0.5 : 0.15
-  const maxSearch = expectedLength > 0 ? expectedLength * 0.9 : Infinity
+  // Use the time gate for peak detection
   const peak = useMemo(
-    () => peakReflection(tdr.distances, tdr.rho, minSearch, maxSearch),
-    [tdr, minSearch, maxSearch],
+    () => peakReflection(tdr.distances, tdr.rho, gateStart, gateEnd),
+    [tdr, gateStart, gateEnd],
   )
   const peakVSWR = useMemo(() => {
     let max = 0
@@ -438,7 +474,7 @@ function VSWRPlot({ dut, reference, thresholds }) {
   )
 }
 
-function TDRPlot({ dut, reference, vfPercent, units, thresholds, expectedLength }) {
+function TDRPlot({ dut, reference, vfPercent, units, thresholds, expectedLength, gateStart, gateEnd }) {
   const dutTDR = useMemo(
     () => computeTDR(dut.s.map((b) => b.s11), dut.freqs, vfPercent / 100, units === 'ft'),
     [dut, vfPercent, units],
@@ -468,6 +504,12 @@ function TDRPlot({ dut, reference, vfPercent, units, thresholds, expectedLength 
       <ReferenceLine y={-thresholds.reflection_fail} stroke={C.red} strokeDasharray="3 3" />
       {expectedLength > 0 && (
         <ReferenceLine x={expectedLength} stroke={C.amber} strokeDasharray="2 2" label={{ value: 'cable end', fill: C.amber, fontSize: 10, position: 'top' }} />
+      )}
+      {gateStart != null && (
+        <ReferenceLine x={gateStart} stroke={C.copper} strokeDasharray="4 2" strokeWidth={0.7} label={{ value: 'gate', fill: C.copper, fontSize: 9, position: 'top' }} />
+      )}
+      {gateEnd != null && (
+        <ReferenceLine x={gateEnd} stroke={C.copper} strokeDasharray="4 2" strokeWidth={0.7} />
       )}
       {reference && <Line type="monotone" dataKey="reference" stroke={C.teal} strokeWidth={1.5} dot={false} />}
       <Line type="monotone" dataKey="dut" stroke={C.copper} strokeWidth={2} dot={false} />
