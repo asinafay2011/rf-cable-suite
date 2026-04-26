@@ -438,8 +438,40 @@ export default function ProcessSim() {
           },
         }))
         toast.success(`Applied "${e.detail.label || 'preset'}" to outer shield (stage ⑧)`)
+      } else if (section === 'calc') {
+        // Z₀ preset: parameters affect the insulation stage's wall thickness + dielectric choice.
+        // params has: D (insulated OD), d (conductor OD), er
+        setRecipe((r) => {
+          const next = { ...r, insulation: { ...r.insulation } }
+          if (params.D != null && params.d != null) {
+            next.insulation.wall_mm = parseFloat(((params.D - params.d) / 2).toFixed(3))
+          }
+          // Map εr → closest dielectric in DIELECTRICS table
+          if (params.er != null) {
+            const candidates = Object.entries(DIELECTRICS)
+              .map(([id, d]) => ({ id, dist: Math.abs(d.er - params.er) }))
+              .sort((a, b) => a.dist - b.dist)
+            next.insulation.material = candidates[0].id
+          }
+          return next
+        })
+        toast.success(`Applied "${e.detail.label || 'preset'}" to insulation (stage ③)`)
+      } else if (section === 'lay') {
+        setRecipe((r) => ({
+          ...r,
+          pair: {
+            ...r.pair,
+            lay_mm: params.lay_mm ?? (Array.isArray(params.pair_lays_mm) && params.pair_lays_mm[0]) ?? r.pair.lay_mm,
+            direction: params.direction ?? r.pair.direction,
+            tension_n: params.tension_n ?? r.pair.tension_n,
+          },
+          bundle: {
+            ...r.bundle,
+            bundle_lay_mm: params.bundle_lay_mm ?? r.bundle.bundle_lay_mm,
+          },
+        }))
+        toast.success(`Applied "${e.detail.label || 'preset'}" to pair / bundle (stages ④ / ⑦)`)
       }
-      // Future: handle 'calc' / 'lay' presets here too
     }
     window.addEventListener('cable-suite:apply-preset', onApply)
     return () => window.removeEventListener('cable-suite:apply-preset', onApply)

@@ -235,6 +235,41 @@ export const CABLE_TOOLS = [
     },
   },
   {
+    name: 'propose_z0_preset',
+    description:
+      'Propose a coaxial geometry as a one-click apply preset for the Z₀ Calc tab. Returns Z₀, the inputs, and a flagged preset the user can apply with a button. Call once per option (e.g. Minimal change / Best balance / Overkill) when the user asks to fix or change Z₀ on the Z₀ Calc tab or on the Process Sim insulation stage.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'User-friendly option name (e.g., "Best balance")' },
+        mode: { type: 'string', description: 'Geometry mode: "coax" | "twisted" | "starquad" (default coax)' },
+        D_mm: { type: 'number', description: 'Outer/spacing diameter in mm (dielectric OD for coax)' },
+        d_mm: { type: 'number', description: 'Inner conductor diameter in mm' },
+        er: { type: 'number', description: 'Relative permittivity εr of the dielectric' },
+        rationale: { type: 'string', description: 'One-sentence trade-off explanation' },
+      },
+      required: ['label', 'D_mm', 'd_mm', 'er'],
+    },
+  },
+  {
+    name: 'propose_pair_preset',
+    description:
+      'Propose a pair-twisting setting as a one-click apply preset. Pushes lay length / direction / tension into the Lay Design tab or the Process Sim pair stage. Use when the user wants to fix skew, NEXT, or pair geometry.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'User-friendly option name' },
+        lay_mm: { type: 'number', description: 'Pair lay length in mm (single-pair scope) or first-pair lay if specifying a Lay Designer set' },
+        pair_lays_mm: { type: 'array', items: { type: 'number' }, description: 'Optional 4-pair lay set for the Lay Designer (e.g., [11, 13, 15, 17])' },
+        bundle_lay_mm: { type: 'number', description: 'Optional bundle lay (for Lay Designer)' },
+        direction: { type: 'string', description: 'S | Z (Process Sim only)' },
+        tension_n: { type: 'number', description: 'Tension in N (Process Sim only)' },
+        rationale: { type: 'string', description: 'One-sentence trade-off explanation' },
+      },
+      required: ['label'],
+    },
+  },
+  {
     name: 'sensitivity_analysis',
     description:
       'Sweep one parameter of a coax Z₀ calculation across a range, hold the rest fixed, and return Z₀ at each step. Use to answer "how sensitive is Z₀ to εr / D / d?" or to size manufacturing tolerances.',
@@ -507,6 +542,40 @@ export function dispatchCableTool(name, input) {
           // Magic fields the FloatingAgent UI looks for to render an Apply button:
           _apply_preset: { N, P, d: d_mm, D: D_mm, PR, material },
           _section: 'braid',
+        };
+      }
+      case 'propose_z0_preset': {
+        const { label, mode = 'coax', D_mm, d_mm, er, rationale } = input;
+        if (!(D_mm > 0 && d_mm > 0 && er > 0)) throw new Error('D_mm, d_mm, er must be positive');
+        if (D_mm <= d_mm) throw new Error('D must be greater than d');
+        let z0;
+        if (mode === 'coax') z0 = (138 / Math.sqrt(er)) * Math.log10(D_mm / d_mm);
+        else {
+          const erEff = 0.4 + 0.55 * er;
+          z0 = (276 / Math.sqrt(erEff)) * Math.log10(2 * D_mm / d_mm);
+        }
+        return {
+          label,
+          predicted_z0_ohm: num(z0, 1),
+          mode,
+          inputs: { D_mm, d_mm, er },
+          rationale: rationale || undefined,
+          _apply_preset: { mode, D: D_mm, d: d_mm, er },
+          _section: 'calc',
+        };
+      }
+      case 'propose_pair_preset': {
+        const { label, lay_mm, pair_lays_mm, bundle_lay_mm, direction, tension_n, rationale } = input;
+        if (!label) throw new Error('label required');
+        if (lay_mm == null && (!pair_lays_mm || pair_lays_mm.length === 0)) {
+          throw new Error('Provide lay_mm (single value) or pair_lays_mm (array)');
+        }
+        return {
+          label,
+          inputs: { lay_mm, pair_lays_mm, bundle_lay_mm, direction, tension_n },
+          rationale: rationale || undefined,
+          _apply_preset: { lay_mm, pair_lays_mm, bundle_lay_mm, direction, tension_n },
+          _section: 'lay',
         };
       }
       case 'sensitivity_analysis': {

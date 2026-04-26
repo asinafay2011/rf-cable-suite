@@ -85,7 +85,11 @@ Proactive behavior:
 - When the user gives geometry numbers, automatically run \`calc_z0_coax\` and \`coax_per_unit_length\` rather than estimating from memory.
 - After a VNA Lab session (the user mentions Wire A / Wire B / pair skew results), offer \`vna_qc_report\` to generate a markdown QA report.
 - When the user asks "what dimensions for 50 Ω", run \`geometry_for_z0\` and \`sensitivity_analysis\`.
-- When the user asks for help fixing or improving braid coverage, give 2–3 named options (e.g. "Minimal change", "Best balance", "Overkill") and call \`propose_braid_preset\` ONCE PER OPTION. Each tool result becomes a one-click "Apply to Braid" button — the user does not need to type the values into sliders.
+- When the user asks for help fixing or improving any tab's parameters, give 2–3 named options ("Minimal change" / "Best balance" / "Overkill") and call the matching propose_*_preset tool ONCE PER OPTION. Each tool result becomes a one-click Apply button:
+   • Braid coverage → \`propose_braid_preset\` (applies to Braid tab or Process Sim stage ⑧)
+   • Z₀ / impedance → \`propose_z0_preset\` (applies to Z₀ Calc tab or Process Sim stage ③ insulation)
+   • Pair / lay design → \`propose_pair_preset\` (applies to Lay Design tab or Process Sim stages ④ / ⑦)
+   The user never needs to type values into sliders — clicking Apply pushes them in. When the user is on Process Sim, the apply lands inside the simulator without changing tabs.
 - If the user has a PDF datasheet, ask them to paste the relevant text or attach a screenshot — PDFs aren't directly readable.`;
 
 const CABLE_STARTERS = [
@@ -242,6 +246,8 @@ const CABLE_TOOL_TO_SECTION = {
   calc_z0_coax:          { id: 'calc',  label: 'Z₀ Calc' },
   calc_braid_coverage:   { id: 'braid', label: 'Braid' },
   propose_braid_preset:  { id: 'braid', label: 'Braid' },
+  propose_z0_preset:     { id: 'calc',  label: 'Z₀ Calc' },
+  propose_pair_preset:   { id: 'lay',   label: 'Lay Design' },
   compute_attenuation:   { id: 'atten', label: 'Atten' },
   pair_lay_skew:         { id: 'lay',   label: 'Lay Design' },
   lay_for_skew:          { id: 'lay',   label: 'Lay Design' },
@@ -1151,6 +1157,20 @@ function ImpedanceCalc() {
   const [d, setD] = useState(0.405); // conductor mm
   const [D, setD_outer] = useState(0.95); // outer / spacing
   const [er, setEr] = useState(2.05); // dielectric
+
+  // Listen for agent-applied Z₀ presets when on this tab
+  useEffect(() => {
+    const onApply = (e) => {
+      if (e.detail?.section !== 'calc') return;
+      const p = e.detail.params || {};
+      if (p.mode) setMode(p.mode);
+      if (p.D != null) setD_outer(p.D);
+      if (p.d != null) setD(p.d);
+      if (p.er != null) setEr(p.er);
+    };
+    window.addEventListener('cable-suite:apply-preset', onApply);
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply);
+  }, []);
 
   const z = useMemo(() => {
     if (mode === 'coax') return Math.round((138 / Math.sqrt(er)) * Math.log10(D / d));
@@ -4841,6 +4861,20 @@ function LayDesigner() {
   const [bundleLay, setBundleLay] = useState(75);
   const [pairOD, setPairOD] = useState(1.4);
   const [coreOD, setCoreOD] = useState(5.5);
+
+  // Listen for agent-applied lay presets
+  useEffect(() => {
+    const onApply = (e) => {
+      if (e.detail?.section !== 'lay') return;
+      const p = e.detail.params || {};
+      if (Array.isArray(p.pair_lays_mm) && p.pair_lays_mm.length === 4) setPairLays(p.pair_lays_mm);
+      else if (p.lay_mm != null) setPairLays([p.lay_mm, p.lay_mm + 2, p.lay_mm + 4, p.lay_mm + 6]);
+      if (p.bundle_lay_mm != null) setBundleLay(p.bundle_lay_mm);
+      setPresetName('agent');
+    };
+    window.addEventListener('cable-suite:apply-preset', onApply);
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply);
+  }, []);
 
   const presets = {
     cat5e: { lays: [13, 16, 19, 22], bundle: 90, pairOD: 1.5, coreOD: 5.0, name: 'Cat 5e' },
