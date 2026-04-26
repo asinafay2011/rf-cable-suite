@@ -9,6 +9,7 @@ import FloatingAgent from '../components/FloatingAgent.jsx';
 import { CABLE_TOOLS, dispatchCableTool } from '../components/cableTools.js';
 import VNATest from '../components/VNATest.jsx';
 import CustomCablesPanel from '../components/CustomCablesPanel.jsx';
+import ProcessSim from '../components/ProcessSim.jsx';
 import { useIsMobile } from '../components/useIsMobile.js';
 import { Menu, X as XIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -102,6 +103,7 @@ const SECTION_LABELS = {
   calc: 'Z₀ Calc',
   tdr: 'TDR Sim',
   vna: 'VNA Lab',
+  sim: 'Process Sim (manufacturing)',
   braid: 'Braid Coverage',
   atten: 'Attenuation Plot',
   next: 'NEXT Crosstalk',
@@ -119,6 +121,12 @@ const SECTION_STARTERS = {
     'What D/d ratio hits 50 Ω with PTFE εr=2.10?',
     'Compare solid PE vs foamed PE for 75 Ω coax',
     'Why is εr lower for foamed dielectrics?',
+  ],
+  sim: [
+    'Why does my Cat 6A NEXT come out below 50 dB?',
+    'What manufacturing knobs hurt yield the most?',
+    'Trade-off between line speed and εr drift in foamed dielectric',
+    'How do I hit USB4 skew (≤5 ps/m) with manufacturing realistic tolerances?',
   ],
   vna: [
     'How do I read a TDR plot — what looks like a defect?',
@@ -5770,6 +5778,7 @@ function TopNav({ active, onChange }) {
     { id: 'calc', label: 'Z₀ Calc', icon: Calculator },
     { id: 'tdr', label: 'TDR Sim', icon: Activity },
     { id: 'vna', label: 'VNA Lab', icon: FlaskConical },
+    { id: 'sim', label: 'Process Sim', icon: Wrench },
     { id: 'braid', label: 'Braid', icon: Shield },
     { id: 'atten', label: 'Atten', icon: Zap },
     { id: 'next', label: 'NEXT', icon: Radio },
@@ -6041,6 +6050,7 @@ export default function CableApp() {
         {section === 'calc' && <ImpedanceCalc />}
         {section === 'tdr' && <TDRSim />}
         {section === 'vna' && <VNATest />}
+        {section === 'sim' && <ProcessSim />}
         {section === 'braid' && <BraidCoverage />}
         {section === 'atten' && <AttenPlot />}
         {section === 'next' && <NEXTViz />}
