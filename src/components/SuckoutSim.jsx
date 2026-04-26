@@ -84,22 +84,41 @@ const PRESETS = {
       { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1 },
     ],
   },
+  spiral_8bobbin: {
+    label: '8-bobbin spiral · 10% gap (phase-stable)',
+    stack: [
+      { kind: 'ptfe', width: 6.0, overlap: -10, count: 4, bobbins: 8 },
+      { kind: 'ptfe', width: 6.0, overlap: -10, count: 4, bobbins: 8 },
+    ],
+  },
+  spiral_8bobbin_double: {
+    label: '8-bobbin × 2 layers · 13% gap + foil',
+    stack: [
+      { kind: 'ptfe', width: 5.0, overlap: -13, count: 1, bobbins: 8 },
+      { kind: 'ptfe', width: 5.0, overlap: -13, count: 1, bobbins: 8 },
+      { kind: 'foil', width: 10.0, overlap: 25, count: 1, bobbins: 1 },
+    ],
+  },
 }
 
 // ─────────── Helpers ───────────
 function newLayer(kind = 'ptfe') {
-  if (kind === 'braid') return { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1 }
-  return { kind, width: kind === 'foil' ? 10 : 12, overlap: 25, count: 1 }
+  if (kind === 'braid') return { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1, bobbins: 1 }
+  return { kind, width: kind === 'foil' ? 10 : 12, overlap: 25, count: 1, bobbins: 1 }
 }
 function pitchOf(layer, cableOD) {
+  const bobbins = Math.max(1, layer.bobbins || 1)
   if (layer.kind === 'braid') {
     return 25.4 / Math.max(2, layer.picksPerIn)
   }
-  const o = Math.max(0, Math.min(0.95, layer.overlap / 100))
+  // overlap can be NEGATIVE (gap). Allow range -50 .. 95 %
+  const o = Math.max(-0.5, Math.min(0.95, layer.overlap / 100))
   const circ = Math.PI * Math.max(0.5, cableOD)
   const sinG = Math.min(0.95, layer.width / circ)
   const cosG = Math.sqrt(1 - sinG * sinG)
-  return layer.width * (1 - o) * cosG
+  // Multi-bobbin: N tape heads spiral simultaneously, each offset by 1/N
+  // axially → effective seam-to-seam axial period reduces by 1/N.
+  return (layer.width * (1 - o) * cosG) / bobbins
 }
 function helixAngleOf(layer, cableOD) {
   if (layer.kind === 'braid') {
@@ -164,10 +183,20 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
     stack.forEach((layer, i) => {
       const ns = notchesOf(layer, cableOD, vf)
       ns.forEach((n) => {
-        // Depth contribution scales with count (coherent stacking) and 1/order
+        // Depth model:
+        //  • count = identical stacked wraps → linear depth scaling
+        //  • bobbins = N tape heads in one pass → each bobbin's contribution
+        //    is smaller (perturbation spreads), so depth reduces ~1/N
+        //  • gap (overlap < 0) = air gap between tape edges → DEEPER (clean
+        //    contrast). overlap > 0 = double-thick seam = also deep but
+        //    less than gap. We model as: 1 + |overlap|·0.5  with gap ×1.5
+        const o = (layer.overlap ?? 25) / 100
+        const gapFactor = o < 0 ? 1 + Math.abs(o) * 1.5 : 1 + o * 0.3
+        const bobFactor = 1 / Math.max(1, layer.bobbins || 1)
+        const baseDepth = (notchDepth * Math.max(1, layer.count) * gapFactor * bobFactor) / n.order
         list.push({
           ...n,
-          depth: (notchDepth * Math.max(1, layer.count)) / n.order,
+          depth: baseDepth,
           layerIdx: i,
           layerId: layer.id,
           layerKind: layer.kind,
@@ -466,13 +495,15 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
       {/* FORMULA + PRACTICE NOTES */}
       <div className="bg-[#12171a] border border-[#252e33] rounded p-4 space-y-2 text-[12px] leading-relaxed" style={{ color: C.textDim }}>
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: C.teal }}>Reference</div>
-        <div className="font-mono" style={{ color: C.amber }}>tape: P = W · (1 − overlap) · cos(γ)   where sin(γ) = W / (π · OD)</div>
+        <div className="font-mono" style={{ color: C.amber }}>tape: P = W · (1 − overlap) · cos(γ) / N<sub>bobbins</sub>   where sin(γ) = W / (π · OD)</div>
         <div className="font-mono" style={{ color: C.amber }}>braid: P = 25.4 / picks_per_inch</div>
         <div className="font-mono" style={{ color: C.amber }}>f<sub>n</sub> = n · c · VF / (2 · P)  ≈  n · 150 000 · VF / P<sub>mm</sub>  [MHz]</div>
         <div>
           • Each layer adds its OWN pitch-driven notch — they're independent contributions.
           <br />• N identical wraps stack the SAME notch ~N× deeper. <em>Worst case for engineering, best case for QC repeatability.</em>
           <br />• N wraps with mixed widths produce N (or fewer) DIFFERENT notches, each shallower than a single equivalent stack — the standard "spread the suckout" trick.
+          <br />• <span style={{ color: C.amber }}>Multi-bobbin spiral (8-bobbin etc.):</span> N tape heads spiral simultaneously, each offset axially by 1/N → effective seam period reduces by 1/N → notch frequency goes UP by ~N×. An 8-bobbin layup pushes the notch ~8× higher than a single bobbin with the same tape. This is the standard phase-stable / mil-spec coax trick to dodge low-GHz suckouts.
+          <br />• <span style={{ color: C.amber }}>Negative overlap (gap):</span> 10-13% gap leaves bare dielectric between tape edges, increasing the impedance contrast → notch DEEPER. Engineers use small gaps deliberately so the multi-bobbin pattern controls the placement, while the gap controls the depth (managed by shield underneath).
           <br />• Foil shield notches typically appear shallower than dielectric notches; braid shield notches even shallower (1-3 dB) but at 1/PR pitch.
         </div>
       </div>
@@ -678,17 +709,19 @@ function LayerRow({ layer, idx, cableOD, vf, color, units = 'mm', onUpdate, onRe
           </select>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
           {!isBraid && (
             <>
               <CompactSlider label="Width" value={layer.width} onChange={(v) => onUpdate({ width: v })} min={0.5} max={30} step={0.5} units={units} length />
-              <CompactSlider label="Overlap" value={layer.overlap} onChange={(v) => onUpdate({ overlap: v })} min={0} max={90} step={5} unit="%" />
+              <CompactSlider label={(layer.overlap ?? 0) < 0 ? 'Gap' : 'Overlap'} value={layer.overlap} onChange={(v) => onUpdate({ overlap: v })} min={-50} max={90} step={1} unit="%" />
+              <CompactSlider label="Bobbins" value={layer.bobbins ?? 1} onChange={(v) => onUpdate({ bobbins: Math.max(1, Math.round(v)) })} min={1} max={12} step={1} unit="heads" />
             </>
           )}
           {isBraid && (
             <>
               <CompactSlider label="Carriers" value={layer.carriers} onChange={(v) => onUpdate({ carriers: v })} min={8} max={48} step={2} unit="" />
               <CompactSlider label="Picks/in" value={layer.picksPerIn} onChange={(v) => onUpdate({ picksPerIn: v })} min={4} max={40} step={1} unit="PR" />
+              <CompactSlider label="Bobbins" value={layer.bobbins ?? 1} onChange={(v) => onUpdate({ bobbins: Math.max(1, Math.round(v)) })} min={1} max={12} step={1} unit="heads" />
             </>
           )}
           <CompactSlider label="× count" value={layer.count} onChange={(v) => onUpdate({ count: Math.max(1, v) })} min={1} max={20} step={1} unit="wraps" />
