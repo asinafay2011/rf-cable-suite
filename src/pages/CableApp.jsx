@@ -8,7 +8,6 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import FloatingAgent from '../components/FloatingAgent.jsx';
 import { CABLE_TOOLS, dispatchCableTool } from '../components/cableTools.js';
 import VNATest from '../components/VNATest.jsx';
-import PairSkew from '../components/PairSkew.jsx';
 import { parseTouchstone, returnLossDb, vswr, s11Summary } from '../components/touchstone.js';
 import { computeTDR, peakReflection } from '../components/fft.js';
 
@@ -5646,8 +5645,7 @@ function TopNav({ active, onChange }) {
     { id: 'm3', label: 'Bundle', icon: Box },
     { id: 'calc', label: 'Z₀ Calc', icon: Calculator },
     { id: 'tdr', label: 'TDR Sim', icon: Activity },
-    { id: 'vna', label: 'VNA Test', icon: FlaskConical },
-    { id: 'skew', label: 'Pair Skew', icon: Ruler },
+    { id: 'vna', label: 'VNA Lab', icon: FlaskConical },
     { id: 'braid', label: 'Braid', icon: Shield },
     { id: 'atten', label: 'Atten', icon: Zap },
     { id: 'next', label: 'NEXT', icon: Radio },
@@ -5854,7 +5852,6 @@ export default function CableApp() {
         {section === 'calc' && <ImpedanceCalc />}
         {section === 'tdr' && <TDRSim />}
         {section === 'vna' && <VNATest />}
-        {section === 'skew' && <PairSkew />}
         {section === 'braid' && <BraidCoverage />}
         {section === 'atten' && <AttenPlot />}
         {section === 'next' && <NEXTViz />}

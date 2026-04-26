@@ -1,9 +1,8 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react'
-import { Upload, X, FileText, AlertTriangle, CheckCircle2, Activity, Layers, Wand2 } from 'lucide-react'
+import React, { useState, useMemo, useRef } from 'react'
+import { Upload, X, FileText, AlertTriangle, CheckCircle2, Activity, Sparkles, GitCompare } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from 'recharts'
 import {
   parseTouchstone,
-  cAbs,
   returnLossDb,
   vswr,
   insertionLossDb,
@@ -13,56 +12,60 @@ import {
 import { computeTDR, peakReflection } from './fft.js'
 
 const C = {
-  bg: '#0a0d0f',
   bgCard: '#12171a',
   bgCardHi: '#171d20',
   border: '#252e33',
-  borderHi: '#384249',
   copper: '#c97b3f',
   copperBright: '#e89357',
   teal: '#5eead4',
   amber: '#fbbf24',
-  blue: '#7dd3fc',
   red: '#f87171',
   text: '#f0ebe2',
   textDim: '#a7b0b6',
   textMuted: '#6b7479',
 }
 
-// Generic pass/fail thresholds for installation QC of a single wire
 const DEFAULT_THRESHOLDS = {
-  rl_pass_db: 15,    // mean return loss should exceed (dB)
-  rl_fail_db: 10,    // worst-case return loss must exceed (dB)
-  vswr_pass: 1.5,    // peak VSWR
+  rl_pass_db: 15,
+  rl_fail_db: 10,
+  vswr_pass: 1.5,
   vswr_fail: 2.0,
-  reflection_pass: 0.10, // peak reflection coefficient amplitude (unitless)
+  reflection_pass: 0.10,
   reflection_fail: 0.20,
 }
 
+const PAIR_STANDARDS = [
+  { id: 'cat6a',   label: 'Cat 6A',         maxSkew_ps_per_m: 45 },
+  { id: 'cat8',    label: 'Cat 8',          maxSkew_ps_per_m: 25 },
+  { id: 'usb4',    label: 'USB4 / 25G+',    maxSkew_ps_per_m: 5 },
+  { id: 'mil1553', label: 'MIL-STD-1553B',  maxSkew_ps_per_m: 50 },
+]
+
 export default function VNATest() {
-  const [dut, setDut] = useState(null)        // { name, parsed }
-  const [reference, setReference] = useState(null)
-  const [vfPercent, setVfPercent] = useState(66) // velocity factor for TDR distance scaling
-  const [expectedLength, setExpectedLength] = useState(33) // cable length in current units (excludes end reflection)
-  const [gateStart, setGateStart] = useState(0.5) // distance — exclude near-connector reflection
-  const [gateEnd, setGateEnd] = useState(31)      // distance — exclude end termination
-  const [gateAuto, setGateAuto] = useState(true)  // when true, gate follows expectedLength
-  const [error, setError] = useState(null)
+  const [wireA, setWireA] = useState(null) // { name, parsed }
+  const [wireB, setWireB] = useState(null)
+  const [vfPercent, setVfPercent] = useState(66)
+  const [expectedLength, setExpectedLength] = useState(33)
+  const [gateStart, setGateStart] = useState(0.5)
+  const [gateEnd, setGateEnd] = useState(31)
+  const [gateAuto, setGateAuto] = useState(true)
+  const [units, setUnits] = useState('ft')
   const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS)
-  const [activePlot, setActivePlot] = useState('s11') // s11 | vswr | tdr | s21 | gd
-  const [units, setUnits] = useState('ft')      // ft | m
+  const [view, setView] = useState('a') // a | b | compare | skew
+  const [error, setError] = useState(null)
 
   const handleFile = async (file, slot) => {
     setError(null)
     if (!file) return
     try {
       const text = await file.text()
-      const portsHint = file.name.toLowerCase().endsWith('.s2p') ? 2 : (file.name.toLowerCase().endsWith('.s1p') ? 1 : undefined)
+      const lower = file.name.toLowerCase()
+      const portsHint = lower.endsWith('.s2p') ? 2 : lower.endsWith('.s1p') ? 1 : undefined
       const parsed = parseTouchstone(text, { ports: portsHint })
       const entry = { name: file.name, parsed }
-      if (slot === 'dut') {
-        setDut(entry)
-        // Auto-detect cable length from end reflection (largest peak in TDR)
+      if (slot === 'a') {
+        setWireA(entry)
+        // Auto-detect cable length on Wire A load
         try {
           const tdr = computeTDR(parsed.s.map((b) => b.s11), parsed.freqs, vfPercent / 100, units === 'ft')
           const endPeak = peakReflection(tdr.distances, tdr.rho, units === 'ft' ? 1 : 0.3, Infinity)
@@ -72,41 +75,78 @@ export default function VNATest() {
             if (gateAuto) setGateEnd(parseFloat((L * 0.95).toFixed(1)))
           }
         } catch {}
-      } else setReference(entry)
+      } else {
+        setWireB(entry)
+      }
     } catch (err) {
       setError(`${file.name}: ${err.message}`)
     }
   }
 
+  const loadDemo = () => {
+    // Wire A: clean 33ft, VF 66.5%
+    const a = synthTouchstone({
+      name: 'demo_wireA_clean.s1p',
+      length_ft: 33,
+      vf: 0.665,
+      defects: [], // no in-cable defects
+    })
+    // Wire B: 33ft with kink at 12ft, VF 65.0% (1.5pp lower than A)
+    const b = synthTouchstone({
+      name: 'demo_wireB_defect.s1p',
+      length_ft: 33,
+      vf: 0.650,
+      defects: [{ at_ft: 12, rho: 0.12 }],
+    })
+    setWireA(a)
+    setWireB(b)
+    setExpectedLength(33)
+    if (gateAuto) setGateEnd(31)
+    setError(null)
+  }
+
+  const clearAll = () => {
+    setWireA(null); setWireB(null); setError(null)
+  }
+
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <div className="font-mono text-[11px] tracking-[0.2em] text-[#c97b3f] uppercase">◆ VNA Test · Single-wire QC</div>
+        <div className="font-mono text-[11px] tracking-[0.2em] text-[#c97b3f] uppercase">◆ VNA Lab · Single-wire QC + Pair prediction</div>
         <h1 className="text-2xl text-[#f0ebe2] font-light tracking-tight" style={{ fontFamily: '"Bricolage Grotesque", sans-serif' }}>
           Touchstone analysis (.s1p / .s2p)
         </h1>
-        <p className="text-[13px] text-[#a7b0b6] max-w-2xl leading-relaxed">
-          Upload a measurement from your VNA (Anritsu ShockLine / VectorStar export → Touchstone). The DUT is the
-          wire under test; an optional reference (golden sample) lets you spot installation damage as a delta.
-          Distance to defect is computed from S11 via inverse FFT — set the velocity factor to match your dielectric.
+        <p className="text-[13px] text-[#a7b0b6] max-w-3xl leading-relaxed">
+          Upload one wire to QC it (S11, VSWR, TDR with defect detection). Upload a second wire to also predict
+          intra-pair skew when the two are twisted into a differential pair. Single tab covers the full workflow:
+          measure → QC each → predict pair quality before twisting.
         </p>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button
+            onClick={loadDemo}
+            className="px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider rounded border bg-transparent flex items-center gap-1.5 hover:bg-[#1f1610] transition-colors"
+            style={{ color: C.amber, borderColor: C.amber + '60' }}
+          >
+            <Sparkles size={12} />
+            Load demo (clean Wire A + defective Wire B, 1.5 pp VF mismatch)
+          </button>
+          {(wireA || wireB) && (
+            <button
+              onClick={clearAll}
+              className="px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider rounded border bg-transparent text-[#6b7479] hover:text-[#f87171] hover:border-[#7a2020]"
+              style={{ borderColor: C.border }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="grid md:grid-cols-2 gap-3">
-        <FileSlot
-          label="DUT (Device Under Test)"
-          accent={C.copper}
-          entry={dut}
-          onFile={(f) => handleFile(f, 'dut')}
-          onClear={() => setDut(null)}
-        />
-        <FileSlot
-          label="Reference (optional, golden sample)"
-          accent={C.teal}
-          entry={reference}
-          onFile={(f) => handleFile(f, 'ref')}
-          onClear={() => setReference(null)}
-        />
+        <FileSlot label="Wire A" sub="(DUT — primary measurement)" accent={C.copper} entry={wireA}
+          onFile={(f) => handleFile(f, 'a')} onClear={() => setWireA(null)} />
+        <FileSlot label="Wire B" sub="(pair partner — for comparison + skew prediction)" accent={C.teal} entry={wireB}
+          onFile={(f) => handleFile(f, 'b')} onClear={() => setWireB(null)} />
       </div>
 
       {error && (
@@ -115,53 +155,50 @@ export default function VNATest() {
         </div>
       )}
 
-      {dut && (
-        <>
-          <ControlBar
-            vfPercent={vfPercent}
-            setVfPercent={setVfPercent}
-            expectedLength={expectedLength}
-            setExpectedLength={(v) => {
-              setExpectedLength(v)
-              if (gateAuto) setGateEnd(parseFloat((v * 0.95).toFixed(1)))
-            }}
-            gateStart={gateStart}
-            setGateStart={(v) => { setGateStart(v); setGateAuto(false) }}
-            gateEnd={gateEnd}
-            setGateEnd={(v) => { setGateEnd(v); setGateAuto(false) }}
-            gateAuto={gateAuto}
-            setGateAuto={setGateAuto}
-            units={units}
-            setUnits={setUnits}
-            thresholds={thresholds}
-            setThresholds={setThresholds}
-            ports={dut.parsed.ports}
-          />
-
-          <Verdict dut={dut.parsed} thresholds={thresholds} vfPercent={vfPercent} units={units} gateStart={gateStart} gateEnd={gateEnd} />
-
-          <PlotSelector
-            ports={dut.parsed.ports}
-            active={activePlot}
-            setActive={setActivePlot}
-          />
-
-          <div className="bg-[#12171a] border border-[#252e33] rounded p-4">
-            {activePlot === 's11' && <S11Plot dut={dut.parsed} reference={reference?.parsed} thresholds={thresholds} />}
-            {activePlot === 'vswr' && <VSWRPlot dut={dut.parsed} reference={reference?.parsed} thresholds={thresholds} />}
-            {activePlot === 'tdr' && <TDRPlot dut={dut.parsed} reference={reference?.parsed} vfPercent={vfPercent} units={units} thresholds={thresholds} expectedLength={expectedLength} gateStart={gateStart} gateEnd={gateEnd} />}
-            {activePlot === 's21' && dut.parsed.ports === 2 && <S21Plot dut={dut.parsed} reference={reference?.parsed} />}
-            {activePlot === 'gd' && dut.parsed.ports === 2 && <GroupDelayPlot dut={dut.parsed} reference={reference?.parsed} />}
-          </div>
-        </>
+      {(wireA || wireB) && (
+        <ControlBar
+          vfPercent={vfPercent} setVfPercent={setVfPercent}
+          expectedLength={expectedLength}
+          setExpectedLength={(v) => { setExpectedLength(v); if (gateAuto) setGateEnd(parseFloat((v * 0.95).toFixed(1))) }}
+          gateStart={gateStart} setGateStart={(v) => { setGateStart(v); setGateAuto(false) }}
+          gateEnd={gateEnd} setGateEnd={(v) => { setGateEnd(v); setGateAuto(false) }}
+          gateAuto={gateAuto} setGateAuto={setGateAuto}
+          units={units} setUnits={setUnits}
+          thresholds={thresholds} setThresholds={setThresholds}
+        />
       )}
 
-      {!dut && (
+      {(wireA || wireB) && (
+        <ViewTabs
+          view={view} setView={setView}
+          hasA={!!wireA} hasB={!!wireB}
+        />
+      )}
+
+      {view === 'a' && wireA && (
+        <SingleWireView wire={wireA} accent={C.copper}
+          thresholds={thresholds} vfPercent={vfPercent} units={units}
+          gateStart={gateStart} gateEnd={gateEnd} expectedLength={expectedLength} />
+      )}
+      {view === 'b' && wireB && (
+        <SingleWireView wire={wireB} accent={C.teal}
+          thresholds={thresholds} vfPercent={vfPercent} units={units}
+          gateStart={gateStart} gateEnd={gateEnd} expectedLength={expectedLength} />
+      )}
+      {view === 'compare' && wireA && wireB && (
+        <CompareView wireA={wireA} wireB={wireB}
+          vfPercent={vfPercent} units={units} expectedLength={expectedLength}
+          gateStart={gateStart} gateEnd={gateEnd} thresholds={thresholds} />
+      )}
+      {view === 'skew' && wireA && wireB && (
+        <PairSkewView wireA={wireA} wireB={wireB} vfPercent={vfPercent} units={units} />
+      )}
+
+      {!wireA && !wireB && (
         <div className="px-4 py-12 text-center bg-[#12171a] border border-dashed border-[#252e33] rounded">
           <FileText size={28} className="mx-auto text-[#384249] mb-3" />
           <div className="text-[13px] text-[#6b7479]">
-            Upload a Touchstone file to start. <span className="text-[#a7b0b6]">.s1p</span> for 1-port S11 measurement,{' '}
-            <span className="text-[#a7b0b6]">.s2p</span> for 2-port (S11/S21/S12/S22).
+            Upload .s1p or .s2p files, or click <span className="text-[#fbbf24]">Load demo</span> above to see the full flow.
           </div>
         </div>
       )}
@@ -169,16 +206,40 @@ export default function VNATest() {
   )
 }
 
-function FileSlot({ label, accent, entry, onFile, onClear }) {
+// ── Synthesize a Touchstone for the demo button ─────────
+function synthTouchstone({ name, length_ft, vf, defects = [] }) {
+  const fStart = 1e6, fStop = 3e9, n = 1601, c = 299792458
+  const tauEnd = (2 * (length_ft / 3.28084)) / (vf * c)
+  const lines = [`! Demo synthetic — VF=${(vf * 100).toFixed(1)}%, length=${length_ft} ft`, '# MHz S MA R 50']
+  const sBlocks = []
+  const freqs = []
+  for (let i = 0; i < n; i++) {
+    const f = fStart + ((fStop - fStart) * i) / (n - 1)
+    const w = 2 * Math.PI * f
+    let re = 0.6 * Math.cos(-w * tauEnd)
+    let im = 0.6 * Math.sin(-w * tauEnd)
+    for (const d of defects) {
+      const tau = (2 * (d.at_ft / 3.28084)) / (vf * c)
+      re += d.rho * Math.cos(-w * tau)
+      im += d.rho * Math.sin(-w * tau)
+    }
+    const mag = Math.sqrt(re * re + im * im)
+    const ang = Math.atan2(im, re) * 180 / Math.PI
+    lines.push(`${(f / 1e6).toFixed(6)}  ${mag.toFixed(6)}  ${ang.toFixed(4)}`)
+    sBlocks.push({ s11: { re, im } })
+    freqs.push(f)
+  }
+  return {
+    name,
+    parsed: { format: 'MA', freqs, refZ: 50, ports: 1, s: sBlocks },
+  }
+}
+
+// ── File slot ───────────────────────────────────────────
+function FileSlot({ label, sub, accent, entry, onFile, onClear }) {
   const ref = useRef(null)
   const [dragOver, setDragOver] = useState(false)
-
-  const onDrop = (e) => {
-    e.preventDefault(); setDragOver(false)
-    const file = e.dataTransfer.files?.[0]
-    if (file) onFile(file)
-  }
-
+  const onDrop = (e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) onFile(f) }
   return (
     <div
       onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
@@ -188,8 +249,9 @@ function FileSlot({ label, accent, entry, onFile, onClear }) {
       style={{ borderColor: dragOver ? accent : C.border }}
     >
       <div className="flex items-center justify-between mb-2">
-        <div className="font-mono text-[10px] uppercase tracking-wider" style={{ color: accent }}>
-          {label}
+        <div className="font-mono text-[10px] uppercase tracking-wider flex items-baseline gap-2" style={{ color: accent }}>
+          <span>{label}</span>
+          {sub && <span className="text-[#6b7479] normal-case tracking-normal text-[10px]">{sub}</span>}
         </div>
         {entry && (
           <button onClick={onClear} className="p-1 text-[#6b7479] hover:text-[#f87171] rounded" title="Remove">
@@ -197,17 +259,11 @@ function FileSlot({ label, accent, entry, onFile, onClear }) {
           </button>
         )}
       </div>
-      <input
-        ref={ref}
-        type="file"
-        accept=".s1p,.s2p,.s3p,.s4p,.txt"
-        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f) }}
-        className="hidden"
-      />
+      <input ref={ref} type="file" accept=".s1p,.s2p,.s3p,.s4p,.txt" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f) }} className="hidden" />
       {entry ? (
         <div className="text-[12px] text-[#f0ebe2] space-y-1">
           <div className="font-mono truncate" title={entry.name}>{entry.name}</div>
-          <div className="text-[11px] text-[#6b7479] flex items-center gap-3">
+          <div className="text-[11px] text-[#6b7479] flex items-center gap-3 flex-wrap">
             <span>{entry.parsed.ports}-port</span>
             <span>{entry.parsed.s.length} pts</span>
             <span>{(entry.parsed.freqs[0] / 1e6).toFixed(1)} – {(entry.parsed.freqs[entry.parsed.freqs.length - 1] / 1e9).toFixed(2)} GHz</span>
@@ -215,10 +271,7 @@ function FileSlot({ label, accent, entry, onFile, onClear }) {
           </div>
         </div>
       ) : (
-        <button
-          onClick={() => ref.current?.click()}
-          className="w-full py-4 flex flex-col items-center justify-center gap-1 text-[12px] text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#171d20] rounded border border-dashed border-[#252e33]"
-        >
+        <button onClick={() => ref.current?.click()} className="w-full py-4 flex flex-col items-center justify-center gap-1 text-[12px] text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#171d20] rounded border border-dashed border-[#252e33]">
           <Upload size={18} />
           <span>Click or drop file</span>
         </button>
@@ -227,18 +280,13 @@ function FileSlot({ label, accent, entry, onFile, onClear }) {
   )
 }
 
-function ControlBar({ vfPercent, setVfPercent, expectedLength, setExpectedLength, gateStart, setGateStart, gateEnd, setGateEnd, gateAuto, setGateAuto, units, setUnits, thresholds, setThresholds, ports }) {
+// ── Control bar ────────────────────────────────────────
+function ControlBar({ vfPercent, setVfPercent, expectedLength, setExpectedLength, gateStart, setGateStart, gateEnd, setGateEnd, gateAuto, setGateAuto, units, setUnits, thresholds, setThresholds }) {
   return (
     <div className="bg-[#12171a] border border-[#252e33] rounded p-3 flex flex-wrap items-center gap-x-6 gap-y-3 text-[12px]">
       <Field label="Velocity Factor (VF)">
         <div className="flex items-center gap-2">
-          <input
-            type="range"
-            min="40" max="100" step="1"
-            value={vfPercent}
-            onChange={(e) => setVfPercent(parseInt(e.target.value, 10))}
-            className="w-32"
-          />
+          <input type="range" min="40" max="100" step="1" value={vfPercent} onChange={(e) => setVfPercent(parseInt(e.target.value, 10))} className="w-32" />
           <span className="font-mono text-[#fbbf24] w-12">{vfPercent}%</span>
         </div>
       </Field>
@@ -250,29 +298,13 @@ function ControlBar({ vfPercent, setVfPercent, expectedLength, setExpectedLength
           <NumIn value={gateStart} step="0.5" onChange={setGateStart} />
           <span className="text-[#6b7479]">–</span>
           <NumIn value={gateEnd} step="0.5" onChange={setGateEnd} />
-          <button
-            onClick={() => setGateAuto((v) => !v)}
-            className={`ml-1 px-1.5 py-0.5 text-[9px] uppercase tracking-wider rounded font-mono ${
-              gateAuto ? 'bg-[#2a1d14] text-[#fbbf24] border border-[#3d2a1c]' : 'text-[#6b7479] border border-[#252e33] hover:text-[#fbbf24]'
-            }`}
-            title="Gate auto-tracks expected length × 0.95"
-          >
-            auto
-          </button>
+          <button onClick={() => setGateAuto((v) => !v)} className={`ml-1 px-1.5 py-0.5 text-[9px] uppercase tracking-wider rounded font-mono ${gateAuto ? 'bg-[#2a1d14] text-[#fbbf24] border border-[#3d2a1c]' : 'text-[#6b7479] border border-[#252e33] hover:text-[#fbbf24]'}`} title="Gate auto-tracks expected length × 0.95">auto</button>
         </div>
       </Field>
       <Field label="Distance unit">
         <div className="flex gap-1">
           {['ft', 'm'].map((u) => (
-            <button
-              key={u}
-              onClick={() => setUnits(u)}
-              className={`px-2 py-1 rounded font-mono text-[11px] uppercase ${
-                units === u ? 'bg-[#2a1d14] text-[#fbbf24] border border-[#3d2a1c]' : 'text-[#6b7479] hover:text-[#fbbf24]'
-              }`}
-            >
-              {u}
-            </button>
+            <button key={u} onClick={() => setUnits(u)} className={`px-2 py-1 rounded font-mono text-[11px] uppercase ${units === u ? 'bg-[#2a1d14] text-[#fbbf24] border border-[#3d2a1c]' : 'text-[#6b7479] hover:text-[#fbbf24]'}`}>{u}</button>
           ))}
         </div>
       </Field>
@@ -309,83 +341,95 @@ function Field({ label, children }) {
     </div>
   )
 }
-
-function NumIn({ value, onChange, step = '1' }) {
+function NumIn({ value, onChange, step = '1', placeholder }) {
   return (
-    <input
-      type="number"
-      step={step}
-      value={value}
+    <input type="number" step={step} value={value ?? ''} placeholder={placeholder}
       onChange={(e) => onChange(parseFloat(e.target.value))}
-      className="w-16 bg-[#0a0d0f] border border-[#252e33] rounded px-1.5 py-0.5 text-[11px] font-mono text-[#fbbf24] focus:outline-none focus:border-[#c97b3f]"
-    />
+      className="w-16 bg-[#0a0d0f] border border-[#252e33] rounded px-1.5 py-0.5 text-[11px] font-mono text-[#fbbf24] focus:outline-none focus:border-[#c97b3f]" />
   )
 }
 
-function Verdict({ dut, thresholds, vfPercent, units, gateStart, gateEnd }) {
-  const summary = useMemo(() => s11Summary(dut.s, dut.freqs), [dut])
-  const tdr = useMemo(
-    () => computeTDR(dut.s.map((b) => b.s11), dut.freqs, vfPercent / 100, units === 'ft'),
-    [dut, vfPercent, units],
+// ── View sub-tabs ───────────────────────────────────────
+function ViewTabs({ view, setView, hasA, hasB }) {
+  const tabs = [
+    { id: 'a',       label: 'Wire A QC',     enabled: hasA, icon: Activity },
+    { id: 'b',       label: 'Wire B QC',     enabled: hasB, icon: Activity },
+    { id: 'compare', label: 'Pair Compare',  enabled: hasA && hasB, icon: GitCompare },
+    { id: 'skew',    label: 'Pair Skew',     enabled: hasA && hasB, icon: GitCompare },
+  ]
+  return (
+    <div className="flex flex-wrap gap-1 border-b border-[#252e33] pb-1">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          disabled={!t.enabled}
+          onClick={() => setView(t.id)}
+          className={`px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider rounded-sm flex items-center gap-1.5 transition-colors ${
+            !t.enabled ? 'text-[#384249] cursor-not-allowed'
+            : view === t.id ? 'bg-[#2a1d14] text-[#fbbf24] border border-[#3d2a1c]'
+            : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610] border border-transparent'
+          }`}
+        >
+          <t.icon size={11} />
+          {t.label}
+        </button>
+      ))}
+    </div>
   )
-  // Use the time gate for peak detection
-  const peak = useMemo(
-    () => peakReflection(tdr.distances, tdr.rho, gateStart, gateEnd),
-    [tdr, gateStart, gateEnd],
-  )
-  const peakVSWR = useMemo(() => {
-    let max = 0
-    for (const b of dut.s) max = Math.max(max, vswr(b.s11))
-    return max
-  }, [dut])
+}
 
-  // Pass/fail logic
+// ── Single-wire view (Verdict + plot tabs for one wire) ─
+function SingleWireView({ wire, accent, thresholds, vfPercent, units, gateStart, gateEnd, expectedLength }) {
+  const [plot, setPlot] = useState('s11')
+  return (
+    <>
+      <Verdict wire={wire} thresholds={thresholds} vfPercent={vfPercent} units={units} gateStart={gateStart} gateEnd={gateEnd} accent={accent} />
+      <PlotSelector ports={wire.parsed.ports} active={plot} setActive={setPlot} />
+      <div className="bg-[#12171a] border border-[#252e33] rounded p-4">
+        {plot === 's11' && <S11Plot wire={wire} thresholds={thresholds} accent={accent} />}
+        {plot === 'vswr' && <VSWRPlot wire={wire} thresholds={thresholds} accent={accent} />}
+        {plot === 'tdr' && <TDRPlot wire={wire} vfPercent={vfPercent} units={units} thresholds={thresholds} expectedLength={expectedLength} gateStart={gateStart} gateEnd={gateEnd} accent={accent} />}
+        {plot === 's21' && wire.parsed.ports === 2 && <S21Plot wire={wire} accent={accent} />}
+        {plot === 'gd' && wire.parsed.ports === 2 && <GroupDelayPlot wire={wire} accent={accent} />}
+      </div>
+    </>
+  )
+}
+
+function Verdict({ wire, thresholds, vfPercent, units, gateStart, gateEnd, accent }) {
+  const summary = useMemo(() => s11Summary(wire.parsed.s, wire.parsed.freqs), [wire])
+  const tdr = useMemo(() => computeTDR(wire.parsed.s.map((b) => b.s11), wire.parsed.freqs, vfPercent / 100, units === 'ft'), [wire, vfPercent, units])
+  const peak = useMemo(() => peakReflection(tdr.distances, tdr.rho, gateStart, gateEnd), [tdr, gateStart, gateEnd])
+  const peakVSWR = useMemo(() => { let max = 0; for (const b of wire.parsed.s) max = Math.max(max, vswr(b.s11)); return max }, [wire])
+
   const checks = []
-  // Mean RL
-  if (summary.meanRL >= thresholds.rl_pass_db) {
-    checks.push({ ok: true, msg: `Mean RL ${summary.meanRL.toFixed(1)} dB ≥ ${thresholds.rl_pass_db} dB` })
-  } else if (summary.meanRL < thresholds.rl_fail_db) {
-    checks.push({ ok: false, msg: `Mean RL ${summary.meanRL.toFixed(1)} dB below fail threshold ${thresholds.rl_fail_db} dB` })
-  } else {
-    checks.push({ ok: 'warn', msg: `Mean RL ${summary.meanRL.toFixed(1)} dB — marginal (between ${thresholds.rl_fail_db} and ${thresholds.rl_pass_db} dB)` })
-  }
-  // VSWR
-  if (peakVSWR <= thresholds.vswr_pass) {
-    checks.push({ ok: true, msg: `Peak VSWR ${peakVSWR.toFixed(2)} ≤ ${thresholds.vswr_pass}` })
-  } else if (peakVSWR > thresholds.vswr_fail) {
-    checks.push({ ok: false, msg: `Peak VSWR ${peakVSWR.toFixed(2)} above fail threshold ${thresholds.vswr_fail}` })
-  } else {
-    checks.push({ ok: 'warn', msg: `Peak VSWR ${peakVSWR.toFixed(2)} — marginal` })
-  }
-  // Peak reflection
+  if (summary.meanRL >= thresholds.rl_pass_db) checks.push({ ok: true, msg: `Mean RL ${summary.meanRL.toFixed(1)} dB ≥ ${thresholds.rl_pass_db} dB` })
+  else if (summary.meanRL < thresholds.rl_fail_db) checks.push({ ok: false, msg: `Mean RL ${summary.meanRL.toFixed(1)} dB below fail threshold ${thresholds.rl_fail_db} dB` })
+  else checks.push({ ok: 'warn', msg: `Mean RL ${summary.meanRL.toFixed(1)} dB — marginal` })
+  if (peakVSWR <= thresholds.vswr_pass) checks.push({ ok: true, msg: `Peak VSWR ${peakVSWR.toFixed(2)} ≤ ${thresholds.vswr_pass}` })
+  else if (peakVSWR > thresholds.vswr_fail) checks.push({ ok: false, msg: `Peak VSWR ${peakVSWR.toFixed(2)} above fail threshold ${thresholds.vswr_fail}` })
+  else checks.push({ ok: 'warn', msg: `Peak VSWR ${peakVSWR.toFixed(2)} — marginal` })
   if (peak) {
     const ar = Math.abs(peak.rho)
-    if (ar <= thresholds.reflection_pass) {
-      checks.push({ ok: true, msg: `Largest TDR reflection |ρ|=${ar.toFixed(3)} at ${peak.distance.toFixed(2)} ${units} (clean)` })
-    } else if (ar > thresholds.reflection_fail) {
-      checks.push({ ok: false, msg: `TDR reflection |ρ|=${ar.toFixed(3)} at ${peak.distance.toFixed(2)} ${units} — likely defect (kink, crush, splice)` })
-    } else {
-      checks.push({ ok: 'warn', msg: `TDR reflection |ρ|=${ar.toFixed(3)} at ${peak.distance.toFixed(2)} ${units} — marginal` })
-    }
+    if (ar <= thresholds.reflection_pass) checks.push({ ok: true, msg: `Largest in-cable reflection |ρ|=${ar.toFixed(3)} at ${peak.distance.toFixed(2)} ${units} (clean)` })
+    else if (ar > thresholds.reflection_fail) checks.push({ ok: false, msg: `In-cable reflection |ρ|=${ar.toFixed(3)} at ${peak.distance.toFixed(2)} ${units} — likely defect (kink, crush, splice)` })
+    else checks.push({ ok: 'warn', msg: `In-cable reflection |ρ|=${ar.toFixed(3)} at ${peak.distance.toFixed(2)} ${units} — marginal` })
   }
-
   const overall = checks.some((c) => c.ok === false) ? 'FAIL' : checks.some((c) => c.ok === 'warn') ? 'MARGINAL' : 'PASS'
   const overallColor = overall === 'FAIL' ? C.red : overall === 'MARGINAL' ? C.amber : C.teal
 
   return (
     <div className="bg-[#12171a] border rounded p-4" style={{ borderColor: overallColor + '60' }}>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479]">Verdict</div>
-          <div className="text-2xl font-light tracking-tight mt-0.5" style={{ color: overallColor, fontFamily: '"Bricolage Grotesque", sans-serif' }}>
-            {overall}
-          </div>
+          <div className="font-mono text-[10px] uppercase tracking-wider" style={{ color: accent }}>{wire.name}</div>
+          <div className="text-2xl font-light tracking-tight mt-0.5" style={{ color: overallColor, fontFamily: '"Bricolage Grotesque", sans-serif' }}>{overall}</div>
         </div>
         <div className="text-right text-[11px] font-mono text-[#a7b0b6] space-y-0.5">
           <div>Worst RL: <span className="text-[#fbbf24]">{summary.worstRLDb.toFixed(1)} dB</span> @ {(summary.worstFreq / 1e6).toFixed(0)} MHz</div>
           <div>Mean RL: <span className="text-[#fbbf24]">{summary.meanRL.toFixed(1)} dB</span></div>
           <div>Peak VSWR: <span className="text-[#fbbf24]">{peakVSWR.toFixed(2)}</span></div>
-          {peak && <div>TDR peak: <span className="text-[#fbbf24]">|ρ|={Math.abs(peak.rho).toFixed(3)}</span> @ {peak.distance.toFixed(2)} {units}</div>}
+          {peak && <div>In-cable peak: <span className="text-[#fbbf24]">|ρ|={Math.abs(peak.rho).toFixed(3)}</span> @ {peak.distance.toFixed(2)} {units}</div>}
         </div>
       </div>
       <ul className="space-y-1 text-[12px]">
@@ -404,182 +448,252 @@ function Verdict({ dut, thresholds, vfPercent, units, gateStart, gateEnd }) {
 
 function PlotSelector({ ports, active, setActive }) {
   const tabs = [
-    { id: 's11', label: 'S11 (Return Loss)' },
+    { id: 's11', label: 'S11 (RL)' },
     { id: 'vswr', label: 'VSWR' },
     { id: 'tdr', label: 'TDR' },
-    ...(ports === 2 ? [
-      { id: 's21', label: 'S21 (IL)' },
-      { id: 'gd', label: 'Group Delay' },
-    ] : []),
+    ...(ports === 2 ? [{ id: 's21', label: 'S21 (IL)' }, { id: 'gd', label: 'Group Delay' }] : []),
   ]
   return (
     <div className="flex flex-wrap gap-1">
       {tabs.map((t) => (
-        <button
-          key={t.id}
-          onClick={() => setActive(t.id)}
+        <button key={t.id} onClick={() => setActive(t.id)}
           className={`px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider rounded-sm transition-colors ${
-            active === t.id
-              ? 'bg-[#2a1d14] text-[#fbbf24] border border-[#3d2a1c]'
-              : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610] border border-transparent'
-          }`}
-        >
-          {t.label}
-        </button>
+            active === t.id ? 'bg-[#2a1d14] text-[#fbbf24] border border-[#3d2a1c]' : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610] border border-transparent'
+          }`}>{t.label}</button>
       ))}
     </div>
   )
 }
 
-// ── Plots ───────────────────────────────────────────────
-
-function freqAxisData(parsed, mapper) {
-  return parsed.freqs.map((f, i) => ({ f_mhz: f / 1e6, ...mapper(parsed.s[i], i) }))
-}
-
-function S11Plot({ dut, reference, thresholds }) {
-  const data = useMemo(() => {
-    const dutData = freqAxisData(dut, (b) => ({ dut: returnLossDb(b.s11) }))
-    if (!reference) return dutData
-    const refData = freqAxisData(reference, (b) => ({ reference: returnLossDb(b.s11) }))
-    // Merge by frequency (assume same axis)
-    return dutData.map((d, i) => ({ ...d, reference: refData[i]?.reference }))
-  }, [dut, reference])
-
+// ── Plots (single wire) ─────────────────────────────────
+function S11Plot({ wire, thresholds, accent }) {
+  const data = useMemo(() => wire.parsed.freqs.map((f, i) => ({ f_mhz: f / 1e6, rl: returnLossDb(wire.parsed.s[i].s11) })), [wire])
   return (
     <ChartShell title="Return Loss vs Frequency" yLabel="RL (dB)" data={data} xKey="f_mhz" xUnit="MHz">
       <ReferenceLine y={thresholds.rl_pass_db} stroke={C.teal} strokeDasharray="3 3" label={{ value: 'pass', fill: C.teal, fontSize: 10, position: 'right' }} />
       <ReferenceLine y={thresholds.rl_fail_db} stroke={C.red} strokeDasharray="3 3" label={{ value: 'fail', fill: C.red, fontSize: 10, position: 'right' }} />
-      {reference && <Line type="monotone" dataKey="reference" stroke={C.teal} strokeWidth={1.5} dot={false} />}
-      <Line type="monotone" dataKey="dut" stroke={C.copper} strokeWidth={2} dot={false} />
+      <Line type="monotone" dataKey="rl" stroke={accent} strokeWidth={2} dot={false} />
     </ChartShell>
   )
 }
-
-function VSWRPlot({ dut, reference, thresholds }) {
-  const data = useMemo(() => {
-    const dutData = freqAxisData(dut, (b) => ({ dut: vswr(b.s11) }))
-    if (!reference) return dutData
-    const refData = freqAxisData(reference, (b) => ({ reference: vswr(b.s11) }))
-    return dutData.map((d, i) => ({ ...d, reference: refData[i]?.reference }))
-  }, [dut, reference])
-
+function VSWRPlot({ wire, thresholds, accent }) {
+  const data = useMemo(() => wire.parsed.freqs.map((f, i) => ({ f_mhz: f / 1e6, vswr: vswr(wire.parsed.s[i].s11) })), [wire])
   return (
     <ChartShell title="VSWR vs Frequency" yLabel="VSWR" data={data} xKey="f_mhz" xUnit="MHz" yDomain={[1, 'auto']}>
       <ReferenceLine y={thresholds.vswr_pass} stroke={C.teal} strokeDasharray="3 3" label={{ value: 'pass', fill: C.teal, fontSize: 10, position: 'right' }} />
       <ReferenceLine y={thresholds.vswr_fail} stroke={C.red} strokeDasharray="3 3" label={{ value: 'fail', fill: C.red, fontSize: 10, position: 'right' }} />
-      {reference && <Line type="monotone" dataKey="reference" stroke={C.teal} strokeWidth={1.5} dot={false} />}
-      <Line type="monotone" dataKey="dut" stroke={C.copper} strokeWidth={2} dot={false} />
+      <Line type="monotone" dataKey="vswr" stroke={accent} strokeWidth={2} dot={false} />
     </ChartShell>
   )
 }
-
-function TDRPlot({ dut, reference, vfPercent, units, thresholds, expectedLength, gateStart, gateEnd }) {
-  const dutTDR = useMemo(
-    () => computeTDR(dut.s.map((b) => b.s11), dut.freqs, vfPercent / 100, units === 'ft'),
-    [dut, vfPercent, units],
-  )
-  const refTDR = useMemo(
-    () => reference ? computeTDR(reference.s.map((b) => b.s11), reference.freqs, vfPercent / 100, units === 'ft') : null,
-    [reference, vfPercent, units],
-  )
+function TDRPlot({ wire, vfPercent, units, thresholds, expectedLength, gateStart, gateEnd, accent }) {
+  const tdr = useMemo(() => computeTDR(wire.parsed.s.map((b) => b.s11), wire.parsed.freqs, vfPercent / 100, units === 'ft'), [wire, vfPercent, units])
   const data = useMemo(() => {
-    // Trim to first ~150 ft (or 50 m) for display
-    const maxDist = units === 'ft' ? 150 : 45
+    const maxDist = units === 'ft' ? Math.max(60, expectedLength * 1.5) : Math.max(18, expectedLength * 1.5)
     const out = []
-    for (let i = 0; i < dutTDR.distances.length; i++) {
-      if (dutTDR.distances[i] > maxDist) break
-      const row = { d: dutTDR.distances[i], dut: dutTDR.rho[i] }
-      if (refTDR && refTDR.rho[i] != null) row.reference = refTDR.rho[i]
-      out.push(row)
+    for (let i = 0; i < tdr.distances.length; i++) {
+      if (tdr.distances[i] > maxDist) break
+      out.push({ d: tdr.distances[i], rho: tdr.rho[i] })
     }
     return out
-  }, [dutTDR, refTDR, units])
-
+  }, [tdr, units, expectedLength])
   return (
     <ChartShell title={`TDR — Reflection Coefficient vs Distance (VF = ${vfPercent}%)`} yLabel="ρ" data={data} xKey="d" xUnit={units} yDomain={[-0.3, 0.3]}>
       <ReferenceLine y={thresholds.reflection_pass} stroke={C.teal} strokeDasharray="3 3" />
       <ReferenceLine y={-thresholds.reflection_pass} stroke={C.teal} strokeDasharray="3 3" />
       <ReferenceLine y={thresholds.reflection_fail} stroke={C.red} strokeDasharray="3 3" />
       <ReferenceLine y={-thresholds.reflection_fail} stroke={C.red} strokeDasharray="3 3" />
-      {expectedLength > 0 && (
-        <ReferenceLine x={expectedLength} stroke={C.amber} strokeDasharray="2 2" label={{ value: 'cable end', fill: C.amber, fontSize: 10, position: 'top' }} />
-      )}
-      {gateStart != null && (
-        <ReferenceLine x={gateStart} stroke={C.copper} strokeDasharray="4 2" strokeWidth={0.7} label={{ value: 'gate', fill: C.copper, fontSize: 9, position: 'top' }} />
-      )}
-      {gateEnd != null && (
-        <ReferenceLine x={gateEnd} stroke={C.copper} strokeDasharray="4 2" strokeWidth={0.7} />
-      )}
-      {reference && <Line type="monotone" dataKey="reference" stroke={C.teal} strokeWidth={1.5} dot={false} />}
-      <Line type="monotone" dataKey="dut" stroke={C.copper} strokeWidth={2} dot={false} />
+      {expectedLength > 0 && <ReferenceLine x={expectedLength} stroke={C.amber} strokeDasharray="2 2" label={{ value: 'cable end', fill: C.amber, fontSize: 10, position: 'top' }} />}
+      <ReferenceLine x={gateStart} stroke={C.copper} strokeDasharray="4 2" strokeWidth={0.7} label={{ value: 'gate', fill: C.copper, fontSize: 9, position: 'top' }} />
+      <ReferenceLine x={gateEnd} stroke={C.copper} strokeDasharray="4 2" strokeWidth={0.7} />
+      <Line type="monotone" dataKey="rho" stroke={accent} strokeWidth={2} dot={false} />
     </ChartShell>
   )
 }
-
-function S21Plot({ dut, reference }) {
-  const data = useMemo(() => {
-    const dutData = freqAxisData(dut, (b) => ({ dut: -insertionLossDb(b.s21) })) // negative for "loss" displayed
-    if (!reference || reference.ports !== 2) return dutData
-    const refData = freqAxisData(reference, (b) => ({ reference: -insertionLossDb(b.s21) }))
-    return dutData.map((d, i) => ({ ...d, reference: refData[i]?.reference }))
-  }, [dut, reference])
-
+function S21Plot({ wire, accent }) {
+  const data = useMemo(() => wire.parsed.freqs.map((f, i) => ({ f_mhz: f / 1e6, s21: -insertionLossDb(wire.parsed.s[i].s21) })), [wire])
   return (
     <ChartShell title="S21 Insertion Loss vs Frequency" yLabel="S21 (dB)" data={data} xKey="f_mhz" xUnit="MHz">
-      {reference && <Line type="monotone" dataKey="reference" stroke={C.teal} strokeWidth={1.5} dot={false} />}
-      <Line type="monotone" dataKey="dut" stroke={C.copper} strokeWidth={2} dot={false} />
+      <Line type="monotone" dataKey="s21" stroke={accent} strokeWidth={2} dot={false} />
     </ChartShell>
   )
 }
-
-function GroupDelayPlot({ dut, reference }) {
-  const data = useMemo(() => {
-    const dutGD = groupDelayNs(dut.s, dut.freqs, 's21')
-    const out = dut.freqs.map((f, i) => ({ f_mhz: f / 1e6, dut: dutGD[i] }))
-    if (reference && reference.ports === 2) {
-      const refGD = groupDelayNs(reference.s, reference.freqs, 's21')
-      out.forEach((d, i) => { d.reference = refGD[i] })
-    }
-    return out
-  }, [dut, reference])
-
+function GroupDelayPlot({ wire, accent }) {
+  const gd = useMemo(() => groupDelayNs(wire.parsed.s, wire.parsed.freqs, 's21'), [wire])
+  const data = useMemo(() => wire.parsed.freqs.map((f, i) => ({ f_mhz: f / 1e6, gd: gd[i] })), [wire, gd])
   return (
     <ChartShell title="Group Delay vs Frequency" yLabel="τg (ns)" data={data} xKey="f_mhz" xUnit="MHz">
-      {reference && <Line type="monotone" dataKey="reference" stroke={C.teal} strokeWidth={1.5} dot={false} />}
-      <Line type="monotone" dataKey="dut" stroke={C.copper} strokeWidth={2} dot={false} />
+      <Line type="monotone" dataKey="gd" stroke={accent} strokeWidth={2} dot={false} />
     </ChartShell>
   )
 }
 
+// ── Compare view ────────────────────────────────────────
+function CompareView({ wireA, wireB, vfPercent, units, expectedLength, gateStart, gateEnd, thresholds }) {
+  const tdrA = useMemo(() => computeTDR(wireA.parsed.s.map((b) => b.s11), wireA.parsed.freqs, vfPercent / 100, units === 'ft'), [wireA, vfPercent, units])
+  const tdrB = useMemo(() => computeTDR(wireB.parsed.s.map((b) => b.s11), wireB.parsed.freqs, vfPercent / 100, units === 'ft'), [wireB, vfPercent, units])
+  const tdrData = useMemo(() => {
+    const maxDist = units === 'ft' ? Math.max(60, expectedLength * 1.5) : Math.max(18, expectedLength * 1.5)
+    const len = Math.min(tdrA.distances.length, tdrB.distances.length)
+    const out = []
+    for (let i = 0; i < len; i++) {
+      if (tdrA.distances[i] > maxDist) break
+      out.push({ d: tdrA.distances[i], A: tdrA.rho[i], B: tdrB.rho[i] })
+    }
+    return out
+  }, [tdrA, tdrB, units, expectedLength])
+  const rlData = useMemo(() => {
+    const out = []
+    const len = Math.min(wireA.parsed.freqs.length, wireB.parsed.freqs.length)
+    for (let i = 0; i < len; i++) {
+      out.push({ f_mhz: wireA.parsed.freqs[i] / 1e6, A: returnLossDb(wireA.parsed.s[i].s11), B: returnLossDb(wireB.parsed.s[i].s11) })
+    }
+    return out
+  }, [wireA, wireB])
+  return (
+    <div className="grid lg:grid-cols-2 gap-4">
+      <div className="bg-[#12171a] border border-[#252e33] rounded p-4">
+        <ChartShell title="TDR Overlay (Wire A vs Wire B)" yLabel="ρ" data={tdrData} xKey="d" xUnit={units} yDomain={[-0.3, 0.3]}>
+          <ReferenceLine x={gateStart} stroke={C.copper} strokeDasharray="4 2" strokeWidth={0.7} />
+          <ReferenceLine x={gateEnd} stroke={C.copper} strokeDasharray="4 2" strokeWidth={0.7} />
+          {expectedLength > 0 && <ReferenceLine x={expectedLength} stroke={C.amber} strokeDasharray="2 2" />}
+          <Line type="monotone" dataKey="A" stroke={C.copper} strokeWidth={2} dot={false} />
+          <Line type="monotone" dataKey="B" stroke={C.teal} strokeWidth={2} dot={false} />
+        </ChartShell>
+      </div>
+      <div className="bg-[#12171a] border border-[#252e33] rounded p-4">
+        <ChartShell title="Return Loss Overlay" yLabel="RL (dB)" data={rlData} xKey="f_mhz" xUnit="MHz">
+          <ReferenceLine y={thresholds.rl_pass_db} stroke={C.teal} strokeDasharray="3 3" />
+          <ReferenceLine y={thresholds.rl_fail_db} stroke={C.red} strokeDasharray="3 3" />
+          <Line type="monotone" dataKey="A" stroke={C.copper} strokeWidth={2} dot={false} />
+          <Line type="monotone" dataKey="B" stroke={C.teal} strokeWidth={2} dot={false} />
+        </ChartShell>
+      </div>
+    </div>
+  )
+}
+
+// ── Pair Skew view ──────────────────────────────────────
+function PairSkewView({ wireA, wireB, vfPercent, units }) {
+  const c = 299792458
+  const skew = useMemo(() => {
+    const tdrA = computeTDR(wireA.parsed.s.map((b) => b.s11), wireA.parsed.freqs, vfPercent / 100, units === 'ft')
+    const tdrB = computeTDR(wireB.parsed.s.map((b) => b.s11), wireB.parsed.freqs, vfPercent / 100, units === 'ft')
+    const peakA = peakReflection(tdrA.distances, tdrA.rho, units === 'ft' ? 1 : 0.3, Infinity)
+    const peakB = peakReflection(tdrB.distances, tdrB.rho, units === 'ft' ? 1 : 0.3, Infinity)
+    if (!peakA || !peakB) return null
+    const dA = units === 'ft' ? peakA.distance / 3.28084 : peakA.distance
+    const dB = units === 'ft' ? peakB.distance / 3.28084 : peakB.distance
+    const tauA = (2 * dA) / (vfPercent / 100 * c)
+    const tauB = (2 * dB) / (vfPercent / 100 * c)
+    const L_m = (dA + dB) / 2
+    const delta_oneway = (tauA - tauB) / 2
+    const skew_per_m = (delta_oneway / L_m) * 1e12
+    return {
+      L_m, L_ft: L_m * 3.28084,
+      vf_A: (2 * L_m) / tauA / c,
+      vf_B: (2 * L_m) / tauB / c,
+      delta_oneway_ps: delta_oneway * 1e12,
+      skew_per_m,
+      skew_per_ft: skew_per_m / 3.28084,
+    }
+  }, [wireA, wireB, vfPercent, units])
+
+  const gdData = useMemo(() => {
+    const gA = groupDelayNs(wireA.parsed.s, wireA.parsed.freqs, 's11')
+    const gB = groupDelayNs(wireB.parsed.s, wireB.parsed.freqs, 's11')
+    const len = Math.min(gA.length, gB.length)
+    const out = []
+    for (let i = 0; i < len; i++) {
+      out.push({ f_mhz: wireA.parsed.freqs[i] / 1e6, A: gA[i], B: gB[i], delta_ns: (gA[i] - gB[i]) / 2 })
+    }
+    return out
+  }, [wireA, wireB])
+
+  if (!skew) return <div className="text-[12px] text-[#6b7479]">Could not detect end-peak in one of the files — check VF or freq range.</div>
+
+  const verdicts = PAIR_STANDARDS.map((s) => ({
+    ...s,
+    pass: Math.abs(skew.skew_per_m) <= s.maxSkew_ps_per_m,
+    margin_ps: s.maxSkew_ps_per_m - Math.abs(skew.skew_per_m),
+  }))
+  const overall = verdicts.every((v) => v.pass) ? 'EXCELLENT' : verdicts[1]?.pass ? 'GOOD' : verdicts[0]?.pass ? 'FAIR' : 'POOR'
+  const overallColor = overall === 'EXCELLENT' ? C.teal : overall === 'GOOD' ? C.amber : overall === 'FAIR' ? '#fdba74' : C.red
+
+  const dist = units === 'ft' ? skew.L_ft.toFixed(1) : skew.L_m.toFixed(2)
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-[#12171a] border rounded p-4" style={{ borderColor: overallColor + '60' }}>
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-3 mb-4">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479]">Pair quality</div>
+            <div className="text-2xl font-light tracking-tight mt-0.5" style={{ color: overallColor, fontFamily: '"Bricolage Grotesque", sans-serif' }}>{overall}</div>
+          </div>
+          <Stat label="Skew rate" value={`${skew.skew_per_m.toFixed(1)} ps/m`} sub={`${skew.skew_per_ft.toFixed(2)} ps/ft`} accent={overallColor} />
+          <Stat label={`Total skew over ${dist} ${units}`} value={`${Math.abs(skew.delta_oneway_ps).toFixed(1)} ps`} accent={C.amber} />
+          <Stat label="VF (Wire A)" value={`${(skew.vf_A * 100).toFixed(2)}%`} accent={C.copper} />
+          <Stat label="VF (Wire B)" value={`${(skew.vf_B * 100).toFixed(2)}%`} accent={C.teal} />
+          <Stat label="ΔVF" value={`${((skew.vf_A - skew.vf_B) * 100).toFixed(3)} pp`} accent={C.amber} />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {verdicts.map((v) => (
+            <div key={v.id} className="p-2 rounded border bg-[#0d1416]" style={{ borderColor: v.pass ? C.teal + '60' : C.red + '60' }}>
+              <div className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-[#6b7479]">
+                {v.pass ? <CheckCircle2 size={11} style={{ color: C.teal }} /> : <AlertTriangle size={11} style={{ color: C.red }} />}
+                <span>{v.label}</span>
+              </div>
+              <div className="text-[11px] text-[#a7b0b6] mt-1">≤ {v.maxSkew_ps_per_m} ps/m</div>
+              <div className="text-[11px] font-mono mt-0.5" style={{ color: v.pass ? C.teal : C.red }}>margin: {v.margin_ps.toFixed(1)} ps/m</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="grid lg:grid-cols-2 gap-4">
+        <div className="bg-[#12171a] border border-[#252e33] rounded p-4">
+          <ChartShell title="S11 Group Delay (per-wire)" yLabel="τg (ns)" data={gdData} xKey="f_mhz" xUnit="MHz">
+            <Line type="monotone" dataKey="A" stroke={C.copper} strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey="B" stroke={C.teal} strokeWidth={1.5} dot={false} />
+          </ChartShell>
+        </div>
+        <div className="bg-[#12171a] border border-[#252e33] rounded p-4">
+          <ChartShell title="One-way Δτ (Wire A − Wire B) / 2" yLabel="Δτ (ns)" data={gdData} xKey="f_mhz" xUnit="MHz">
+            <ReferenceLine y={0} stroke="#384249" />
+            <Line type="monotone" dataKey="delta_ns" stroke={C.amber} strokeWidth={2} dot={false} />
+          </ChartShell>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Stat({ label, value, sub, accent }) {
+  return (
+    <div>
+      <div className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+      <div className="text-lg font-mono mt-0.5" style={{ color: accent }}>{value}</div>
+      {sub && <div className="text-[10px] text-[#6b7479] font-mono">{sub}</div>}
+    </div>
+  )
+}
+
+// ── Shared chart wrapper ────────────────────────────────
 function ChartShell({ title, yLabel, data, xKey, xUnit, yDomain, children }) {
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <div className="font-mono text-[11px] uppercase tracking-wider text-[#c97b3f]">{title}</div>
-        <div className="font-mono text-[10px] text-[#6b7479]">{data.length} pts</div>
-      </div>
-      <div style={{ width: '100%', height: 320 }}>
+      {title && (
+        <div className="flex items-center justify-between mb-2">
+          <div className="font-mono text-[11px] uppercase tracking-wider text-[#c97b3f]">{title}</div>
+          <div className="font-mono text-[10px] text-[#6b7479]">{data.length} pts</div>
+        </div>
+      )}
+      <div style={{ width: '100%', height: 280 }}>
         <ResponsiveContainer>
-          <LineChart data={data} margin={{ top: 10, right: 30, bottom: 24, left: 8 }}>
+          <LineChart data={data} margin={{ top: 8, right: 24, bottom: 24, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1a2226" />
-            <XAxis
-              dataKey={xKey}
-              stroke="#6b7479"
-              tick={{ fontSize: 10, fontFamily: 'JetBrains Mono' }}
-              label={{ value: xUnit, position: 'insideBottom', offset: -8, fill: '#6b7479', fontSize: 10 }}
-            />
-            <YAxis
-              stroke="#6b7479"
-              tick={{ fontSize: 10, fontFamily: 'JetBrains Mono' }}
-              label={{ value: yLabel, angle: -90, position: 'insideLeft', fill: '#6b7479', fontSize: 10 }}
-              domain={yDomain || ['auto', 'auto']}
-            />
-            <Tooltip
-              contentStyle={{ background: '#0a0d0f', border: '1px solid #252e33', borderRadius: 4, fontSize: 11, fontFamily: 'JetBrains Mono' }}
-              labelStyle={{ color: '#c97b3f' }}
-              itemStyle={{ color: '#f0ebe2' }}
-            />
+            <XAxis dataKey={xKey} stroke="#6b7479" tick={{ fontSize: 10, fontFamily: 'JetBrains Mono' }} label={{ value: xUnit, position: 'insideBottom', offset: -8, fill: '#6b7479', fontSize: 10 }} />
+            <YAxis stroke="#6b7479" tick={{ fontSize: 10, fontFamily: 'JetBrains Mono' }} label={{ value: yLabel, angle: -90, position: 'insideLeft', fill: '#6b7479', fontSize: 10 }} domain={yDomain || ['auto', 'auto']} />
+            <Tooltip contentStyle={{ background: '#0a0d0f', border: '1px solid #252e33', borderRadius: 4, fontSize: 11, fontFamily: 'JetBrains Mono' }} labelStyle={{ color: '#c97b3f' }} itemStyle={{ color: '#f0ebe2' }} />
             <Legend wrapperStyle={{ fontSize: 11, fontFamily: 'JetBrains Mono' }} />
             {children}
           </LineChart>
