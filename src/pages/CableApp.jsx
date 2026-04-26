@@ -7,6 +7,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import FloatingAgent from '../components/FloatingAgent.jsx';
 import { CABLE_TOOLS, dispatchCableTool } from '../components/cableTools.js';
+import VNATest from '../components/VNATest.jsx';
 
 const CABLE_SYSTEM_PROMPT = `You are a senior cable manufacturing engineer embedded in the High-Speed Cable Manufacturing curriculum (CABLE.LAB). You have access to calculation tools — use them whenever the user gives or asks for numeric values; do not rely on memorized constants when a tool can compute the exact answer.
 
@@ -5598,6 +5599,7 @@ function TopNav({ active, onChange }) {
     { id: 'm3', label: 'Bundle', icon: Box },
     { id: 'calc', label: 'Z₀ Calc', icon: Calculator },
     { id: 'tdr', label: 'TDR Sim', icon: Activity },
+    { id: 'vna', label: 'VNA Test', icon: FlaskConical },
     { id: 'braid', label: 'Braid', icon: Shield },
     { id: 'atten', label: 'Atten', icon: Zap },
     { id: 'next', label: 'NEXT', icon: Radio },
@@ -5803,6 +5805,7 @@ export default function CableApp() {
         {section === 'm3' && <ModuleBundle />}
         {section === 'calc' && <ImpedanceCalc />}
         {section === 'tdr' && <TDRSim />}
+        {section === 'vna' && <VNATest />}
         {section === 'braid' && <BraidCoverage />}
         {section === 'atten' && <AttenPlot />}
         {section === 'next' && <NEXTViz />}
