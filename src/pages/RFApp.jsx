@@ -53,7 +53,7 @@ const RF_STARTERS = [
 ];
 
 const RF_SECTION_LABELS = {
-  ask: 'Ask (chat with main agent)',
+  home: 'Home (RF workbench overview)',
   design: 'Design',
   library: 'Library',
   connectors: 'Connectors',
@@ -66,6 +66,12 @@ const RF_SECTION_LABELS = {
 };
 
 const RF_SECTION_STARTERS = {
+  home: [
+    'What can this workbench do?',
+    'Recommend a cable for a 2.4 GHz link, 80 m run',
+    'Walk me through building a link budget',
+    'Compare LMR-400 vs RG-213 at 900 MHz',
+  ],
   link: [
     'Build link budget: 30 dBm @ 2.4 GHz, 100 m, RX -85 dBm, 10 ft LMR-400 each side',
     'How does antenna gain factor into the link margin?',
@@ -1602,7 +1608,7 @@ HONESTY:
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════
 export default function RFCableSuite() {
-  const [tab, setTab] = useState("ask");
+  const [tab, setTab] = useState("home");
   const [activeCable, setActiveCable] = useState(null);
   const [queuedPrompt, setQueuedPrompt] = useState(null);
 
@@ -1643,13 +1649,13 @@ export default function RFCableSuite() {
 
   const isMobile = useIsMobile();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const NAV_TABS = [["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["tools", "Tools"], ["suckout", "Suckout"], ["wizard", "Wizard"], ["cheat", "Cheat Sheet"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]];
+  const NAV_TABS = [["home", "Home"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["tools", "Tools"], ["suckout", "Suckout"], ["wizard", "Wizard"], ["cheat", "Cheat Sheet"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]];
 
   const loadCableIntoDesign = (id) => { setActiveCable(id); setTab("design"); };
   const askAboutCable = (id) => {
     const c = CABLES[id];
+    // Surface the prompt to the floating agent (bottom-left chat)
     setQueuedPrompt(`Analyze ${c.name}: construction highlights, ideal applications, and closest alternatives to consider.`);
-    setTab("ask");
   };
   const openInLibrary = (id) => { setActiveCable(id); setTab("library"); };
 
@@ -1838,7 +1844,7 @@ export default function RFCableSuite() {
         )}
 
         <main style={S.main}>
-          {tab === "ask" && <AskView queuedPrompt={queuedPrompt} clearQueued={() => setQueuedPrompt(null)} openInLibrary={openInLibrary} loadIntoDesign={loadCableIntoDesign} toggleCompare={toggleCompare} comparedCables={comparedCables} setTab={setTab} setToolPreset={setToolPreset} />}
+          {tab === "home" && <HomeView setTab={setTab} comparedCables={comparedCables} />}
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
           {tab === "library" && (
             <>
@@ -2421,6 +2427,377 @@ const CONSTRUCTION_PROMPT = `Estimate the specs of this cable from the visible c
 7. **Likely standard it matches** — MIL-C-17, IEC 61196, Belden, Times, etc.
 
 Use the database tools where helpful. Keep under 200 words.`;
+
+// ═══════════════════════════════════════════════════════════════
+// HOME — main landing view for the RF workbench. Replaces the AskView
+// since chat is always available via the bottom-left FloatingAgent.
+// ═══════════════════════════════════════════════════════════════
+function HomeView({ setTab, comparedCables }) {
+  const cableCount = Object.keys(CABLES).length;
+  const connectorCount = Object.keys(CONNECTORS).length;
+
+  // Hero quick-action cards — link to the heavy-lifting tools.
+  const tools = [
+    { id: 'library', icon: 'cable', title: 'Cable Library', sub: `${cableCount} presets · RG / LMR / Heliax / phase-stable`, accent: '#c97b3f' },
+    { id: 'connectors', icon: 'plug', title: 'Connector Library', sub: `${connectorCount} types · N / SMA / TNC / 7-16 DIN`, accent: '#fbbf24' },
+    { id: 'design', icon: 'layers', title: 'Design Workbench', sub: 'Compose chains · paste configs · share', accent: '#5eead4' },
+    { id: 'link', icon: 'link', title: 'Link Budget', sub: 'TX → cable → FSPL → RX with margin', accent: '#7dd3fc' },
+    { id: 'tools', icon: 'tools', title: 'Tools', sub: 'Friis NF · IP3 · Smith · path loss', accent: '#a78bfa' },
+    { id: 'suckout', icon: 'wave', title: 'Tape Suckout Sim', sub: 'Multi-layer Bragg-notch designer', accent: '#e89357' },
+    { id: 'wizard', icon: 'sparkles', title: 'Cable Selector', sub: 'Wizard: pick the right cable for the job', accent: '#84cc16' },
+    { id: 'cheat', icon: 'book', title: 'Cheat Sheet', sub: 'Formulas · constants · standards', accent: '#cbd5e1' },
+  ];
+
+  // Pick a few interesting cables to surface on the home page. IDs without
+  // hyphens — match the CABLES map keys.
+  const featuredCandidates = ['lmr400', 'rg58', 'lmr600', 'rg213', 'rg6', 'heliaxLDF450A', 'ut141', 'sf141', 'sucoflex104', 'rg174', 'rg400'];
+  const featured = featuredCandidates.filter(id => CABLES[id]).slice(0, 6);
+
+  return (
+    <div style={{ position: 'relative', minHeight: '100%' }}>
+      <style>{`
+        @keyframes rfPulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+        @keyframes rfFadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+        .rf-fade { animation: rfFadeUp 0.6s ease-out backwards; }
+        .rf-card { transition: all 0.18s ease; }
+        .rf-card:hover { transform: translateY(-2px); border-color: rgba(201, 123, 63, 0.6); }
+        @keyframes rfRingDraw { from { stroke-dashoffset: 360; } to { stroke-dashoffset: 0; } }
+      `}</style>
+
+      {/* Decorative grid + radial glow */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.18 }}>
+        <svg width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <pattern id="rf-home-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#252e33" strokeWidth="0.5" />
+            </pattern>
+            <radialGradient id="rf-home-glow" cx="78%" cy="22%" r="55%">
+              <stop offset="0%" stopColor="#c97b3f" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="#0a0d0f" stopOpacity="0" />
+            </radialGradient>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#rf-home-grid)" />
+          <rect width="100%" height="100%" fill="url(#rf-home-glow)" />
+        </svg>
+      </div>
+
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        {/* HERO */}
+        <section className="rf-fade" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 32, alignItems: 'center', paddingTop: 18, paddingBottom: 36, borderBottom: '1px solid #252e33' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, letterSpacing: 3, color: '#c97b3f', textTransform: 'uppercase', marginBottom: 10 }}>
+              ◆ RF Cable Workbench · v1
+            </div>
+            <h1 style={{ fontFamily: 'Fraunces, serif', fontSize: 'clamp(28px, 5vw, 46px)', fontWeight: 400, lineHeight: 1.05, color: '#f0ebe2', margin: 0, letterSpacing: '-0.01em' }}>
+              From <span style={{ color: '#c97b3f', fontStyle: 'italic' }}>50&thinsp;Ω</span> to a closed link budget — one workbench.
+            </h1>
+            <p style={{ marginTop: 18, color: '#a7b0b6', fontSize: 14, lineHeight: 1.6, maxWidth: 640 }}>
+              Search 20+ RF cables and connectors, design chains with realistic per-stage loss, run a full link budget against a sensitivity target, and answer "what cable for X" without leaving the page.
+              Every formula is local; every datasheet number is sourced.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 22 }}>
+              <PrimaryCTA onClick={() => setTab('library')} label="Browse cable library" />
+              <SecondaryCTA onClick={() => setTab('link')} label="Open link budget" />
+              <SecondaryCTA onClick={() => setTab('wizard')} label="Try the wizard" />
+            </div>
+            <div style={{ marginTop: 16, fontSize: 11, color: '#6b7479', fontFamily: 'JetBrains Mono, monospace' }}>
+              ⓘ Need help? Click the <span style={{ color: '#fbbf24' }}>Ask</span> button at the bottom-left to chat with the on-board RF agent — it can run every tool here.
+            </div>
+          </div>
+
+          {/* Smith chart inspired hero graphic */}
+          <div style={{ display: 'none', flexShrink: 0 }} className="md-block">
+            <SmithChartBadge />
+          </div>
+          <style>{`@media (min-width: 768px) { .md-block { display: block !important; } }`}</style>
+        </section>
+
+        {/* STATS BAR */}
+        <section className="rf-fade" style={{ animationDelay: '120ms', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 1, background: '#252e33', border: '1px solid #252e33', borderRadius: 4, marginTop: 32, overflow: 'hidden' }}>
+          <StatTile value={cableCount} label="RF cables" sub="RG / LMR / Heliax / phase-stable" color="#5eead4" />
+          <StatTile value={connectorCount} label="Connectors" sub="N · SMA · TNC · 7-16 · F · MMCX" color="#fbbf24" />
+          <StatTile value="24" label="Calc tools" sub="link budget · NF · Smith · Friis" color="#c97b3f" />
+          <StatTile value="0" label="Telemetry" sub="every calc local in your browser" color="#a7b0b6" />
+        </section>
+
+        {/* TOOL CARDS */}
+        <section style={{ marginTop: 36 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+            <h2 style={{ fontFamily: 'Fraunces, serif', fontSize: 22, fontWeight: 400, color: '#f0ebe2', margin: 0 }}>The toolkit</h2>
+            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', letterSpacing: 2, textTransform: 'uppercase' }}>
+              ◆ click to open · {tools.length} tools
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+            {tools.map((t, i) => (
+              <button
+                key={t.id}
+                className="rf-card rf-fade"
+                onClick={() => setTab(t.id)}
+                style={{
+                  animationDelay: `${160 + i * 40}ms`,
+                  background: '#12171a',
+                  border: '1px solid #252e33',
+                  borderRadius: 4,
+                  padding: 16,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  color: '#f0ebe2',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
+              >
+                <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 4, background: t.accent, opacity: 0.5 }} />
+                <ToolGlyph kind={t.icon} color={t.accent} />
+                <div style={{ fontFamily: 'Fraunces, serif', fontSize: 17, fontWeight: 500, color: t.accent, marginTop: 8 }}>{t.title}</div>
+                <div style={{ fontSize: 12, color: '#a7b0b6', lineHeight: 1.45 }}>{t.sub}</div>
+                <div style={{ marginTop: 10, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                  Open →
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* FEATURED CABLES */}
+        <section style={{ marginTop: 40 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+            <h2 style={{ fontFamily: 'Fraunces, serif', fontSize: 22, fontWeight: 400, color: '#f0ebe2', margin: 0 }}>Featured cables</h2>
+            <button onClick={() => setTab('library')} style={{ background: 'transparent', border: 'none', color: '#fbbf24', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, textTransform: 'uppercase', letterSpacing: 2, cursor: 'pointer' }}>
+              Library →
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+            {featured.map((id) => {
+              const c = CABLES[id];
+              if (!c) return null;
+              return (
+                <button
+                  key={id}
+                  onClick={() => { setTab('library'); }}
+                  className="rf-card"
+                  style={{
+                    background: '#0d1416',
+                    border: '1px solid #252e33',
+                    borderRadius: 4,
+                    padding: 12,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    color: '#f0ebe2',
+                  }}
+                >
+                  <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>{c.makers || 'cable'}</div>
+                  <div style={{ fontFamily: 'Fraunces, serif', fontSize: 16, fontWeight: 500, color: '#fbbf24' }}>{c.name}</div>
+                  <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
+                    <Stat label="Z" value={`${c.z} Ω`} accent="#5eead4" />
+                    <Stat label="VF" value={c.vp != null ? `${c.vp}%` : '—'} accent="#c97b3f" />
+                    <Stat label="OD" value={c.OD != null ? `${c.OD.toFixed(1)} mm` : '—'} accent="#a7b0b6" />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* COMPARE PROMPT */}
+        {comparedCables.length > 0 && (
+          <section style={{ marginTop: 32, padding: 14, background: 'rgba(94, 234, 212, 0.08)', border: '1px solid rgba(94, 234, 212, 0.4)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ fontSize: 13, color: '#a7b0b6' }}>
+              <span style={{ color: '#5eead4', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, letterSpacing: 2, marginRight: 8, textTransform: 'uppercase' }}>◆ {comparedCables.length} cable{comparedCables.length === 1 ? '' : 's'} pinned</span>
+              ready to compare side-by-side.
+            </div>
+            <button onClick={() => setTab('compare')} style={{ background: 'transparent', border: '1px solid #5eead4', color: '#5eead4', padding: '6px 14px', borderRadius: 3, fontFamily: 'JetBrains Mono, monospace', fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase', cursor: 'pointer' }}>
+              → Open compare view
+            </button>
+          </section>
+        )}
+
+        {/* WHAT'S NEW */}
+        <section style={{ marginTop: 40, padding: 18, background: '#12171a', border: '1px solid #252e33', borderRadius: 4 }}>
+          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 3, color: '#c97b3f', textTransform: 'uppercase', marginBottom: 10 }}>◆ Recently added</div>
+          <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 8, fontSize: 13, color: '#a7b0b6' }}>
+            <NewItem accent="#e89357">
+              <strong style={{ color: '#fbbf24' }}>Tape Suckout Sim</strong> — multi-layer Bragg-notch designer with mm/inch toggle, cable cross-section visualization, spiral wrap (8-bobbin), and gap-only constraint.
+            </NewItem>
+            <NewItem accent="#5eead4">
+              <strong style={{ color: '#fbbf24' }}>Library expansion</strong> — 8 new entries (RG-316 / 393, LMR-200 / 900, Heliax LDF5, Sucoflex 104, UT-085, RG-6 / 11) with linked datasheets.
+            </NewItem>
+            <NewItem accent="#a78bfa">
+              <strong style={{ color: '#fbbf24' }}>Company defaults memory</strong> — Cu price, preferred materials, and tolerances persist on this device. The agent reads them automatically.
+            </NewItem>
+          </ul>
+        </section>
+
+        <div style={{ marginTop: 36, paddingTop: 20, borderTop: '1px solid #252e33', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', textTransform: 'uppercase', letterSpacing: 2, textAlign: 'center' }}>
+          v1 prototype · every formula local · no telemetry
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PrimaryCTA({ onClick, label }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: '#c97b3f',
+        color: '#0a0d0f',
+        border: 'none',
+        padding: '10px 18px',
+        borderRadius: 3,
+        fontFamily: 'JetBrains Mono, monospace',
+        fontSize: 12,
+        textTransform: 'uppercase',
+        letterSpacing: 1.5,
+        fontWeight: 600,
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+      }}
+    >
+      {label} →
+    </button>
+  );
+}
+function SecondaryCTA({ onClick, label }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'transparent',
+        color: '#a7b0b6',
+        border: '1px solid #384249',
+        padding: '10px 18px',
+        borderRadius: 3,
+        fontFamily: 'JetBrains Mono, monospace',
+        fontSize: 12,
+        textTransform: 'uppercase',
+        letterSpacing: 1.5,
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+function StatTile({ value, label, sub, color }) {
+  return (
+    <div style={{ background: '#0a0d0f', padding: 14 }}>
+      <div style={{ fontFamily: 'Fraunces, serif', fontSize: 28, fontWeight: 500, color, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#a7b0b6', textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 6 }}>{label}</div>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: '#6b7479', marginTop: 2 }}>{sub}</div>
+    </div>
+  );
+}
+function Stat({ label, value, accent }) {
+  return (
+    <div>
+      <div style={{ fontSize: 9, color: '#6b7479', textTransform: 'uppercase', letterSpacing: 1 }}>{label}</div>
+      <div style={{ color: accent, fontSize: 11 }}>{value}</div>
+    </div>
+  );
+}
+function ToolGlyph({ kind, color }) {
+  const size = 22;
+  if (kind === 'cable') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1.5" fill={color} />
+    </svg>
+  );
+  if (kind === 'plug') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M5 12h6m0 0v3m0-3v-3m0 3l4 4 5-5-4-4-5 5z" />
+      <circle cx="12" cy="12" r="1.5" fill={color} />
+    </svg>
+  );
+  if (kind === 'layers') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round">
+      <path d="M12 3l9 5-9 5-9-5 9-5z" />
+      <path d="M3 13l9 5 9-5" opacity="0.6" />
+      <path d="M3 17l9 5 9-5" opacity="0.3" />
+    </svg>
+  );
+  if (kind === 'link') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M3 18l4-4M14 5l4-4M21 6l-3 3M9 19l-3 3" opacity="0.6" />
+      <path d="M8 16l8-8M5 13l3 3 8-8 3 3" />
+    </svg>
+  );
+  if (kind === 'tools') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M3 21l8-8m0 0l3-3m-3 3l-3-3m6 0l5 5-3 3-5-5m3-3l3-3-5-5-3 3" />
+    </svg>
+  );
+  if (kind === 'wave') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M2 12c2-4 3-4 5 0s3 4 5 0 3-4 5 0 3 4 5 0" />
+    </svg>
+  );
+  if (kind === 'sparkles') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M12 3v6M12 15v6M3 12h6M15 12h6M5 5l4 4M15 15l4 4M5 19l4-4M15 9l4-4" />
+    </svg>
+  );
+  if (kind === 'book') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round">
+      <path d="M4 4h16v16H4z" />
+      <path d="M9 4v16M4 9h5" />
+    </svg>
+  );
+  return null;
+}
+function NewItem({ accent, children }) {
+  return (
+    <li style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <span style={{ color: accent, marginTop: 4, fontSize: 8 }}>●</span>
+      <span style={{ flex: 1, lineHeight: 1.55 }}>{children}</span>
+    </li>
+  );
+}
+
+// Decorative Smith-chart inspired badge for the hero
+function SmithChartBadge() {
+  return (
+    <svg width="200" height="200" viewBox="0 0 200 200" style={{ display: 'block' }}>
+      <defs>
+        <linearGradient id="rf-smith-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#c97b3f" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="#5eead4" stopOpacity="0.08" />
+        </linearGradient>
+      </defs>
+      <circle cx="100" cy="100" r="90" fill="url(#rf-smith-grad)" stroke="#c97b3f" strokeOpacity="0.5" strokeWidth="1" />
+      {/* Constant-resistance circles */}
+      {[
+        { cx: 130, cy: 100, r: 60 },
+        { cx: 145, cy: 100, r: 45 },
+        { cx: 165, cy: 100, r: 25 },
+        { cx: 100, cy: 100, r: 90 },
+      ].map((c, i) => (
+        <circle key={i} cx={c.cx} cy={c.cy} r={c.r} fill="none" stroke="#c97b3f" strokeOpacity="0.35" strokeWidth="1" />
+      ))}
+      {/* Constant-reactance arcs (top + bottom) */}
+      {[40, 70, 120].map((r, i) => (
+        <g key={i}>
+          <circle cx={190} cy={100 - r} r={r} fill="none" stroke="#5eead4" strokeOpacity="0.35" strokeWidth="0.8" />
+          <circle cx={190} cy={100 + r} r={r} fill="none" stroke="#5eead4" strokeOpacity="0.35" strokeWidth="0.8" />
+        </g>
+      ))}
+      {/* Real-axis line */}
+      <line x1="10" y1="100" x2="190" y2="100" stroke="#384249" strokeWidth="0.5" />
+      {/* Pulse dot */}
+      <circle cx="100" cy="100" r="3" fill="#fbbf24" style={{ animation: 'rfPulse 2s ease-in-out infinite' }} />
+      {/* Center label */}
+      <text x="100" y="190" fontFamily="JetBrains Mono, monospace" fontSize="9" fill="#6b7479" textAnchor="middle" letterSpacing="2">SMITH · 50 Ω</text>
+    </svg>
+  );
+}
 
 function AskView({ queuedPrompt, clearQueued, openInLibrary, loadIntoDesign, toggleCompare, comparedCables, setTab, setToolPreset }) {
   const { showTools, ttsEnabled, model } = useContext(SettingsContext);
