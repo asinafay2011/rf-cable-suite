@@ -84,26 +84,19 @@ const PRESETS = {
       { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1 },
     ],
   },
-  ptfe_8bobbin: {
-    label: '8-bobbin PTFE · 10% gap (phase-stable dielectric)',
-    stack: [
-      { kind: 'ptfe', width: 6.0, overlap: -10, count: 4, bobbins: 8 },
-      { kind: 'ptfe', width: 6.0, overlap: -10, count: 4, bobbins: 8 },
-    ],
-  },
   spiral_spc_shield: {
     label: 'Spiral SPC flatwire shield · 1.0 mm × 12% gap',
     stack: [
-      { kind: 'ptfe', width: 6.0, overlap: 50, count: 6, bobbins: 1 },
+      { kind: 'ptfe', width: 6.0, overlap: 50, count: 6 },
       { kind: 'spiral', width: 1.0, overlap: -12, count: 1, strands: 1, material: 'spc' },
     ],
   },
   spiral_double_shield: {
     label: 'Spiral SPC + foil + braid (mil-spec coax)',
     stack: [
-      { kind: 'ptfe', width: 6.0, overlap: 50, count: 8, bobbins: 1 },
+      { kind: 'ptfe', width: 6.0, overlap: 50, count: 8 },
       { kind: 'spiral', width: 1.5, overlap: -10, count: 1, strands: 2, material: 'spc' },
-      { kind: 'foil', width: 10.0, overlap: 25, count: 1, bobbins: 1 },
+      { kind: 'foil', width: 10.0, overlap: 25, count: 1 },
       { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1 },
     ],
   },
@@ -111,21 +104,22 @@ const PRESETS = {
 
 // ─────────── Helpers ───────────
 function newLayer(kind = 'ptfe') {
-  if (kind === 'braid') return { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1, bobbins: 1 }
+  if (kind === 'braid') return { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1 }
   // Spiral wrap = SPC / Cu / TC flatwire ribbon helically wound as a shield
   // (NOT PTFE tape).  Typical: 0.5-2 mm wide, 10-13 % gap, 1-4 parallel strands,
   // material defaults to silver-plated copper (SPC).
   if (kind === 'spiral') return { kind: 'spiral', width: 1.0, overlap: -10, count: 1, strands: 1, material: 'spc' }
-  return { kind, width: kind === 'foil' ? 10 : 12, overlap: 25, count: 1, bobbins: 1 }
+  return { kind, width: kind === 'foil' ? 10 : 12, overlap: 25, count: 1 }
 }
 function pitchOf(layer, cableOD) {
   if (layer.kind === 'braid') {
     return 25.4 / Math.max(2, layer.picksPerIn)
   }
-  // Multi-bobbin (PTFE/Foil) and multi-strand (Spiral wrap) both reduce the
-  // effective axial period the same way: N parallel applicators offset 1/N
-  // axially → period scales by 1/N.
-  const N = Math.max(1, layer.kind === 'spiral' ? (layer.strands || 1) : (layer.bobbins || 1))
+  // Only spiral wrap has parallel-applicator multiplicity in this model
+  // (N flatwire strands offset 1/N axially → period scales by 1/N).  Tape
+  // layers (PTFE / Foil) are modelled as a single applicator per layer —
+  // engineers add MORE LAYERS instead of multi-bobbin to spread the notch.
+  const N = layer.kind === 'spiral' ? Math.max(1, layer.strands || 1) : 1
   // overlap can be NEGATIVE (gap). Allow range -50 .. 95 %
   const o = Math.max(-0.5, Math.min(0.95, layer.overlap / 100))
   const circ = Math.PI * Math.max(0.5, cableOD)
@@ -198,15 +192,16 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
       ns.forEach((n) => {
         // Depth model:
         //  • count = identical stacked wraps → linear depth scaling
-        //  • bobbins = N tape heads in one pass → each bobbin's contribution
-        //    is smaller (perturbation spreads), so depth reduces ~1/N
+        //  • strands (spiral only) = N flatwire ribbons in parallel — each
+        //    contributes a smaller perturbation, so depth reduces ~1/N
         //  • gap (overlap < 0) = air gap between tape edges → DEEPER (clean
         //    contrast). overlap > 0 = double-thick seam = also deep but
         //    less than gap. We model as: 1 + |overlap|·0.5  with gap ×1.5
         const o = (layer.overlap ?? 25) / 100
         const gapFactor = o < 0 ? 1 + Math.abs(o) * 1.5 : 1 + o * 0.3
-        const bobFactor = 1 / Math.max(1, layer.bobbins || 1)
-        const baseDepth = (notchDepth * Math.max(1, layer.count) * gapFactor * bobFactor) / n.order
+        const Nstrands = layer.kind === 'spiral' ? Math.max(1, layer.strands || 1) : 1
+        const strandFactor = 1 / Nstrands
+        const baseDepth = (notchDepth * Math.max(1, layer.count) * gapFactor * strandFactor) / n.order
         list.push({
           ...n,
           depth: baseDepth,
@@ -515,16 +510,15 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
       {/* FORMULA + PRACTICE NOTES */}
       <div className="bg-[#12171a] border border-[#252e33] rounded p-4 space-y-2 text-[12px] leading-relaxed" style={{ color: C.textDim }}>
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: C.teal }}>Reference</div>
-        <div className="font-mono" style={{ color: C.amber }}>tape (PTFE / Foil): P = W · (1 − overlap) · cos(γ) / N<sub>bobbins</sub>   where sin(γ) = W / (π · OD)</div>
-        <div className="font-mono" style={{ color: C.amber }}>spiral wrap (SPC / Cu flatwire): P = W · (1 − overlap) · cos(γ) / N<sub>strands</sub></div>
+        <div className="font-mono" style={{ color: C.amber }}>tape (PTFE / Foil): P = W · (1 − overlap) · cos(γ)   where sin(γ) = W / (π · OD)</div>
+        <div className="font-mono" style={{ color: C.amber }}>spiral wrap (SPC / Cu / TC flatwire): P = W · (1 − overlap) · cos(γ) / N<sub>strands</sub></div>
         <div className="font-mono" style={{ color: C.amber }}>braid: P = 25.4 / picks_per_inch</div>
         <div className="font-mono" style={{ color: C.amber }}>f<sub>n</sub> = n · c · VF / (2 · P)  ≈  n · 150 000 · VF / P<sub>mm</sub>  [MHz]</div>
         <div>
           • Each layer adds its OWN pitch-driven notch — independent contributions.
-          <br />• N identical wraps stack the SAME notch ~N× deeper. Different widths produce N DIFFERENT notches, each shallower — the standard "spread the suckout" trick.
-          <br />• <span style={{ color: C.amber }}>Multi-bobbin (PTFE / Foil tape):</span> N tape heads run simultaneously, each offset axially by 1/N → effective seam period reduces by 1/N → notch frequency goes UP by ~N×. An 8-bobbin PTFE wrap pushes the notch ~8× higher than a single bobbin.
-          <br />• <span style={{ color: C.copperBright }}>Spiral wrap (different from PTFE multi-bobbin):</span> a single (or 2-4 strand) SPC / Cu / TC FLATWIRE ribbon, helically wound as a SHIELD layer, NOT a dielectric. Typical 0.5-2 mm wide, 10-13% gap, somewhat thicker than foil tape (80-150 µm) so the impedance discontinuity is sharper — notch is more visible than foil. Used in MIL-DTL-17 RG-class shields, VITA-58 high-flex coax, and as an under-braid layer in phase-stable assemblies.
-          <br />• <span style={{ color: C.amber }}>Negative overlap (gap):</span> 10-13% gap leaves bare dielectric (or open metal between flatwire turns), increasing impedance contrast → notch DEEPER. Engineers use small gaps deliberately so multi-bobbin / multi-strand controls placement while the gap controls depth.
+          <br />• N identical wraps stack the SAME notch ~N× deeper. Different widths across layers produce DIFFERENT notches, each shallower — the standard "spread the suckout" trick. Add MORE LAYERS for the spread, not multi-bobbin per layer.
+          <br />• <span style={{ color: C.copperBright }}>Spiral wrap (SPC / Cu / TC flatwire):</span> 0.5-2 mm wide ribbon helically wound as a SHIELD layer, NOT a dielectric. Typical 10-13% gap. 1-4 parallel STRANDS (each offset axially by 1/N) push the notch frequency up by ~N×. Used in MIL-DTL-17 RG-class shields, VITA-58 high-flex coax, and as an under-braid layer in phase-stable assemblies.
+          <br />• <span style={{ color: C.amber }}>Negative overlap (gap):</span> a 10-13% gap leaves bare dielectric (or open metal between flatwire turns), increasing impedance contrast → notch DEEPER. Engineers use small gaps deliberately so the spiral pattern controls placement while the gap controls depth.
           <br />• Foil shield notches typically appear shallower than dielectric notches; braid shield notches even shallower (1-3 dB) but at 1/PR pitch.
         </div>
       </div>
@@ -754,26 +748,24 @@ function LayerRow({ layer, idx, cableOD, vf, color, units = 'mm', onUpdate, onRe
           )}
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <div className={`grid grid-cols-2 ${isSpiral ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-2`}>
           {isTape && (
             <>
               <CompactSlider label="Width" value={layer.width} onChange={(v) => onUpdate({ width: v })} min={0.5} max={30} step={0.5} units={units} length />
               <CompactSlider label={(layer.overlap ?? 0) < 0 ? 'Gap' : 'Overlap'} value={layer.overlap} onChange={(v) => onUpdate({ overlap: v })} min={-50} max={90} step={1} unit="%" />
-              <CompactSlider label="Bobbins" value={layer.bobbins ?? 1} onChange={(v) => onUpdate({ bobbins: Math.max(1, Math.round(v)) })} min={1} max={12} step={1} unit="heads" />
             </>
           )}
           {isSpiral && (
             <>
               <CompactSlider label="Width" value={layer.width} onChange={(v) => onUpdate({ width: v })} min={0.2} max={5} step={0.1} units={units} length />
               <CompactSlider label={(layer.overlap ?? 0) < 0 ? 'Gap' : 'Overlap'} value={layer.overlap} onChange={(v) => onUpdate({ overlap: v })} min={-50} max={50} step={1} unit="%" />
-              <CompactSlider label="Strands" value={layer.strands ?? 1} onChange={(v) => onUpdate({ strands: Math.max(1, Math.round(v)) })} min={1} max={6} step={1} unit="ribbons" />
+              <CompactSlider label="Strands" value={layer.strands ?? 1} onChange={(v) => onUpdate({ strands: Math.max(1, Math.round(v)) })} min={1} max={6} step={1} unit="" />
             </>
           )}
           {isBraid && (
             <>
               <CompactSlider label="Carriers" value={layer.carriers} onChange={(v) => onUpdate({ carriers: v })} min={8} max={48} step={2} unit="" />
               <CompactSlider label="Picks/in" value={layer.picksPerIn} onChange={(v) => onUpdate({ picksPerIn: v })} min={4} max={40} step={1} unit="PR" />
-              <CompactSlider label="Bobbins" value={layer.bobbins ?? 1} onChange={(v) => onUpdate({ bobbins: Math.max(1, Math.round(v)) })} min={1} max={12} step={1} unit="heads" />
             </>
           )}
           <CompactSlider label="× count" value={layer.count} onChange={(v) => onUpdate({ count: Math.max(1, v) })} min={1} max={20} step={1} unit="wraps" />
@@ -823,9 +815,9 @@ function CompactSlider({ label, value, onChange, min, max, step, unit, units = '
   const handle = (raw) => onChange(isInch ? parseFloat(raw) * 25.4 : parseFloat(raw))
   const fmt = (v) => (isInch ? v.toFixed(4) : v.toFixed(step < 1 ? 1 : 0))
   return (
-    <div>
+    <div className="min-w-0">
       <label className="font-mono text-[9px] uppercase tracking-wider mb-0.5 block" style={{ color: C.textMuted }}>{label}</label>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1.5">
         <input
           type="range"
           min={dispMin}
@@ -833,7 +825,7 @@ function CompactSlider({ label, value, onChange, min, max, step, unit, units = '
           step={dispStep}
           value={dispValue}
           onChange={(e) => handle(e.target.value)}
-          className="flex-1 h-1"
+          className="flex-1 min-w-0 h-1"
           style={{ accentColor: C.copper }}
         />
         <input
@@ -843,10 +835,10 @@ function CompactSlider({ label, value, onChange, min, max, step, unit, units = '
           step={dispStep}
           value={fmt(dispValue)}
           onChange={(e) => handle(e.target.value)}
-          className="w-14 bg-[#0a0d0f] border border-[#252e33] rounded px-1 py-0.5 text-[10px] font-mono text-right"
+          className="w-14 shrink-0 bg-[#0a0d0f] border border-[#252e33] rounded px-1 py-0.5 text-[10px] font-mono text-right"
           style={{ color: C.amber }}
         />
-        {dispUnit && <span className="font-mono text-[9px] w-7" style={{ color: C.textMuted }}>{dispUnit}</span>}
+        {dispUnit && <span className="font-mono text-[9px] shrink-0" style={{ color: C.textMuted }}>{dispUnit}</span>}
       </div>
     </div>
   )
