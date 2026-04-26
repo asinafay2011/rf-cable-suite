@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown, Eye, EyeOff, Image as ImageIcon, X as XIcon, Paperclip } from 'lucide-react'
+import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown, Eye, EyeOff, Image as ImageIcon, X as XIcon, Paperclip, Download, Mic, MicOff, HelpCircle } from 'lucide-react'
 
 const MODEL_DEFAULT = 'claude-sonnet-4-6'
 const MAX_TOOL_TURNS = 6
@@ -28,6 +28,10 @@ export default function FloatingAgent({
   onToolUse,    // optional (name, input) => result|Promise<result>
   onAttachData, // optional (file) => Promise<{ summary: string, chip: { name, info } } | null>
   attachAccept = 'image/*', // file input accept pattern
+  context,      // optional { section, sectionLabel, extra? } — added to system prompt at runtime
+  contextStarters, // optional (context) => string[] — overrides `starters` based on current context
+  toolToSection,   // optional { [toolName]: { id, label } } — maps tool to a target tab
+  onJumpToSection, // optional (sectionId) => void — host wires this to its section setter
 }) {
   const [open, setOpen] = useState(false)
   const modelKey = storageKey ? `${storageKey}-model` : null
@@ -145,10 +149,13 @@ export default function FloatingAgent({
 
   // Streams one turn, returns { blocks, stop_reason }
   const streamOnce = async (messagesPayload, onUpdate) => {
+    const contextSuffix = context?.sectionLabel
+      ? `\n\nUser context (provided by the host app — use this to tailor your suggestions):\n- Currently viewing tab: ${context.sectionLabel}${context.extra ? `\n- Additional context: ${context.extra}` : ''}`
+      : ''
     const body = {
       model: modelId,
       max_tokens: maxTokens,
-      system: systemPrompt,
+      system: (systemPrompt || '') + contextSuffix,
       messages: messagesPayload,
       stream: true,
     }
@@ -304,6 +311,39 @@ export default function FloatingAgent({
     const img = pendingImage
     const data = pendingData
     if ((!text && !img && !data) || loading) return
+
+    // ── Slash commands (intercepted before sending to API) ──
+    if (text.startsWith('/')) {
+      const cmd = text.split(/\s+/)[0].slice(1).toLowerCase()
+      if (cmd === 'clear') { clear(); setInput(''); return }
+      if (cmd === 'export') { exportMarkdown(); setInput(''); return }
+      if (cmd === 'copy')   { copyMarkdown(); setInput(''); return }
+      if (cmd === 'tools' || cmd === 'help') {
+        const helpText =
+`**Available slash commands**
+- \`/clear\` — clear the conversation
+- \`/export\` — download conversation as markdown (.md)
+- \`/copy\` — copy conversation to clipboard as markdown
+- \`/tools\` — list available tools
+- \`/help\` — this help
+
+**Tips**
+- Drag the top edge / right edge / corner of the panel to resize.
+- Click the ◉ eye icon in the header to show/hide tool calls.
+- Use the model picker chip in the header to switch between Opus / Sonnet / Haiku.
+- Paste an image (Ctrl+V) or click 📎 to attach images and ${attachAccept.includes('.s1p') ? '.s1p / .s2p Touchstone files' : 'images'}.${voiceSupported ? '\n- Click the 🎤 mic to dictate by voice.' : ''}` +
+          (tools && tools.length ? `\n\n**${tools.length} tools available:**\n${tools.map((t) => `- \`${t.name}\` — ${t.description.split('.')[0]}`).join('\n')}` : '')
+        const fakeAssistant = { role: 'assistant', content: [{ type: 'text', text: helpText }] }
+        setMessages([...messages, { role: 'user', content: text }, fakeAssistant])
+        setInput('')
+        return
+      }
+      // Unknown command — show error chip but still send to LLM
+      setError(`Unknown command: /${cmd}. Try /help.`)
+      setInput('')
+      return
+    }
+
     setInput('')
     setError(null)
     setPendingImage(null)
@@ -380,6 +420,93 @@ export default function FloatingAgent({
     setStreamBlocks(null)
     setToolStatus(null)
     setError(null)
+  }
+
+  // ── Markdown export of the conversation ───────────────
+  const exportMarkdown = () => {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-')
+    const lines = [`# ${label} — exported ${new Date().toLocaleString()}`, '']
+    for (const m of messages) {
+      if (m.role === 'user') {
+        if (typeof m.content === 'string') {
+          lines.push(`## You`, '', m.content, '')
+        } else if (Array.isArray(m.content)) {
+          const text = m.content.find((b) => b.type === 'text')?.text || ''
+          const hasImage = m.content.some((b) => b.type === 'image')
+          if (text || hasImage) {
+            lines.push(`## You`, '')
+            if (hasImage) lines.push('_[image attached]_', '')
+            if (text) lines.push(text, '')
+          }
+        }
+      } else if (m.role === 'assistant') {
+        lines.push(`## ${label.replace(/^◆ /, '').replace(/ · AGENT$/i, '')}`, '')
+        const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text', text: m.content }]
+        for (const b of blocks) {
+          if (b.type === 'text' && b.text) lines.push(b.text, '')
+          else if (b.type === 'tool_use') {
+            lines.push(`> 🔧 \`${b.name}(${Object.entries(b.input || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})\``, '')
+          }
+        }
+      }
+    }
+    const md = lines.join('\n')
+    const blob = new Blob([md], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `chat-${ts}.md`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 100)
+  }
+
+  const copyMarkdown = async () => {
+    const lines = []
+    for (const m of messages) {
+      if (m.role === 'user' && typeof m.content === 'string') {
+        lines.push(`**You:** ${m.content}`, '')
+      } else if (m.role === 'assistant') {
+        const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text', text: m.content }]
+        for (const b of blocks) if (b.type === 'text' && b.text) lines.push(b.text, '')
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'))
+    } catch {}
+  }
+
+  // ── Voice input via Web Speech API ────────────────────
+  const recognitionRef = useRef(null)
+  const [voiceOn, setVoiceOn] = useState(false)
+  const voiceSupported = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
+
+  const toggleVoice = () => {
+    if (!voiceSupported) {
+      setError('Voice input is not supported in this browser. Try Chrome or Edge.')
+      return
+    }
+    if (voiceOn) {
+      recognitionRef.current?.stop()
+      setVoiceOn(false)
+      return
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    const rec = new SR()
+    rec.continuous = false
+    rec.interimResults = true
+    rec.lang = 'en-US'
+    rec.onresult = (e) => {
+      const transcript = [...e.results].map((r) => r[0].transcript).join('')
+      setInput(transcript)
+    }
+    rec.onerror = (e) => {
+      setError(`Voice error: ${e.error || 'unknown'}`)
+      setVoiceOn(false)
+    }
+    rec.onend = () => setVoiceOn(false)
+    recognitionRef.current = rec
+    rec.start()
+    setVoiceOn(true)
   }
 
   if (!open) {
@@ -501,9 +628,18 @@ export default function FloatingAgent({
           )}
           {messages.length > 0 && (
             <button
+              onClick={exportMarkdown}
+              className="p-1.5 text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded transition-colors"
+              title="Export conversation as markdown (or use /export)"
+            >
+              <Download size={13} />
+            </button>
+          )}
+          {messages.length > 0 && (
+            <button
               onClick={clear}
               className="p-1.5 text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded transition-colors"
-              title="Clear conversation"
+              title="Clear conversation (or use /clear)"
             >
               <Trash2 size={13} />
             </button>
@@ -540,7 +676,7 @@ export default function FloatingAgent({
               )}
             </div>
             <div className="space-y-1.5">
-              {starters.map((s) => (
+              {(contextStarters ? contextStarters(context) : starters).map((s) => (
                 <button
                   key={s}
                   onClick={() => send(s)}
@@ -556,7 +692,13 @@ export default function FloatingAgent({
         {view
           .filter((item) => showTools || item.kind !== 'tool')
           .map((item, i) => (
-            <ViewItem key={i} item={item} accent={accent} />
+            <ViewItem
+              key={i}
+              item={item}
+              accent={accent}
+              jumpTarget={item.kind === 'tool' ? toolToSection?.[item.name] : null}
+              onJumpToSection={onJumpToSection}
+            />
           ))}
 
         {toolStatus === 'executing' && (
@@ -646,6 +788,17 @@ export default function FloatingAgent({
           >
             <Paperclip size={14} />
           </button>
+          {voiceSupported && (
+            <button
+              onClick={toggleVoice}
+              disabled={loading}
+              className="shrink-0 p-2 hover:bg-[#1f1610] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
+              style={{ color: voiceOn ? '#f87171' : '#6b7479' }}
+              title={voiceOn ? 'Stop voice input' : 'Start voice input'}
+            >
+              {voiceOn ? <MicOff size={14} /> : <Mic size={14} />}
+            </button>
+          )}
           <textarea
             ref={inputRef}
             rows={1}
@@ -764,7 +917,7 @@ function visibleCount(messages) {
          messages.filter((m) => m.role === 'assistant').length
 }
 
-function ViewItem({ item, accent }) {
+function ViewItem({ item, accent, jumpTarget, onJumpToSection }) {
   if (item.kind === 'user') {
     return (
       <div className="flex justify-end">
@@ -797,18 +950,19 @@ function ViewItem({ item, accent }) {
     )
   }
   if (item.kind === 'tool') {
-    return <ToolPill name={item.name} input={item.input} result={item.result} accent={accent} partial={item.partial} />
+    return <ToolPill name={item.name} input={item.input} result={item.result} accent={accent} partial={item.partial} jumpTarget={jumpTarget} onJumpToSection={onJumpToSection} />
   }
   return null
 }
 
-function ToolPill({ name, input, result, accent, partial }) {
+function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSection }) {
   const [open, setOpen] = useState(false)
   const inputSummary = summarizeInput(input)
   let parsedResult = result
   if (typeof result === 'string') {
     try { parsedResult = JSON.parse(result) } catch {}
   }
+  const canJump = jumpTarget && onJumpToSection && !partial && !parsedResult?.error
   return (
     <div className="flex justify-start">
       <div
@@ -846,6 +1000,15 @@ function ToolPill({ name, input, result, accent, partial }) {
                   style={{ color: parsedResult?.error ? '#f87171' : '#f0ebe2' }}
                 >{typeof parsedResult === 'object' ? JSON.stringify(parsedResult, null, 2) : String(parsedResult)}</pre>
               </>
+            )}
+            {canJump && (
+              <button
+                onClick={() => onJumpToSection(jumpTarget.id)}
+                className="mt-2 px-2 py-1 text-[10px] font-mono uppercase tracking-wider rounded border bg-transparent hover:bg-[#1f1610]"
+                style={{ color: accent, borderColor: accent + '60' }}
+              >
+                → Open in {jumpTarget.label}
+              </button>
             )}
           </div>
         )}

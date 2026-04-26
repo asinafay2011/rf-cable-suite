@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect, createContext, useContext } from "react";
 import FloatingAgent from "../components/FloatingAgent.jsx";
+import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
 
-const RF_SYSTEM_PROMPT = `You are a senior RF cable engineer embedded in the RF Cable Engineering Suite.
+const RF_SYSTEM_PROMPT = `You are a senior RF cable engineer embedded in the RF Cable Engineering Suite. You have access to calculation tools — use them whenever a numeric answer is requested instead of relying on memorized constants.
 
 Domain focus:
 - Coaxial cable selection (RG-50/75/174/178/213, LMR-100/240/400/600, Heliax LDF/AVA, semi-rigid, phase-stable, video/broadcast)
@@ -25,11 +26,70 @@ Style:
 - If outside RF cable/connector scope, say so briefly and redirect.`;
 
 const RF_STARTERS = [
-  'Why 50 Ω for RF and 75 Ω for CATV/video?',
-  'When should I pick LMR-400 over RG-58?',
-  'How do connector losses add up in a link budget?',
-  'What does VSWR 1.5:1 mean for transmitted power?',
+  'Build link budget: 30 dBm @ 2.4 GHz, 100 m, RX -85 dBm, 10 ft LMR-400 each side',
+  'Compare LMR-400 and RG-213 attenuation at 900 MHz',
+  'Convert VSWR 1.5 to return loss and reflection coefficient',
+  'Cascaded NF for [LNA: NF=1.5, G=20] + [filter: NF=1, G=-1] + [mixer: NF=8, G=-7]',
 ];
+
+const RF_SECTION_LABELS = {
+  ask: 'Ask (chat with main agent)',
+  design: 'Design',
+  library: 'Library',
+  connectors: 'Connectors',
+  link: 'Link Budget',
+  tools: 'Tools (NF / IP3 / Path / Smith)',
+  wizard: 'Wizard',
+  cheat: 'Cheat Sheet',
+  compare: 'Compare',
+};
+
+const RF_SECTION_STARTERS = {
+  link: [
+    'Build link budget: 30 dBm @ 2.4 GHz, 100 m, RX -85 dBm, 10 ft LMR-400 each side',
+    'How does antenna gain factor into the link margin?',
+    'Compute FSPL at 2.4 GHz over 1 km',
+    'What link margin is "enough" for outdoor 5 GHz Wi-Fi?',
+  ],
+  tools: [
+    'Cascaded NF for [LNA: NF=1.5, G=20] + [mixer: NF=8, G=-7]',
+    'Why does first-stage NF dominate?',
+    'Convert VSWR 2.0 to return loss',
+    'Compute mismatch loss between source VSWR 1.5 and load VSWR 1.8',
+  ],
+  library: [
+    'Compare LMR-400 and RG-213 attenuation at 900 MHz',
+    'Specs for Heliax LDF4-50A',
+    'Show me 75 Ω options',
+    'Which cables work above 6 GHz?',
+  ],
+  connectors: [
+    'Specs for N-type and SMA',
+    'Highest-frequency connector in the database',
+    'Difference between TNC and BNC',
+    'Recommend a connector for 18 GHz',
+  ],
+  design: [
+    'What εr does foamed PE typically have?',
+    'Why pick 75 Ω over 50 Ω for video?',
+    'Trade-off between dielectric loss and dielectric strength',
+  ],
+};
+
+function rfContextStarters(ctx) {
+  return RF_SECTION_STARTERS[ctx?.section] || RF_STARTERS;
+}
+
+const RF_TOOL_TO_SECTION = {
+  link_budget:           { id: 'link',       label: 'Link Budget' },
+  free_space_path_loss:  { id: 'tools',      label: 'Tools' },
+  noise_figure_cascade:  { id: 'tools',      label: 'Tools' },
+  vswr_to_rl:            { id: 'tools',      label: 'Tools' },
+  mismatch_loss:         { id: 'tools',      label: 'Tools' },
+  compute_attenuation:   { id: 'tools',      label: 'Tools' },
+  lookup_rf_cable:       { id: 'library',    label: 'Library' },
+  lookup_connector:      { id: 'connectors', label: 'Connectors' },
+};
 
 // ═══════════════════════════════════════════════════════════════
 // RF CABLE ENGINEERING SUITE · v2
@@ -1707,10 +1767,16 @@ export default function RFCableSuite() {
         label="◆ RF · AGENT"
         systemPrompt={RF_SYSTEM_PROMPT}
         starters={RF_STARTERS}
+        contextStarters={rfContextStarters}
         roleDescription="Senior RF cable engineer."
         topics={['cable selection', 'link budgets', 'connectors', 'VSWR / Smith', 'path loss']}
         placeholder="Ask about RF cable, connectors, link budgets…"
         storageKey="rf-chat-history"
+        tools={RF_TOOLS}
+        onToolUse={dispatchRfTool}
+        context={{ section: tab, sectionLabel: RF_SECTION_LABELS[tab] || tab }}
+        toolToSection={RF_TOOL_TO_SECTION}
+        onJumpToSection={setTab}
       />
     </SettingsContext.Provider>
   );

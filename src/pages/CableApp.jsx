@@ -82,6 +82,99 @@ const CABLE_STARTERS = [
   'Convert 38 AWG to mm and compare to 40 AWG',
 ];
 
+const SECTION_LABELS = {
+  progression: 'Progression (overview)',
+  m1: 'Conductor (Module 1)',
+  m2: 'Twisted Pair (Module 2)',
+  m3: 'Bundle (Module 3)',
+  calc: 'Z₀ Calc',
+  tdr: 'TDR Sim',
+  vna: 'VNA Lab',
+  braid: 'Braid Coverage',
+  atten: 'Attenuation Plot',
+  next: 'NEXT Crosstalk',
+  eye: 'Eye Diagram',
+  cost: 'Cost Calc',
+  lay: 'Lay Designer',
+  library: 'Vendor Library',
+  catalog: 'Glenair 963 Catalog',
+  more: 'Modules 4–10',
+};
+
+const SECTION_STARTERS = {
+  calc: [
+    'Compute Z₀ for D=2.95mm, d=0.91mm, foamed PE εr=1.55',
+    'What D/d ratio hits 50 Ω with PTFE εr=2.10?',
+    'Compare solid PE vs foamed PE for 75 Ω coax',
+    'Why is εr lower for foamed dielectrics?',
+  ],
+  vna: [
+    'How do I read a TDR plot — what looks like a defect?',
+    'Why is my pair skew bad even though the wires look identical?',
+    'What ΔVF tolerance is acceptable for Cat 6A vs USB4?',
+    'Walk me through gating to isolate an in-cable reflection',
+  ],
+  braid: [
+    'Why does coverage K saturate above ~95%?',
+    'Compute braid coverage for N=24, P=7, d=0.13mm, D=5mm, PR=10',
+    'How does picks/inch trade off against DC resistance?',
+    'What is transfer impedance Zt and how does it differ from coverage?',
+  ],
+  m2: [
+    'What lay length gives ≤25 ps/m skew with Δεr=0.02?',
+    'Why does shorter lay reduce NEXT?',
+    'How tight should pair lay tolerance be for 25G+?',
+    'Explain bind-with-binder vs free-floating pairs',
+  ],
+  tdr: [
+    'How does VF mismatch show up on a TDR?',
+    'What is time gating and why use it?',
+    'Convert 100 ns round-trip delay into cable length',
+    'Why does the open-end reflection saturate the trace?',
+  ],
+  atten: [
+    'Compute insertion loss for LMR-400 over 30 ft at 2.4 GHz',
+    'Why does cable loss scale with √f?',
+    'Compare RG-58 and LMR-240 for 900 MHz',
+    'When does dielectric loss start to dominate over skin effect?',
+  ],
+  cost: [
+    'Estimate Cu cost per km for a 24-carrier, 7-ends, 0.13mm SPC braid',
+    'How does silver plating affect cost vs DC resistance?',
+    'Trade-off between strand size and yield loss in braiding',
+  ],
+  lay: [
+    'What lay length gives ≤25 ps/m skew with Δεr=0.02?',
+    'Trade-off between lay length and bend radius',
+    'How is lay direction (S vs Z) decided?',
+  ],
+  next: [
+    'Why does shorter lay reduce NEXT?',
+    'How is ANEXT measured and limited per Cat 6A?',
+    'Explain the 6 dB headroom rule for cable testing',
+  ],
+  eye: [
+    'How does insertion loss compress the eye opening?',
+    'What is BER vs eye height tradeoff?',
+    'Pre-emphasis vs equalization — when to use which?',
+  ],
+};
+
+function cableContextStarters(ctx) {
+  const tabStarters = SECTION_STARTERS[ctx?.section]
+  return tabStarters || CABLE_STARTERS
+}
+
+const CABLE_TOOL_TO_SECTION = {
+  calc_z0_coax:        { id: 'calc',  label: 'Z₀ Calc' },
+  calc_braid_coverage: { id: 'braid', label: 'Braid' },
+  compute_attenuation: { id: 'atten', label: 'Atten' },
+  pair_lay_skew:       { id: 'lay',   label: 'Lay Design' },
+  lay_for_skew:        { id: 'lay',   label: 'Lay Design' },
+  geometry_for_z0:     { id: 'calc',  label: 'Z₀ Calc' },
+  lookup_cable:        { id: 'library', label: 'Vendors' },
+};
+
 /* ============================================================
    Color tokens (engineering blueprint aesthetic)
    ============================================================ */
@@ -5887,6 +5980,7 @@ export default function CableApp() {
         label="◆ CABLE.LAB · AGENT"
         systemPrompt={CABLE_SYSTEM_PROMPT}
         starters={CABLE_STARTERS}
+        contextStarters={cableContextStarters}
         roleDescription="Senior cable manufacturing engineer."
         topics={['Z₀ formulas', 'braid coverage', 'pair lay', 'TDR', 'VNA measurements']}
         placeholder="Ask about cable design, manufacturing, formulas…"
@@ -5895,6 +5989,9 @@ export default function CableApp() {
         onToolUse={dispatchCableTool}
         onAttachData={summarizeTouchstoneFile}
         attachAccept="image/*,.s1p,.s2p,.s3p,.s4p"
+        context={{ section, sectionLabel: SECTION_LABELS[section] || section }}
+        toolToSection={CABLE_TOOL_TO_SECTION}
+        onJumpToSection={setSection}
       />
     </div>
   );

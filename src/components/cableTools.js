@@ -1,4 +1,58 @@
-// Tools exposed to the Cable agent. Pure-math, client-side dispatch — no DB.
+// Tools exposed to the Cable agent. Pure-math + small DB, client-side dispatch.
+
+// ── Compact cable database (key high-speed / RF coax + datacable specs) ────
+// Sources: Belden / Times Microwave / CommScope datasheets, Glenair Series 963.
+// Atten[freq_mhz, dB_per_100ft]; vf as fraction; impedance Ω; capacitance pF/ft.
+export const CABLE_DB = {
+  'rg-58':   { name: 'RG-58/U',     family: 'RG · 50 Ω', z0: 50, vf: 0.66, cap_pf_ft: 30.8, od_mm: 4.95,
+    atten_db_per_100ft: { 100: 4.4, 400: 9.4, 900: 14.8, 1000: 16.0, 2400: 26.0 },
+    notes: 'General-purpose RF jumper. Stranded center, single tinned-Cu braid. Solid PE dielectric.' },
+  'rg-174':  { name: 'RG-174/U',    family: 'RG · 50 Ω', z0: 50, vf: 0.66, cap_pf_ft: 30.8, od_mm: 2.79,
+    atten_db_per_100ft: { 100: 8.8, 400: 18.0, 900: 28.5, 1000: 30.0, 2400: 50.0 },
+    notes: 'Miniature RF, low power. Used for pigtails and intra-equipment.' },
+  'rg-213':  { name: 'RG-213/U',    family: 'RG · 50 Ω', z0: 50, vf: 0.66, cap_pf_ft: 30.8, od_mm: 10.3,
+    atten_db_per_100ft: { 100: 1.9, 400: 4.1, 900: 6.4, 1000: 6.9, 2400: 11.5 },
+    notes: 'Higher-power RG-class. 7-strand center, double braid. Replaces RG-8.' },
+  'lmr-100': { name: 'LMR-100A',    family: 'LMR · Wireless', z0: 50, vf: 0.66, cap_pf_ft: 25.0, od_mm: 2.79,
+    atten_db_per_100ft: { 100: 7.4, 400: 15.6, 900: 24.1, 1000: 25.5, 2400: 39.5 },
+    notes: 'Low-loss flexible 100 series. Better than RG-174 in same form factor.' },
+  'lmr-240': { name: 'LMR-240',     family: 'LMR · Wireless', z0: 50, vf: 0.84, cap_pf_ft: 24.2, od_mm: 6.10,
+    atten_db_per_100ft: { 100: 3.0, 400: 6.4, 900: 9.9, 1000: 10.5, 2400: 16.5 },
+    notes: 'Lower-loss alternative to RG-58. Solid foam-PE, foil + braid.' },
+  'lmr-400': { name: 'LMR-400',     family: 'LMR · Wireless', z0: 50, vf: 0.85, cap_pf_ft: 23.9, od_mm: 10.29,
+    atten_db_per_100ft: { 100: 1.5, 400: 3.0, 900: 4.6, 1000: 4.8, 2400: 7.6 },
+    notes: 'Industry-standard low-loss outdoor cable. Foam-PE dielectric, Al foil + tinned-Cu braid.' },
+  'lmr-600': { name: 'LMR-600',     family: 'LMR · Wireless', z0: 50, vf: 0.87, cap_pf_ft: 23.0, od_mm: 14.99,
+    atten_db_per_100ft: { 100: 0.96, 400: 1.96, 900: 3.0, 1000: 3.1, 2400: 5.0 },
+    notes: 'Long-run low-loss for tower-top installs.' },
+  'heliax-ldf4-50a': { name: 'Heliax LDF4-50A', family: 'Heliax · Rigid', z0: 50, vf: 0.88, cap_pf_ft: 22.8, od_mm: 12.7,
+    atten_db_per_100ft: { 100: 0.66, 400: 1.36, 900: 2.07, 1000: 2.18, 2400: 3.5 },
+    notes: 'Foam-PE, corrugated Cu outer. Industry workhorse for 1/2" feedline.' },
+  'rg-59':   { name: 'RG-59/U',     family: 'RG · 75 Ω · Video', z0: 75, vf: 0.66, cap_pf_ft: 20.5, od_mm: 6.15,
+    atten_db_per_100ft: { 100: 3.6, 400: 7.5, 900: 11.4, 1000: 12.0, 2400: 19.5 },
+    notes: 'Video / CATV / CCTV. Solid PE.' },
+  'cat6a-sftp': { name: 'Cat 6A S/FTP', family: 'Datacable · 100 Ω diff', z0: 100, vf: 0.65, cap_pf_ft: 16.0, od_mm: 7.5,
+    atten_db_per_100ft: { 100: 5.5, 250: 9.6, 500: 13.5 },
+    notes: '4-pair shielded twisted pair. 26-23 AWG. PoE++ capable. Foil-shielded pairs + outer braid.' },
+  'cat8':    { name: 'Cat 8 S/FTP', family: 'Datacable · 100 Ω diff', z0: 100, vf: 0.71, cap_pf_ft: 14.0, od_mm: 8.0,
+    atten_db_per_100ft: { 100: 4.7, 500: 11.5, 1000: 17.0, 2000: 25.5 },
+    notes: '40 GBASE-T, 30 m max. 22 AWG, foil per pair + overall braid.' },
+  'sma-141': { name: 'UT-141 Semi-Rigid', family: 'Semi-rigid', z0: 50, vf: 0.70, cap_pf_ft: 28.0, od_mm: 3.58,
+    atten_db_per_100ft: { 1000: 14.0, 6000: 36.0, 18000: 67.0 },
+    notes: 'Solid Cu outer conductor. Used for SMA jumpers up to 18 GHz.' },
+}
+
+// Search the DB by partial name / family match
+export function lookupCableDB(query) {
+  if (!query) return []
+  const q = query.toLowerCase().replace(/\s+/g, '').replace(/-/g, '')
+  const results = []
+  for (const [id, c] of Object.entries(CABLE_DB)) {
+    const haystack = (id + ' ' + c.name + ' ' + c.family).toLowerCase().replace(/\s+/g, '').replace(/-/g, '')
+    if (haystack.includes(q)) results.push({ id, ...c })
+  }
+  return results
+}
 
 export const CABLE_TOOLS = [
   {
@@ -79,6 +133,59 @@ export const CABLE_TOOLS = [
         delta_er: { type: 'number', description: 'εr difference between the two wires of the pair (typical 0.01–0.05 from foaming or extrusion variation)' },
       },
       required: ['lay_mm', 'delta_er'],
+    },
+  },
+  {
+    name: 'lookup_cable',
+    description:
+      'Search the on-board cable database for a cable by partial name, family, or model number (e.g. "RG-58", "LMR", "Cat 6A", "Heliax", "75 ohm video"). Returns full specs (Z₀, VF, attenuation table, OD, capacitance, application notes) for matching cables. Use this whenever the user asks for specs of a named cable, compares cables, or wants real numbers instead of memorized estimates.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search term (e.g., "RG-58", "LMR-400", "Cat 8", "75 ohm video")' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'compute_attenuation',
+    description:
+      'Compute insertion loss (dB) over a given length at a given frequency for a known cable. Uses the cable\'s published attenuation table with √f scaling between datapoints. Use when the user asks for IL at a specific frequency / length / cable combination.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cable_id: { type: 'string', description: 'Cable id from the database (e.g., "rg-58", "lmr-400", "cat6a-sftp"). Use lookup_cable first if unsure.' },
+        freq_mhz: { type: 'number', description: 'Frequency of interest in MHz' },
+        length_ft: { type: 'number', description: 'Cable length in feet' },
+      },
+      required: ['cable_id', 'freq_mhz', 'length_ft'],
+    },
+  },
+  {
+    name: 'geometry_for_z0',
+    description:
+      'Given a target characteristic impedance Z₀ and dielectric εr, compute the required D/d ratio (and example concrete dimensions) for a coaxial geometry. Inverse of calc_z0_coax. Use when the user asks "what dimensions hit 50 Ω with foamed PE?" etc.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        z0_target: { type: 'number', description: 'Target characteristic impedance in Ω (typical 50 or 75)' },
+        er: { type: 'number', description: 'Relative permittivity εr of the dielectric' },
+        d_mm: { type: 'number', description: 'Optional inner conductor diameter in mm — if provided, returns the matching D' },
+      },
+      required: ['z0_target', 'er'],
+    },
+  },
+  {
+    name: 'lay_for_skew',
+    description:
+      'Inverse of pair_lay_skew: given a target intra-pair skew (ps/m) and an expected εr mismatch, compute the maximum pair lay length that meets the target. Use when the user asks "what lay length do I need for ≤ X ps/m skew?".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        target_skew_ps_per_m: { type: 'number', description: 'Maximum allowed intra-pair skew in ps/m (Cat 6A ~25, Cat 8 ~7, USB4 ~5)' },
+        delta_er: { type: 'number', description: 'εr difference between the two wires of the pair (typical 0.01–0.05)' },
+      },
+      required: ['target_skew_ps_per_m', 'delta_er'],
     },
   },
 ];
@@ -163,6 +270,91 @@ export function dispatchCableTool(name, input) {
           skew_ps_per_ft: num(skew_ps_per_m * 0.3048, 1),
           inputs: { lay_mm, delta_er },
           notes: 'First-order estimate. Real skew depends on conductor orientation, twist symmetry, and material homogeneity. Cat 6A target ≤25 ps/m, USB4 / 25G+ targets ≤5 ps/m.',
+        };
+      }
+      case 'lookup_cable': {
+        const { query } = input;
+        const matches = lookupCableDB(query);
+        if (matches.length === 0) {
+          return {
+            matches: [],
+            available_ids: Object.keys(CABLE_DB),
+            note: `No match for "${query}". Try one of the available_ids above.`,
+          };
+        }
+        return { matches: matches.slice(0, 6) };
+      }
+      case 'compute_attenuation': {
+        const { cable_id, freq_mhz, length_ft } = input;
+        const cable = CABLE_DB[cable_id];
+        if (!cable) throw new Error(`Unknown cable_id "${cable_id}". Use lookup_cable first.`);
+        if (!(freq_mhz > 0 && length_ft > 0)) throw new Error('freq_mhz and length_ft must be positive');
+        // Interpolate dB/100ft using √f scaling between adjacent data points.
+        const tbl = Object.entries(cable.atten_db_per_100ft)
+          .map(([f, db]) => [parseFloat(f), db])
+          .sort((a, b) => a[0] - b[0]);
+        const fLo = tbl[0][0], fHi = tbl[tbl.length - 1][0];
+        let db_per_100ft;
+        if (freq_mhz <= fLo) {
+          db_per_100ft = tbl[0][1] * Math.sqrt(freq_mhz / fLo);
+        } else if (freq_mhz >= fHi) {
+          db_per_100ft = tbl[tbl.length - 1][1] * Math.sqrt(freq_mhz / fHi);
+        } else {
+          for (let i = 0; i < tbl.length - 1; i++) {
+            const [f1, a1] = tbl[i];
+            const [f2, a2] = tbl[i + 1];
+            if (freq_mhz >= f1 && freq_mhz <= f2) {
+              const t = (Math.sqrt(freq_mhz) - Math.sqrt(f1)) / (Math.sqrt(f2) - Math.sqrt(f1));
+              db_per_100ft = a1 + t * (a2 - a1);
+              break;
+            }
+          }
+        }
+        const total_db = (db_per_100ft / 100) * length_ft;
+        return {
+          cable: cable.name,
+          freq_mhz, length_ft,
+          attenuation_db_per_100ft: num(db_per_100ft, 2),
+          attenuation_db_total: num(total_db, 2),
+          power_lost_percent: num((1 - Math.pow(10, -total_db / 10)) * 100, 1),
+          notes: freq_mhz > fHi ? `Extrapolated above table (max ${fHi} MHz). Real loss may exceed estimate at higher freq due to dielectric losses.` : undefined,
+        };
+      }
+      case 'geometry_for_z0': {
+        const { z0_target, er, d_mm } = input;
+        if (!(z0_target > 0 && er > 0)) throw new Error('z0_target and er must be positive');
+        // Z₀ = (138/√εᵣ)·log10(D/d) → D/d = 10^(Z₀·√εᵣ/138)
+        const Dd_ratio = Math.pow(10, (z0_target * Math.sqrt(er)) / 138);
+        const result = {
+          z0_target,
+          er,
+          D_over_d_ratio: num(Dd_ratio, 3),
+          formula: 'D/d = 10^(Z₀·√εᵣ / 138)',
+        };
+        if (d_mm > 0) {
+          result.d_mm = d_mm;
+          result.D_mm = num(d_mm * Dd_ratio, 3);
+        } else {
+          // Provide example geometry for typical d values
+          result.examples = [0.5, 0.91, 1.0, 1.63].map((d) => ({
+            d_mm: d,
+            D_mm: num(d * Dd_ratio, 3),
+          }));
+        }
+        return result;
+      }
+      case 'lay_for_skew': {
+        const { target_skew_ps_per_m, delta_er } = input;
+        if (!(target_skew_ps_per_m > 0)) throw new Error('target_skew_ps_per_m must be positive');
+        if (!(delta_er > 0)) throw new Error('delta_er must be positive');
+        // Inverse of pair_lay_skew: skew = lay_mm × delta_er × 50  →  lay_mm = skew / (delta_er × 50)
+        const lay_mm = target_skew_ps_per_m / (delta_er * 50);
+        return {
+          target_skew_ps_per_m,
+          delta_er,
+          max_lay_mm: num(lay_mm, 2),
+          max_lay_inch: num(lay_mm / 25.4, 4),
+          notes: lay_mm < 5 ? 'Required lay is shorter than 5 mm — consider tighter εr control instead of tighter lay.' : (lay_mm > 25 ? 'Lay > 25 mm is unusually loose; check manufacturability.' : 'Within typical lay-length range (5–25 mm).'),
         };
       }
       default:
