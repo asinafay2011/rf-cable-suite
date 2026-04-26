@@ -185,6 +185,59 @@ function cableContextStarters(ctx) {
   return tabStarters || CABLE_STARTERS
 }
 
+function formatProcessSimContext(state) {
+  if (!state || !state.sim) return null
+  const { recipe, sim, std } = state
+  const lines = []
+  lines.push(`Current Process Sim state:`)
+  lines.push(`- Target standard: ${std?.name || recipe.product?.target}`)
+  // Quick verdict block
+  const z_off = Math.abs(sim.jacket.z_diff - std.z0_diff)
+  const z_pass = z_off <= std.z0_tol
+  lines.push(`- Verdict checks:`)
+  lines.push(`  ${z_pass ? '✓' : '✗'} Z₀ ${std.z0_diff} ±${std.z0_tol} Ω → ${sim.jacket.z_diff.toFixed(1)} Ω${z_pass ? '' : ` (off by ${z_off.toFixed(1)} Ω)`}`)
+  if (std.min_next_db > 0) {
+    const next_pass = sim.jacket.next_db_estimate >= std.min_next_db
+    lines.push(`  ${next_pass ? '✓' : '✗'} NEXT ≥ ${std.min_next_db} dB @ ${std.freq_next_mhz} MHz → ${sim.jacket.next_db_estimate.toFixed(1)} dB`)
+  }
+  if (std.max_skew_ps_per_m > 0) {
+    const skew_pass = sim.jacket.pair_skew_ps_per_m <= std.max_skew_ps_per_m
+    lines.push(`  ${skew_pass ? '✓' : '✗'} Skew ≤ ${std.max_skew_ps_per_m} ps/m → ${sim.jacket.pair_skew_ps_per_m.toFixed(1)} ps/m`)
+  }
+  lines.push(`- Final OD: ${sim.jacket.final_od_mm.toFixed(2)} mm (${(sim.jacket.final_od_mm / 25.4).toFixed(3)}″)`)
+  lines.push(`- Total yield: ${sim.total_yield_pct.toFixed(1)}% · Cost: $${sim.jacket.cost_per_m.toFixed(2)}/m · Mass: ${sim.jacket.mass_g_per_m.toFixed(0)} g/m`)
+  lines.push(`- Recipe (key parameters):`)
+  lines.push(`  Conductor: ${recipe.conductor.target_awg} AWG ${recipe.conductor.material.toUpperCase()}, anneal ${recipe.conductor.anneal_c}°C, line ${recipe.conductor.line_m_min} m/min`)
+  if (recipe.stranding.enabled) lines.push(`  Stranding: ${recipe.stranding.strand_count}-strand, lay ${recipe.stranding.lay_mm} mm`)
+  lines.push(`  Insulation: ${recipe.insulation.material} (εr_eff ${sim.insulation.er_effective.toFixed(2)}), wall ${recipe.insulation.wall_mm} mm, line ${recipe.insulation.line_m_min} m/min, melt ${recipe.insulation.melt_c}°C`)
+  lines.push(`  Pair: lay ${recipe.pair.lay_mm} mm ${recipe.pair.direction}-direction, ${recipe.pair.tension_n} N tension`)
+  if (recipe.pair_wrap.material !== 'none') {
+    lines.push(`  Pair wrap: ${recipe.pair_wrap.material}, wall ${recipe.pair_wrap.wall_mm} mm, ${recipe.pair_wrap.overlap_pct}% overlap`)
+  }
+  if (recipe.pair_foil.material !== 'none') {
+    lines.push(`  Pair foil: ${recipe.pair_foil.material}, ${recipe.pair_foil.overlap_pct}% overlap${recipe.pair_foil.drain_wire ? `, drain ${recipe.pair_foil.drain_awg} AWG` : ', no drain'}`)
+  }
+  lines.push(`  Bundle: ${recipe.bundle.pair_count} pairs, lay diversity ${recipe.bundle.lay_diversity ? 'ON' : 'OFF'}, filler ${recipe.bundle.filler}, lay ${recipe.bundle.bundle_lay_mm} mm`)
+  if (recipe.shield.foil || recipe.shield.braid_enabled) {
+    const parts = []
+    if (recipe.shield.foil) parts.push(`foil ${recipe.shield.foil_overlap}% overlap`)
+    if (recipe.shield.braid_enabled) parts.push(`braid ${recipe.shield.braid_N}c/${recipe.shield.braid_P}e/${recipe.shield.braid_d_mm}mm/${recipe.shield.braid_PR}ppi ${recipe.shield.braid_material.toUpperCase()} (K=${sim.shield.coverage_pct.toFixed(1)}%)`)
+    lines.push(`  Outer shield: ${parts.join(' + ')}`)
+  }
+  lines.push(`  Jacket: ${recipe.jacket.material.toUpperCase()}, wall ${recipe.jacket.wall_mm} mm`)
+  // Per-stage warnings (only those with active warns)
+  const warnStages = []
+  for (const k of ['conductor','stranding','insulation','pair','pair_wrap','pair_foil','bundle','shield','jacket']) {
+    const s = sim[k]
+    if (s?.warn && s.warn.length) warnStages.push(`  - ${k}: ${s.warn.join('; ')}`)
+  }
+  if (warnStages.length) {
+    lines.push(`- Active warnings:`)
+    lines.push(...warnStages)
+  }
+  return lines.join('\n')
+}
+
 const CABLE_TOOL_TO_SECTION = {
   calc_z0_coax:          { id: 'calc',  label: 'Z₀ Calc' },
   calc_braid_coverage:   { id: 'braid', label: 'Braid' },
@@ -5892,6 +5945,14 @@ export default function CableApp() {
     window.scrollTo({ top: 0, behavior: 'instant' });
   };
 
+  // Subscribe to ProcessSim state so the agent gets it as context.extra when on the sim tab
+  const [processSimState, setProcessSimState] = useState(null);
+  useEffect(() => {
+    const onUpdate = (e) => setProcessSimState(e.detail);
+    window.addEventListener('processsim:state', onUpdate);
+    return () => window.removeEventListener('processsim:state', onUpdate);
+  }, []);
+
   const closeRecipe = () => {
     const returnTo = recipeProduct?.vendor === 'Glenair' ? 'catalog' : 'library';
     setRecipeProduct(null);
@@ -6100,7 +6161,11 @@ export default function CableApp() {
         onToolUse={dispatchCableTool}
         onAttachData={summarizeTouchstoneFile}
         attachAccept="image/*,.s1p,.s2p,.s3p,.s4p"
-        context={{ section, sectionLabel: SECTION_LABELS[section] || section }}
+        context={{
+          section,
+          sectionLabel: SECTION_LABELS[section] || section,
+          extra: section === 'sim' ? formatProcessSimContext(processSimState) : undefined,
+        }}
         toolToSection={CABLE_TOOL_TO_SECTION}
         onJumpToSection={setSection}
       />

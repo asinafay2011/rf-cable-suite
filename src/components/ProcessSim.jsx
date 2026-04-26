@@ -366,6 +366,11 @@ export default function ProcessSim() {
     try { localStorage.setItem('cablelab.process-sim-recipe', JSON.stringify(recipe)) } catch {}
   }, [recipe])
 
+  // Broadcast current state so the host (CableApp → agent) can read it
+  // for context-aware help. Fired again whenever recipe / sim output changes.
+  // (defined inside component so we have access to recipe + sim)
+  // ⬇ effect attached after sim is computed below
+
   const update = (path) => (value) => {
     setRecipe((r) => {
       const copy = { ...r }
@@ -406,6 +411,13 @@ export default function ProcessSim() {
   }, [recipe])
 
   const std = STANDARDS[recipe.product.target]
+
+  // Push current state out to listeners (agent context). Compact text + a structured object.
+  useEffect(() => {
+    const detail = { recipe, sim, std }
+    window.dispatchEvent(new CustomEvent('processsim:state', { detail }))
+  }) // run on every render so it stays in sync with sim output
+
   const checks = useMemo(() => {
     const c = []
     const z_off = Math.abs(sim.jacket.z_diff - std.z0_diff)
