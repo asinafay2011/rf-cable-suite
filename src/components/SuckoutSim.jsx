@@ -134,6 +134,14 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
   const [bandHi, setBandHi] = useState(18000)
   const [notchDepth, setNotchDepth] = useState(8)
   const [insertionLossBase, setInsertionLossBase] = useState(0.5)
+  // Display units for length values (mm or inch). Internal state stays in mm.
+  const [units, setUnits] = useState(() => {
+    try { return localStorage.getItem('suckout.units') || 'mm' } catch { return 'mm' }
+  })
+  const setUnitsAndPersist = (u) => {
+    setUnits(u)
+    try { localStorage.setItem('suckout.units', u) } catch {}
+  }
 
   const addLayer = (kind) => setStack([...stack, { ...newLayer(kind), id: nextId() }])
   const removeLayer = (id) => setStack(stack.filter((l) => l.id !== id))
@@ -202,12 +210,40 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
   return (
     <section className="space-y-5">
       <header className="space-y-1">
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase" style={{ color: accent }}>
-          ◆ Tape Suckout Sim · multi-layer Bragg notch designer
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="space-y-1">
+            <div className="font-mono text-[11px] tracking-[0.2em] uppercase" style={{ color: accent }}>
+              ◆ Tape Suckout Sim · multi-layer Bragg notch designer
+            </div>
+            <h1 className="text-2xl md:text-3xl font-light tracking-tight" style={{ fontFamily: 'Bricolage Grotesque' }}>
+              Stack many tapes — see every Bragg notch at once
+            </h1>
+          </div>
+          {/* Units toggle */}
+          <div className="flex items-center bg-[#0a0d0f] border border-[#252e33] rounded overflow-hidden shrink-0">
+            <button
+              onClick={() => setUnitsAndPersist('mm')}
+              className="px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider"
+              style={{
+                background: units === 'mm' ? accent + '20' : 'transparent',
+                color: units === 'mm' ? accent : C.textMuted,
+                borderRight: '1px solid ' + C.border,
+              }}
+            >
+              mm
+            </button>
+            <button
+              onClick={() => setUnitsAndPersist('inch')}
+              className="px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider"
+              style={{
+                background: units === 'inch' ? accent + '20' : 'transparent',
+                color: units === 'inch' ? accent : C.textMuted,
+              }}
+            >
+              inch
+            </button>
+          </div>
         </div>
-        <h1 className="text-2xl md:text-3xl font-light tracking-tight" style={{ fontFamily: 'Bricolage Grotesque' }}>
-          Stack many tapes — see every Bragg notch at once
-        </h1>
         <p className="text-[12px] md:text-[13px] leading-relaxed max-w-3xl" style={{ color: C.textDim }}>
           Real semi-rigid coax has 8-15 PTFE layers. Each one has its own pitch, so each contributes its own Bragg notch at <span className="font-mono" style={{ color: C.teal }}>f<sub>n</sub> = n·c·VF / (2·P)</span>.
           Identical layers stack the notch deeper at the same frequency. Mixing widths spreads the notches across frequency.
@@ -243,7 +279,7 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
             <div className="font-mono text-[9px]" style={{ color: C.textMuted }}>step 2</div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <SliderInput label="Cable OD" value={cableOD} onChange={setCableOD} min={0.5} max={30} step={0.1} unit="mm" inchHint />
+            <SliderInput label="Cable OD" value={cableOD} onChange={setCableOD} min={0.5} max={30} step={0.1} units={units} length />
             <SliderInput label="VF" value={vf} onChange={setVf} min={0.5} max={0.95} step={0.01} unit="" />
             <SliderInput label="Band low" value={bandLo} onChange={setBandLo} min={100} max={20000} step={100} unit="MHz" />
             <SliderInput label="Band high" value={bandHi} onChange={setBandHi} min={500} max={50000} step={500} unit="MHz" />
@@ -301,6 +337,7 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
               cableOD={cableOD}
               vf={vf}
               color={colorFor(idx)}
+              units={units}
               onUpdate={(patch) => updateLayer(layer.id, patch)}
               onRemove={() => removeLayer(layer.id)}
               onDuplicate={() => duplicateLayer(layer.id)}
@@ -308,6 +345,9 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
           ))}
         </div>
       </div>
+
+      {/* CROSS-SECTION VISUALIZATION */}
+      <CableCrossSectionPanel stack={stack} cableOD={cableOD} units={units} accent={accent} />
 
       {/* VERDICT */}
       <div
@@ -443,12 +483,177 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
 let _id = 1
 function nextId() { return ++_id }
 
+// ─────────── Cable cross-section visualization ───────────
+// Shows the cable's concentric rings as each tape layer is added.
+// - Inner copper conductor + dielectric
+// - One ring per WRAP (so a layer with count=10 adds 10 visible rings)
+// - Each ring colored to match its layer (and its notch markers)
+// - PTFE: translucent fill + diagonal hatch (helix direction)
+// - Foil:  silver solid ring
+// - Braid: dark with crosshatch pattern
+//
+// We render: a "build flow" of mini cross-sections (one per wrap)
+// AND a final big cross-section with all layers overlaid, with an OD
+// dimension chip in the active units.
+function CableCrossSectionPanel({ stack, cableOD, units, accent }) {
+  // Build the wrap-by-wrap stack (each `count` is expanded into N entries
+  // so the visualisation shows every physical wrap, not just every layer).
+  const wraps = []
+  stack.forEach((layer, layerIdx) => {
+    for (let k = 0; k < Math.max(1, layer.count); k++) {
+      wraps.push({ ...layer, layerIdx, wrapIdx: k })
+    }
+  })
+
+  // Approximate radial thickness for each wrap (visual only, not to scale).
+  // Tape: 25-50 µm, foil: 35 µm, braid: 200 µm. Scale down to a sane visual.
+  const tapeT = 0.10  // mm visual
+  const foilT = 0.10
+  const braidT = 0.40
+
+  // Compute outer OD after all layers — for OD chip
+  const finalOD = wraps.reduce((od, w) => {
+    if (w.kind === 'foil') return od + 2 * foilT
+    if (w.kind === 'braid') return od + 2 * braidT
+    return od + 2 * tapeT
+  }, cableOD)
+
+  // Build the cumulative stages: stage 0 = bare core, stage N = after wrap N
+  const stages = [{ od: cableOD, label: 'Core', wraps: [] }]
+  let runningOD = cableOD
+  wraps.forEach((w, i) => {
+    runningOD += 2 * (w.kind === 'foil' ? foilT : w.kind === 'braid' ? braidT : tapeT)
+    stages.push({
+      od: runningOD,
+      label: `+L${w.layerIdx + 1} ${w.kind === 'ptfe' ? 'PTFE' : w.kind === 'foil' ? 'Foil' : 'Braid'} #${w.wrapIdx + 1}`,
+      wraps: wraps.slice(0, i + 1),
+    })
+  })
+
+  // OD chip formatter
+  const fmtOD = (mm) => {
+    if (units === 'inch') return `ϕ${(mm / 25.4).toFixed(4)}″`
+    return `ϕ${mm.toFixed(2)} mm`
+  }
+
+  return (
+    <div className="bg-[#12171a] border border-[#252e33] rounded p-3">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: C.teal }}>
+          Cable cross-section · build progression
+        </div>
+        <div className="font-mono text-[10px]" style={{ color: C.textMuted }}>
+          core {fmtOD(cableOD)} → final {fmtOD(finalOD)} · {wraps.length} wrap{wraps.length === 1 ? '' : 's'}
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-[260px_1fr] gap-3">
+        {/* Big final cross-section */}
+        <div className="bg-[#0a0d0f] border border-[#252e33] rounded p-2 flex flex-col items-center">
+          <BigCableXS wraps={wraps} cableOD={cableOD} size={240} />
+          <div className="mt-2 text-center font-mono text-[10px] uppercase" style={{ color: C.textMuted }}>final cable</div>
+          <div className="font-mono text-[14px] font-medium" style={{ color: accent }}>{fmtOD(finalOD)}</div>
+        </div>
+
+        {/* Horizontal build flow */}
+        <div className="bg-[#0a0d0f] border border-[#252e33] rounded p-2 overflow-hidden">
+          <div className="flex gap-1 overflow-x-auto pb-1">
+            {stages.map((s, i) => (
+              <React.Fragment key={i}>
+                <div className="flex flex-col items-center shrink-0 w-[68px]">
+                  <div className="bg-[#12171a] border border-[#252e33] rounded mx-auto flex items-center justify-center" style={{ width: 56, height: 56 }}>
+                    <BigCableXS wraps={s.wraps} cableOD={cableOD} size={50} />
+                  </div>
+                  <div className="font-mono text-[9px] mt-1 text-center leading-tight" style={{ color: i === 0 ? C.copper : colorFor(s.wraps[s.wraps.length - 1]?.layerIdx ?? 0) }}>
+                    {s.label}
+                  </div>
+                  <div className="font-mono text-[8px] mt-0.5" style={{ color: C.textMuted }}>
+                    {fmtOD(s.od)}
+                  </div>
+                </div>
+                {i < stages.length - 1 && (
+                  <div className="flex items-center shrink-0 -mx-0.5" style={{ color: C.borderHi, height: 56 }}>▸</div>
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+          <div className="mt-2 text-[10px] font-mono" style={{ color: C.textMuted }}>
+            ⓘ Each wrap shown as a colored ring. PTFE = translucent layer color · Foil = silver · Braid = crosshatch.
+            Thickness shown is visual only (real tape is 25-50 µm).
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// SVG that renders a coax cross-section with the given wrap stack
+function BigCableXS({ wraps, cableOD, size = 240 }) {
+  const c = size / 2
+  // Total visual radius: scale so final fits within the canvas
+  const totalT = wraps.reduce((acc, w) => acc + (w.kind === 'foil' ? 0.10 : w.kind === 'braid' ? 0.40 : 0.10), 0)
+  const finalODmm = cableOD + 2 * totalT
+  const padding = 4
+  const maxR = c - padding
+  const mmToPx = maxR / Math.max(0.5, finalODmm / 2)
+  const coreR = (cableOD / 2) * mmToPx
+  // Conductor: assume conductor = 50% of core OD (dielectric core fills the rest)
+  const condR = coreR * 0.55
+  // Outer build outward
+  const layers = []
+  let r = coreR
+  wraps.forEach((w, i) => {
+    const t = (w.kind === 'foil' ? 0.10 : w.kind === 'braid' ? 0.40 : 0.10) * mmToPx
+    const inner = r
+    const outer = r + t
+    layers.push({ inner, outer, kind: w.kind, color: colorFor(w.layerIdx), wrapIdx: w.wrapIdx, layerIdx: w.layerIdx })
+    r = outer
+  })
+
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <defs>
+        <pattern id="braid-pat" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#c97b3f" strokeWidth="1.2" />
+          <line x1="3" y1="0" x2="3" y2="6" stroke="#e89357" strokeWidth="0.8" />
+        </pattern>
+        {/* Diagonal hatch for PTFE — alternates direction by wrap index for S/Z */}
+        <pattern id="ptfe-hatch-s" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#ffffff" strokeOpacity="0.10" strokeWidth="0.8" />
+        </pattern>
+        <pattern id="ptfe-hatch-z" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-35)">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#ffffff" strokeOpacity="0.10" strokeWidth="0.8" />
+        </pattern>
+      </defs>
+      {/* Outermost first so inner rings render on top */}
+      {layers.slice().reverse().map((l, idx) => {
+        const fill = l.kind === 'foil' ? '#a7b0b6' : l.kind === 'braid' ? 'url(#braid-pat)' : l.color
+        const opacity = l.kind === 'ptfe' ? 0.55 : 0.85
+        const hatch = l.kind === 'ptfe' ? (l.wrapIdx % 2 ? 'url(#ptfe-hatch-z)' : 'url(#ptfe-hatch-s)') : null
+        return (
+          <g key={idx}>
+            <circle cx={c} cy={c} r={l.outer} fill={fill} fillOpacity={opacity} stroke={l.color} strokeWidth="0.75" />
+            {hatch && <circle cx={c} cy={c} r={l.outer} fill={hatch} />}
+          </g>
+        )
+      })}
+      {/* Dielectric core (the OD where the tape sits) */}
+      <circle cx={c} cy={c} r={coreR} fill="#1a1612" stroke="#384249" strokeWidth="0.5" />
+      {/* Copper conductor */}
+      <circle cx={c} cy={c} r={condR} fill="#c97b3f" stroke="#e89357" strokeWidth="0.5" />
+      {/* Center sparkle (small highlight) */}
+      <circle cx={c - condR * 0.3} cy={c - condR * 0.3} r={condR * 0.15} fill="#fbbf24" fillOpacity="0.5" />
+    </svg>
+  )
+}
+
 // ─────────── Layer row ───────────
-function LayerRow({ layer, idx, cableOD, vf, color, onUpdate, onRemove, onDuplicate }) {
+function LayerRow({ layer, idx, cableOD, vf, color, units = 'mm', onUpdate, onRemove, onDuplicate }) {
   const P = pitchOf(layer, cableOD)
   const f1 = (150000 * vf) / Math.max(0.01, P)
   const alpha = helixAngleOf(layer, cableOD)
   const isBraid = layer.kind === 'braid'
+  const showInch = units === 'inch'
 
   return (
     <div className="border rounded bg-[#0d1416] flex items-stretch overflow-hidden" style={{ borderColor: color + '40' }}>
@@ -476,7 +681,7 @@ function LayerRow({ layer, idx, cableOD, vf, color, onUpdate, onRemove, onDuplic
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {!isBraid && (
             <>
-              <CompactSlider label="Width" value={layer.width} onChange={(v) => onUpdate({ width: v })} min={0.5} max={30} step={0.5} unit="mm" />
+              <CompactSlider label="Width" value={layer.width} onChange={(v) => onUpdate({ width: v })} min={0.5} max={30} step={0.5} units={units} length />
               <CompactSlider label="Overlap" value={layer.overlap} onChange={(v) => onUpdate({ overlap: v })} min={0} max={90} step={5} unit="%" />
             </>
           )}
@@ -489,7 +694,9 @@ function LayerRow({ layer, idx, cableOD, vf, color, onUpdate, onRemove, onDuplic
           <CompactSlider label="× count" value={layer.count} onChange={(v) => onUpdate({ count: Math.max(1, v) })} min={1} max={20} step={1} unit="wraps" />
           <div className="bg-[#0a0d0f] border border-[#252e33] rounded p-1.5">
             <div className="font-mono text-[8px] uppercase" style={{ color: C.textMuted }}>P / f₁ / α</div>
-            <div className="font-mono text-[10px] mt-0.5" style={{ color }}>{P.toFixed(2)} mm</div>
+            <div className="font-mono text-[10px] mt-0.5" style={{ color }}>
+              {showInch ? `${(P / 25.4).toFixed(4)}″` : `${P.toFixed(2)} mm`}
+            </div>
             <div className="font-mono text-[10px]" style={{ color: C.amber }}>{(f1 / 1000).toFixed(2)} GHz</div>
             <div className="font-mono text-[9px]" style={{ color: C.textMuted }}>α = {alpha.toFixed(0)}°</div>
           </div>
@@ -518,65 +725,89 @@ function LayerRow({ layer, idx, cableOD, vf, color, onUpdate, onRemove, onDuplic
   )
 }
 
-function CompactSlider({ label, value, onChange, min, max, step, unit }) {
+// Length-aware: when `length` is true, the value is interpreted as mm
+// internally but displayed/edited in the active `units` (mm or inch).
+function CompactSlider({ label, value, onChange, min, max, step, unit, units = 'mm', length = false }) {
+  const isInch = length && units === 'inch'
+  const factor = isInch ? 1 / 25.4 : 1
+  const dispValue = value * factor
+  const dispMin = min * factor
+  const dispMax = max * factor
+  const dispStep = isInch ? Math.max(0.001, step / 25.4) : step
+  const dispUnit = length ? (isInch ? '″' : 'mm') : unit
+  const handle = (raw) => onChange(isInch ? parseFloat(raw) * 25.4 : parseFloat(raw))
+  const fmt = (v) => (isInch ? v.toFixed(4) : v.toFixed(step < 1 ? 1 : 0))
   return (
     <div>
       <label className="font-mono text-[9px] uppercase tracking-wider mb-0.5 block" style={{ color: C.textMuted }}>{label}</label>
       <div className="flex items-center gap-1">
         <input
           type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={(e) => onChange(parseFloat(e.target.value))}
+          min={dispMin}
+          max={dispMax}
+          step={dispStep}
+          value={dispValue}
+          onChange={(e) => handle(e.target.value)}
           className="flex-1 h-1"
           style={{ accentColor: C.copper }}
         />
         <input
           type="number"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={(e) => onChange(parseFloat(e.target.value))}
-          className="w-12 bg-[#0a0d0f] border border-[#252e33] rounded px-1 py-0.5 text-[10px] font-mono text-right"
+          min={dispMin}
+          max={dispMax}
+          step={dispStep}
+          value={fmt(dispValue)}
+          onChange={(e) => handle(e.target.value)}
+          className="w-14 bg-[#0a0d0f] border border-[#252e33] rounded px-1 py-0.5 text-[10px] font-mono text-right"
           style={{ color: C.amber }}
         />
-        {unit && <span className="font-mono text-[9px] w-7" style={{ color: C.textMuted }}>{unit}</span>}
+        {dispUnit && <span className="font-mono text-[9px] w-7" style={{ color: C.textMuted }}>{dispUnit}</span>}
       </div>
     </div>
   )
 }
 
-function SliderInput({ label, value, onChange, min, max, step, unit, inchHint = false }) {
+function SliderInput({ label, value, onChange, min, max, step, unit, units = 'mm', length = false }) {
+  const isInch = length && units === 'inch'
+  const factor = isInch ? 1 / 25.4 : 1
+  const dispValue = value * factor
+  const dispMin = min * factor
+  const dispMax = max * factor
+  const dispStep = isInch ? Math.max(0.001, step / 25.4) : step
+  const dispUnit = length ? (isInch ? 'inch' : 'mm') : unit
+  const handle = (raw) => onChange(isInch ? parseFloat(raw) * 25.4 : parseFloat(raw))
+  const fmt = (v) => (isInch ? v.toFixed(4) : v.toFixed(step < 1 ? 2 : 0))
   return (
     <div>
       <label className="font-mono text-[10px] uppercase tracking-wider mb-1 block" style={{ color: C.textMuted }}>{label}</label>
       <div className="flex items-center gap-2">
         <input
           type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={(e) => onChange(parseFloat(e.target.value))}
+          min={dispMin}
+          max={dispMax}
+          step={dispStep}
+          value={dispValue}
+          onChange={(e) => handle(e.target.value)}
           className="flex-1"
           style={{ accentColor: C.copper }}
         />
         <input
           type="number"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={(e) => onChange(parseFloat(e.target.value))}
+          min={dispMin}
+          max={dispMax}
+          step={dispStep}
+          value={fmt(dispValue)}
+          onChange={(e) => handle(e.target.value)}
           className="w-16 bg-[#0a0d0f] border border-[#252e33] rounded px-1.5 py-0.5 text-[11px] font-mono text-right"
           style={{ color: C.amber }}
         />
-        <span className="font-mono text-[10px] w-12" style={{ color: C.textMuted }}>{unit}</span>
+        <span className="font-mono text-[10px] w-12" style={{ color: C.textMuted }}>{dispUnit}</span>
       </div>
-      {inchHint && <div className="font-mono text-[9px] text-right mt-0.5" style={{ color: C.teal }}>{(value / 25.4).toFixed(4)}″</div>}
+      {length && (
+        <div className="font-mono text-[9px] text-right mt-0.5" style={{ color: C.teal }}>
+          {isInch ? `${value.toFixed(2)} mm` : `${(value / 25.4).toFixed(4)}″`}
+        </div>
+      )}
     </div>
   )
 }
