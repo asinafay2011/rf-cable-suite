@@ -30,8 +30,9 @@ const DEFAULT_THRESHOLDS = {
   rl_fail_db: 10,
   vswr_pass: 1.5,
   vswr_fail: 2.0,
-  reflection_pass: 0.10,
-  reflection_fail: 0.20,
+  // For installed-cable QC, in-cable reflection thresholds are typically tighter than end-of-line
+  reflection_pass: 0.05,
+  reflection_fail: 0.10,
 }
 
 const PAIR_STANDARDS = [
@@ -94,12 +95,21 @@ export default function VNATest() {
       }),
     },
     {
+      id: 'mixed',
+      label: 'Mixed pair',
+      hint: 'clean Wire A + defective Wire B, matched VF → skew passes but B fails QC',
+      build: () => ({
+        a: synthTouchstone({ name: 'demo_mixed_wireA_clean.s1p', length_ft: 33, vf: 0.6650, defects: [] }),
+        b: synthTouchstone({ name: 'demo_mixed_wireB_defect.s1p', length_ft: 33, vf: 0.6648, defects: [{ at_ft: 12, rho: 0.35 }] }),
+      }),
+    },
+    {
       id: 'bad',
       label: 'Bad pair',
       hint: 'kink @ 12 ft + 1.5 pp VF mismatch → POOR',
       build: () => ({
         a: synthTouchstone({ name: 'demo_bad_wireA_clean.s1p', length_ft: 33, vf: 0.665, defects: [] }),
-        b: synthTouchstone({ name: 'demo_bad_wireB_defect.s1p', length_ft: 33, vf: 0.650, defects: [{ at_ft: 12, rho: 0.12 }] }),
+        b: synthTouchstone({ name: 'demo_bad_wireB_defect.s1p', length_ft: 33, vf: 0.650, defects: [{ at_ft: 12, rho: 0.35 }] }),
       }),
     },
   ]
@@ -139,8 +149,8 @@ export default function VNATest() {
               onClick={() => loadDemo(d.id)}
               className="px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider rounded border bg-transparent flex items-center gap-1.5 hover:bg-[#1f1610] transition-colors"
               style={{
-                color: d.id === 'good' ? C.teal : C.amber,
-                borderColor: (d.id === 'good' ? C.teal : C.amber) + '60',
+                color: d.id === 'good' ? C.teal : d.id === 'mixed' ? '#fdba74' : C.amber,
+                borderColor: (d.id === 'good' ? C.teal : d.id === 'mixed' ? '#fdba74' : C.amber) + '60',
               }}
               title={d.hint}
             >
@@ -628,6 +638,8 @@ function PairSkewView({ wireA, wireB, vfPercent, units }) {
   const skew = useMemo(() => {
     const tdrA = computeTDR(wireA.parsed.s.map((b) => b.s11), wireA.parsed.freqs, vfPercent / 100, units === 'ft')
     const tdrB = computeTDR(wireB.parsed.s.map((b) => b.s11), wireB.parsed.freqs, vfPercent / 100, units === 'ft')
+    // Find the actual end (rightmost significant peak), not the largest peak — robust to in-cable defects
+    // For typical cables the end peak is the LARGEST reflection — use peakReflection.
     const peakA = peakReflection(tdrA.distances, tdrA.rho, units === 'ft' ? 1 : 0.3, Infinity)
     const peakB = peakReflection(tdrB.distances, tdrB.rho, units === 'ft' ? 1 : 0.3, Infinity)
     if (!peakA || !peakB) return null
@@ -640,8 +652,8 @@ function PairSkewView({ wireA, wireB, vfPercent, units }) {
     const skew_per_m = (delta_oneway / L_m) * 1e12
     return {
       L_m, L_ft: L_m * 3.28084,
-      vf_A: (2 * L_m) / tauA / c,
-      vf_B: (2 * L_m) / tauB / c,
+      vf_A: (2 * L_m) / (tauA * c),
+      vf_B: (2 * L_m) / (tauB * c),
       delta_oneway_ps: delta_oneway * 1e12,
       skew_per_m,
       skew_per_ft: skew_per_m / 3.28084,

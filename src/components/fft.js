@@ -118,3 +118,28 @@ export function peakReflection(distances, rho, minDistance = 0.1, maxDistance = 
   if (bestIdx === -1) return null
   return { index: bestIdx, distance: distances[bestIdx], rho: rho[bestIdx] }
 }
+
+// Find the rightmost (last) significant peak — robust end-of-cable detector that
+// doesn't get fooled by a large in-cable defect that happens to be bigger than the end peak.
+// Walks from the largest distance backward; returns the last local-maximum whose magnitude is
+// at least `relThreshold * globalPeak`.
+export function endPeakReflection(distances, rho, minDistance = 0.5, relThreshold = 0.3) {
+  // Find the global peak amplitude in the search range first
+  let globalPeak = 0
+  for (let i = 0; i < distances.length; i++) {
+    if (distances[i] < minDistance) continue
+    const a = Math.abs(rho[i])
+    if (a > globalPeak) globalPeak = a
+  }
+  if (globalPeak === 0) return null
+  const cutoff = globalPeak * relThreshold
+  // Walk from the end backwards, return the first peak above cutoff
+  for (let i = distances.length - 2; i >= 1; i--) {
+    if (distances[i] < minDistance) break
+    const a = Math.abs(rho[i])
+    if (a >= cutoff && a > Math.abs(rho[i - 1]) && a > Math.abs(rho[i + 1])) {
+      return { index: i, distance: distances[i], rho: rho[i] }
+    }
+  }
+  return null
+}
