@@ -216,6 +216,65 @@ export const CABLE_TOOLS = [
     },
   },
   {
+    name: 'sensitivity_analysis',
+    description:
+      'Sweep one parameter of a coax Z₀ calculation across a range, hold the rest fixed, and return Z₀ at each step. Use to answer "how sensitive is Z₀ to εr / D / d?" or to size manufacturing tolerances.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vary: { type: 'string', description: 'Which parameter to sweep: "D", "d", or "er"' },
+        from: { type: 'number', description: 'Sweep start' },
+        to: { type: 'number', description: 'Sweep end' },
+        steps: { type: 'number', description: 'Number of steps (default 11)' },
+        D: { type: 'number', description: 'Fixed D in mm (used if not the swept variable)' },
+        d: { type: 'number', description: 'Fixed d in mm' },
+        er: { type: 'number', description: 'Fixed εr' },
+      },
+      required: ['vary', 'from', 'to'],
+    },
+  },
+  {
+    name: 'vna_qc_report',
+    description:
+      'Generate a markdown-formatted QA test report from the VNA Lab summary that the host app provides. Engineers paste the result directly into Confluence / email / Slack. Pass the wireA / wireB summaries (RL, VSWR, peak rho/distance, VFs, skew rate) you already have from the app or from the user.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cable_label: { type: 'string', description: 'Cable / build name (e.g., "Lot 2026-04 RG-58 33 ft sample 1")' },
+        operator: { type: 'string', description: 'Test operator name (optional)' },
+        wireA: {
+          type: 'object',
+          description: 'Per-wire summary: { name, mean_rl_db, worst_rl_db, peak_vswr, in_cable_peak_rho, in_cable_peak_ft, vf_percent }',
+        },
+        wireB: { type: 'object', description: 'Same shape as wireA (optional, for pair tests)' },
+        skew: { type: 'object', description: 'Pair skew summary: { skew_per_m, dvf_pp, total_skew_ps }' },
+        verdict: { type: 'string', description: 'Overall verdict (PASS / MARGINAL / FAIL)' },
+        thresholds: { type: 'object', description: 'Threshold values used (rl, vswr, reflection, skew limits)' },
+        notes: { type: 'string', description: 'Free-form operator notes' },
+      },
+      required: ['cable_label', 'wireA'],
+    },
+  },
+  {
+    name: 'bom_generator',
+    description:
+      'Generate a bill of materials for a cable assembly. Estimates Cu / dielectric / jacket mass per length, multiplies by user-supplied unit prices, sums totals. Returns a markdown table the user can paste into Excel / SAP.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cable_id: { type: 'string', description: 'Cable id from the database' },
+        length_m: { type: 'number', description: 'Length in meters' },
+        connectors_a: { type: 'string', description: 'Connector at end A (free-form, e.g., "N-male")' },
+        connectors_b: { type: 'string', description: 'Connector at end B' },
+        cu_price_usd_per_kg: { type: 'number', description: 'Spot Cu price USD/kg (default 9.5)' },
+        connector_unit_price_usd: { type: 'number', description: 'Per-connector cost (default 12)' },
+        labor_usd: { type: 'number', description: 'Assembly labor (default 25)' },
+        qty: { type: 'number', description: 'Number of identical assemblies (default 1)' },
+      },
+      required: ['cable_id', 'length_m'],
+    },
+  },
+  {
     name: 'lay_for_skew',
     description:
       'Inverse of pair_lay_skew: given a target intra-pair skew (ps/m) and an expected εr mismatch, compute the maximum pair lay length that meets the target. Use when the user asks "what lay length do I need for ≤ X ps/m skew?".',
@@ -405,6 +464,123 @@ export function dispatchCableTool(name, input) {
           }));
         }
         return result;
+      }
+      case 'sensitivity_analysis': {
+        const { vary, from, to, steps = 11, D, d, er } = input;
+        if (!['D', 'd', 'er'].includes(vary)) throw new Error('vary must be "D", "d", or "er"');
+        if (!(from > 0 && to > 0 && to !== from)) throw new Error('from and to must be positive and different');
+        const N = Math.max(2, Math.min(101, Math.floor(steps)));
+        const sweep = [];
+        for (let i = 0; i < N; i++) {
+          const x = from + ((to - from) * i) / (N - 1);
+          const D_ = vary === 'D' ? x : D;
+          const d_ = vary === 'd' ? x : d;
+          const er_ = vary === 'er' ? x : er;
+          if (!(D_ > 0 && d_ > 0 && er_ > 0 && D_ > d_)) {
+            sweep.push({ [vary]: num(x, 4), z0_ohm: null, error: 'invalid combo' });
+            continue;
+          }
+          const z0 = (138 / Math.sqrt(er_)) * Math.log10(D_ / d_);
+          sweep.push({ [vary]: num(x, 4), z0_ohm: num(z0, 2) });
+        }
+        // Identify which value of vary hits 50 / 75 Ω closest
+        const valid = sweep.filter((s) => s.z0_ohm != null);
+        const closest = (target) => {
+          let best = null;
+          for (const s of valid) {
+            if (best == null || Math.abs(s.z0_ohm - target) < Math.abs(best.z0_ohm - target)) best = s;
+          }
+          return best;
+        };
+        return {
+          vary, from, to, fixed: { D, d, er },
+          sweep,
+          closest_to_50: closest(50),
+          closest_to_75: closest(75),
+        };
+      }
+      case 'vna_qc_report': {
+        const { cable_label, operator, wireA, wireB, skew, verdict, thresholds, notes } = input;
+        if (!cable_label || !wireA) throw new Error('cable_label and wireA are required');
+        const ts = new Date().toISOString();
+        const lines = [];
+        lines.push(`# VNA Lab QC Report — ${cable_label}`);
+        lines.push('');
+        lines.push(`- **Test date**: ${ts}`);
+        if (operator) lines.push(`- **Operator**: ${operator}`);
+        if (verdict) lines.push(`- **Verdict**: **${verdict}**`);
+        lines.push('');
+        const renderWire = (label, w) => {
+          if (!w) return;
+          lines.push(`## ${label} — ${w.name || 'unnamed'}`);
+          lines.push('');
+          lines.push('| Metric | Value |');
+          lines.push('|---|---|');
+          if (w.mean_rl_db != null)         lines.push(`| Mean RL | ${w.mean_rl_db} dB |`);
+          if (w.worst_rl_db != null)        lines.push(`| Worst RL | ${w.worst_rl_db} dB |`);
+          if (w.peak_vswr != null)          lines.push(`| Peak VSWR | ${w.peak_vswr} |`);
+          if (w.in_cable_peak_rho != null)  lines.push(`| In-cable peak \\|ρ\\| | ${w.in_cable_peak_rho} |`);
+          if (w.in_cable_peak_ft != null)   lines.push(`| In-cable peak distance | ${w.in_cable_peak_ft} ft |`);
+          if (w.vf_percent != null)         lines.push(`| Velocity Factor | ${w.vf_percent}% |`);
+          lines.push('');
+        };
+        renderWire('Wire A', wireA);
+        renderWire('Wire B', wireB);
+        if (skew) {
+          lines.push(`## Pair Skew`);
+          lines.push('');
+          lines.push('| Metric | Value |');
+          lines.push('|---|---|');
+          if (skew.skew_per_m != null)    lines.push(`| Skew rate | ${skew.skew_per_m} ps/m |`);
+          if (skew.dvf_pp != null)        lines.push(`| ΔVF | ${skew.dvf_pp} pp |`);
+          if (skew.total_skew_ps != null) lines.push(`| Total skew | ${skew.total_skew_ps} ps |`);
+          lines.push('');
+        }
+        if (thresholds) {
+          lines.push(`## Thresholds`);
+          lines.push('');
+          lines.push('```json');
+          lines.push(JSON.stringify(thresholds, null, 2));
+          lines.push('```');
+          lines.push('');
+        }
+        if (notes) {
+          lines.push(`## Notes`);
+          lines.push('');
+          lines.push(notes);
+          lines.push('');
+        }
+        lines.push(`---`);
+        lines.push(`Generated by VNA Lab agent · brian-coax-lab.vercel.app`);
+        return { markdown: lines.join('\n'), bytes: lines.join('\n').length };
+      }
+      case 'bom_generator': {
+        const { cable_id, length_m, connectors_a, connectors_b, cu_price_usd_per_kg = 9.5, connector_unit_price_usd = 12, labor_usd = 25, qty = 1 } = input;
+        const merged = { ...CABLE_DB, ...getCustomCableCables() };
+        const c = merged[cable_id];
+        if (!c) throw new Error(`Unknown cable_id "${cable_id}". Use lookup_cable.`);
+        if (!(length_m > 0)) throw new Error('length_m must be positive');
+        // Crude Cu mass estimate: 0.6× of OD-area × density × length (very rough; user can adjust)
+        const od_mm = c.od_mm || 5;
+        const cu_volume_cm3 = Math.PI * Math.pow((od_mm * 0.3) / 10 / 2, 2) * (length_m * 100); // ≈ 30% of OD diameter is Cu
+        const cu_mass_kg = (cu_volume_cm3 * 8.96) / 1000;
+        const cable_cost = cu_mass_kg * cu_price_usd_per_kg;
+        const conn_count = (connectors_a ? 1 : 0) + (connectors_b ? 1 : 0);
+        const conn_cost = conn_count * connector_unit_price_usd;
+        const total_per_unit = cable_cost + conn_cost + labor_usd;
+        const total = total_per_unit * qty;
+        const lines = [];
+        lines.push(`# Bill of Materials — ${c.name} assembly`);
+        lines.push('');
+        lines.push('| Item | Detail | Qty | Unit | Subtotal |');
+        lines.push('|---|---|---|---|---|');
+        lines.push(`| Cable | ${c.name} (Z₀=${c.z0} Ω, ${od_mm} mm OD) | ${num(length_m, 2)} m | $${num(cu_price_usd_per_kg, 2)}/kg Cu | $${num(cable_cost, 2)} |`);
+        if (connectors_a) lines.push(`| Connector A | ${connectors_a} | 1 | $${num(connector_unit_price_usd, 2)} | $${num(connector_unit_price_usd, 2)} |`);
+        if (connectors_b) lines.push(`| Connector B | ${connectors_b} | 1 | $${num(connector_unit_price_usd, 2)} | $${num(connector_unit_price_usd, 2)} |`);
+        lines.push(`| Labor | Termination + test | 1 | $${num(labor_usd, 2)} | $${num(labor_usd, 2)} |`);
+        lines.push(`| **Per assembly** |  |  |  | **$${num(total_per_unit, 2)}** |`);
+        if (qty > 1) lines.push(`| **Total (×${qty})** |  |  |  | **$${num(total, 2)}** |`);
+        return { markdown: lines.join('\n'), per_unit_usd: num(total_per_unit, 2), total_usd: num(total, 2) };
       }
       case 'lay_for_skew': {
         const { target_skew_ps_per_m, delta_er } = input;
