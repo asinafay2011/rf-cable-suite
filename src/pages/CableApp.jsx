@@ -4950,6 +4950,15 @@ function fmtOD(mm) {
   if (mm == null || isNaN(mm)) return '—';
   return mm < 1 ? `ϕ${mm.toFixed(3)} mm` : `ϕ${mm.toFixed(2)} mm`;
 }
+function fmtODInch(mm) {
+  if (mm == null || isNaN(mm)) return '—';
+  const inch = mm / 25.4;
+  return inch < 0.1 ? `${inch.toFixed(4)}″` : `${inch.toFixed(3)}″`;
+}
+function fmtODBoth(mm) {
+  if (mm == null || isNaN(mm)) return '—';
+  return `${fmtOD(mm)} / ${fmtODInch(mm)}`;
+}
 
 function BuildFlowDiagram({ recipe, product }) {
   const c = recipe.construction;
@@ -4987,8 +4996,13 @@ function BuildFlowDiagram({ recipe, product }) {
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#5eead4]">
           ◆ Cross-section build flow · {stages.length} stage{stages.length === 1 ? '' : 's'}
         </div>
-        <div className="font-mono text-[10px] text-[#6b7479]">
-          OD growth: <span className="text-[#fbbf24]">{fmtOD(od.cond)}</span> → <span className="text-[#c97b3f]">{fmtOD(od.finalOD)}</span>
+        <div className="font-mono text-[11px] text-[#a7b0b6]">
+          <span className="text-[#6b7479]">OD growth:</span>{' '}
+          <span className="text-[#fbbf24]">{fmtOD(od.cond)}</span>
+          <span className="text-[#6b7479]"> ({fmtODInch(od.cond)})</span>
+          {' → '}
+          <span className="text-[#c97b3f]">{fmtOD(od.finalOD)}</span>
+          <span className="text-[#6b7479]"> ({fmtODInch(od.finalOD)})</span>
           <span className="ml-2 text-[#5eead4]">({(od.finalOD / od.cond).toFixed(1)}×)</span>
         </div>
       </div>
@@ -5028,31 +5042,38 @@ function BuildFlowDiagram({ recipe, product }) {
       >
         {stages.map((s, i) => {
           const sz = iconSize(s.od);
+          const mmStr = s.od < 1 ? s.od.toFixed(3) : s.od.toFixed(2);
+          const inchStr = s.od < 25.4 ? (s.od / 25.4).toFixed(4) : (s.od / 25.4).toFixed(3);
           return (
             <React.Fragment key={i}>
-              <div className="flex flex-col items-stretch shrink-0 w-[120px] md:w-[140px] p-2.5 border-r border-[#252e33]" style={{ borderRightStyle: i === stages.length - 1 ? 'none' : 'solid' }}>
+              <div className="flex flex-col items-stretch shrink-0 w-[140px] md:w-[160px] p-3 border-r border-[#252e33]" style={{ borderRightStyle: i === stages.length - 1 ? 'none' : 'solid' }}>
                 {/* step number */}
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="font-mono text-[9px] text-[#c97b3f] tracking-wider">{String(i + 1).padStart(2, '0')}</span>
+                  <span className="font-mono text-[10px] text-[#c97b3f] tracking-wider font-medium">{String(i + 1).padStart(2, '0')}</span>
                   {s.isFinal && <span className="font-mono text-[8px] text-[#5eead4] bg-[#0d1f1d] border border-[#2f7a6e] px-1 rounded">FINAL</span>}
                 </div>
                 {/* SVG cross-section */}
                 <div
-                  className="relative bg-[#0a0d0f] border border-[#252e33] rounded mx-auto flex items-center justify-center"
+                  className="bg-[#0a0d0f] border border-[#252e33] rounded mx-auto flex items-center justify-center"
                   style={{ width: 80, height: 80 }}
                 >
                   <StageXS kind={s.kind} size={sz} />
-                  {/* dimension annotation top-right */}
-                  <div className="absolute -top-1 -right-1 px-1 py-0.5 font-mono text-[8px] text-[#fbbf24] bg-[#0a0d0f] border border-[#384249] rounded">
-                    {fmtOD(s.od)}
+                </div>
+                {/* dimension block — bigger and shows both mm + inch */}
+                <div className="mt-2 bg-[#0a0d0f] border border-[#384249] rounded px-1.5 py-1 text-center">
+                  <div className="font-mono text-[13px] text-[#fbbf24] font-medium leading-none">
+                    ϕ {mmStr}<span className="text-[10px] text-[#a7b0b6] ml-0.5">mm</span>
+                  </div>
+                  <div className="font-mono text-[11px] text-[#5eead4] leading-none mt-1">
+                    {inchStr}″
                   </div>
                 </div>
                 {/* label */}
-                <div className="font-mono text-[10px] text-[#fbbf24] text-center leading-tight mt-2 font-medium">{s.label}</div>
+                <div className="font-mono text-[11px] text-[#fbbf24] text-center leading-tight mt-2 font-medium">{s.label}</div>
                 <div className="font-mono text-[9px] text-[#a7b0b6] text-center leading-tight mt-0.5">{s.mat}</div>
                 <div className="font-mono text-[9px] text-[#6b7479] text-center leading-tight mt-0.5">{s.spec}</div>
                 {s.z && (
-                  <div className="font-mono text-[9px] text-[#5eead4] text-center leading-tight mt-1 bg-[#0d1f1d] border border-[#2f7a6e] rounded py-0.5">
+                  <div className="font-mono text-[10px] text-[#5eead4] text-center leading-tight mt-1.5 bg-[#0d1f1d] border border-[#2f7a6e] rounded py-1">
                     Z {s.z}
                   </div>
                 )}
@@ -5073,8 +5094,8 @@ function BuildFlowDiagram({ recipe, product }) {
           ⓘ ODs are first-order estimates from AWG + εᵣ + standard wall assumptions. Use the recipe BOM for sourcing specs.
         </div>
         <div className="flex items-center gap-3">
-          <span>Δ <span className="text-[#fbbf24]">{((od.finalOD - od.cond)).toFixed(2)} mm</span></span>
-          <span>Final ϕ <span className="text-[#c97b3f]">{od.finalOD.toFixed(2)} mm</span></span>
+          <span>Δ <span className="text-[#fbbf24]">{(od.finalOD - od.cond).toFixed(2)} mm</span> <span className="text-[#5eead4]">/ {((od.finalOD - od.cond) / 25.4).toFixed(3)}″</span></span>
+          <span>Final <span className="text-[#c97b3f]">ϕ {od.finalOD.toFixed(2)} mm</span> <span className="text-[#5eead4]">/ {(od.finalOD / 25.4).toFixed(3)}″</span></span>
         </div>
       </div>
 
