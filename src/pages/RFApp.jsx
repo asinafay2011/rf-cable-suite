@@ -5,6 +5,7 @@ import FloatingAgent from "../components/FloatingAgent.jsx";
 import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
 import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
 import CompanyDefaultsPanel from "../components/CompanyDefaultsPanel.jsx";
+import SuckoutSim from "../components/SuckoutSim.jsx";
 import { useIsMobile } from "../components/useIsMobile.js";
 
 const RF_SYSTEM_PROMPT = `You are a senior RF cable engineer embedded in the RF Cable Engineering Suite. You have access to calculation tools — use them whenever a numeric answer is requested instead of relying on memorized constants.
@@ -58,6 +59,7 @@ const RF_SECTION_LABELS = {
   connectors: 'Connectors',
   link: 'Link Budget',
   tools: 'Tools (NF / IP3 / Path / Smith)',
+  suckout: 'Tape Suckout Sim',
   wizard: 'Wizard',
   cheat: 'Cheat Sheet',
   compare: 'Compare',
@@ -1641,7 +1643,7 @@ export default function RFCableSuite() {
 
   const isMobile = useIsMobile();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const NAV_TABS = [["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["tools", "Tools"], ["wizard", "Wizard"], ["cheat", "Cheat Sheet"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]];
+  const NAV_TABS = [["ask", "Ask"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["tools", "Tools"], ["suckout", "Suckout"], ["wizard", "Wizard"], ["cheat", "Cheat Sheet"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]];
 
   const loadCableIntoDesign = (id) => { setActiveCable(id); setTab("design"); };
   const askAboutCable = (id) => {
@@ -1848,6 +1850,7 @@ export default function RFCableSuite() {
           {tab === "connectors" && <ConnectorView />}
           {tab === "link" && <LinkView openInLibrary={openInLibrary} onPrint={() => setPrintSetup({ type: "link" })} toolPreset={toolPreset} clearToolPreset={clearToolPreset} />}
           {tab === "tools" && <ToolsView toolPreset={toolPreset} clearToolPreset={clearToolPreset} />}
+          {tab === "suckout" && <SuckoutSim accent="#d97706" defaultLayer="ptfe" />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
           {tab === "cheat" && <CheatSheetView />}
           {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}
