@@ -15,7 +15,7 @@ export default function AppSwitcher() {
       className="fixed top-3 right-3 z-[100] flex gap-1 p-1 rounded-md bg-[#0a0d0f]/90 backdrop-blur-md border border-[#1f1610] shadow-lg"
       style={{ fontFamily: '"Bricolage Grotesque", system-ui, sans-serif' }}
     >
-      <NavLink to="/" end className={cls}>
+      <NavLink to="/rf" className={cls}>
         <Radio size={13} strokeWidth={2} />
         <span>RF</span>
       </NavLink>

@@ -1,10 +1,18 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import AppSwitcher from './components/AppSwitcher.jsx'
+
+// Hide AppSwitcher on landing page (/) and About — they have their own nav
+function ConditionalAppSwitcher() {
+  const { pathname } = useLocation()
+  if (pathname === '/' || pathname === '/about') return null
+  return <AppSwitcher />
+}
 
 const RFApp = lazy(() => import('./pages/RFApp.jsx'))
 const CableApp = lazy(() => import('./pages/CableApp.jsx'))
 const AboutPage = lazy(() => import('./pages/AboutPage.jsx'))
+const LandingPage = lazy(() => import('./pages/LandingPage.jsx'))
 
 function RouteFallback() {
   return (
@@ -30,10 +38,11 @@ function RouteFallback() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AppSwitcher />
+      <ConditionalAppSwitcher />
       <Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/" element={<RFApp />} />
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/rf" element={<RFApp />} />
           <Route path="/highspeed" element={<CableApp />} />
           <Route path="/about" element={<AboutPage />} />
         </Routes>
