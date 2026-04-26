@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react'
 import {
   Layers, Settings, AlertTriangle, CheckCircle2, Sparkles, RotateCcw,
   Save, Upload, Download, ChevronRight, Activity, Cable, Shield,
-  Zap, Box, GitMerge, Atom, Beaker,
+  Zap, Box, GitMerge, Atom, Beaker, ScrollText, Waves,
 } from 'lucide-react'
 import { useToast } from './Toaster.jsx'
 
@@ -55,6 +55,23 @@ const STANDARDS = {
   rg58:   { name: 'RG-58 (50Ω coax)', z0_diff: 50, z0_tol: 3, max_il_db_per_100m: 53.0, freq_il_mhz: 1000, min_next_db: 0, freq_next_mhz: 1, max_skew_ps_per_m: 0 },
 }
 
+// ── Pair-wrap (binder) materials ────────────────────────
+const WRAP_MATERIALS = {
+  none:         { name: 'None (no wrap)', er: 1.0, density: 0, cost_kg: 0, tmax: 0 },
+  ptfe_tape:    { name: 'PTFE tape',      er: 2.10, density: 2.20, cost_kg: 22.0, tmax: 200 },
+  eptfe_tape:   { name: 'ePTFE tape',     er: 1.30, density: 0.60, cost_kg: 45.0, tmax: 200 },
+  polyester:    { name: 'Polyester (Mylar) tape', er: 3.20, density: 1.40, cost_kg: 3.50, tmax: 105 },
+  paper:        { name: 'Paper binder',   er: 2.50, density: 0.90, cost_kg: 1.20, tmax: 80 },
+  polyimide:    { name: 'Polyimide (Kapton)', er: 3.40, density: 1.42, cost_kg: 25.0, tmax: 250 },
+}
+// Pair-foil shield materials (laminated foil + carrier)
+const FOIL_MATERIALS = {
+  al_polyester: { name: 'Al / polyester', density: 1.50, cost_kg: 4.00, thickness_mm: 0.025 },
+  cu_polyester: { name: 'Cu / polyester', density: 4.00, cost_kg: 9.00, thickness_mm: 0.025 },
+  al_polyimide: { name: 'Al / polyimide', density: 1.55, cost_kg: 18.0, thickness_mm: 0.025 },
+  none:         { name: 'None', density: 0, cost_kg: 0, thickness_mm: 0 },
+}
+
 // ── Default recipe ──────────────────────────────────────
 const DEFAULT_RECIPE = {
   product: { target: 'cat6a' },
@@ -62,6 +79,8 @@ const DEFAULT_RECIPE = {
   stranding: { enabled: false, strand_count: 7, lay_mm: 12 },
   insulation: { material: 'fep_foamed', wall_mm: 0.24, line_m_min: 200, melt_c: 320 },
   pair: { lay_mm: 13, direction: 'S', tension_n: 8 },
+  pair_wrap: { material: 'ptfe_tape', overlap_pct: 25, wall_mm: 0.05 },
+  pair_foil: { material: 'al_polyester', overlap_pct: 25, drain_wire: true, drain_awg: 28 },
   bundle: { pair_count: 4, lay_diversity: true, filler: 'x_spline', bundle_lay_mm: 80 },
   shield: { foil: true, foil_overlap: 25, braid_enabled: true, braid_N: 24, braid_P: 7, braid_d_mm: 0.13, braid_PR: 14, braid_material: 'spc' },
   jacket: { material: 'lszh', wall_mm: 0.5 },
@@ -147,17 +166,92 @@ function computePair(p, prev) {
   return { z_diff, skew_ps_per_m, pair_od_mm, yield_pct, warn, mass_g_per_m: prev.mass_g_per_m * 2, cost_per_m: prev.cost_per_m * 2, lay_mm: p.lay_mm }
 }
 
+function computePairWrap(p, prev) {
+  if (p.material === 'none') {
+    return { wrapped_pair_od_mm: prev.pair_od_mm, mass_g_per_m: prev.mass_g_per_m, cost_per_m: prev.cost_per_m, yield_pct: 100, warn: [], wrap: WRAP_MATERIALS.none, z_diff: prev.z_diff, skew_ps_per_m: prev.skew_ps_per_m, lay_mm: prev.lay_mm }
+  }
+  const w = WRAP_MATERIALS[p.material]
+  const wrapped_od = prev.pair_od_mm + 2 * p.wall_mm
+  // Wrap ring: tape spirals around with overlap
+  const ring_area_m2 = Math.PI * (Math.pow(wrapped_od * 1e-3 / 2, 2) - Math.pow(prev.pair_od_mm * 1e-3 / 2, 2))
+  const overlap_factor = 1 + p.overlap_pct / 100
+  const mass_g_per_m = ring_area_m2 * w.density * 1000 * 1000 * overlap_factor
+  const cost_per_m = (mass_g_per_m / 1000) * w.cost_kg
+  const yield_pct = 97
+  const warn = []
+  if (p.overlap_pct < 15) warn.push('Wrap overlap < 15 %: gaps possible at flex, can leak between conductor and foil')
+  if (p.material === 'paper') warn.push('Paper binder: not suitable for high-temp / wet environments')
+  if (p.wall_mm < 0.03) warn.push('Wall < 0.03 mm: tape too thin, mechanical durability concern')
+  // Pair Z₀ shifts slightly because dielectric envelope changes (very small effect)
+  const z_diff_drift = (w.er - 1.0) * 0.5
+  return {
+    wrapped_pair_od_mm: wrapped_od,
+    mass_g_per_m: prev.mass_g_per_m + mass_g_per_m,
+    cost_per_m: prev.cost_per_m + cost_per_m,
+    yield_pct,
+    warn,
+    wrap: w,
+    z_diff: prev.z_diff - z_diff_drift,
+    skew_ps_per_m: prev.skew_ps_per_m,
+    lay_mm: prev.lay_mm,
+  }
+}
+
+function computePairFoil(p, prev) {
+  if (p.material === 'none') {
+    return { shielded_pair_od_mm: prev.wrapped_pair_od_mm, mass_g_per_m: prev.mass_g_per_m, cost_per_m: prev.cost_per_m, yield_pct: 100, warn: [], foil: FOIL_MATERIALS.none, drain: null, z_diff: prev.z_diff, skew_ps_per_m: prev.skew_ps_per_m, lay_mm: prev.lay_mm, pair_zt_mohm_per_m: 1000 }
+  }
+  const f = FOIL_MATERIALS[p.material]
+  const wrapped = prev.wrapped_pair_od_mm
+  // Foil overlap: tape spirals — usually 25 % overlap
+  const foil_thickness = f.thickness_mm
+  const shielded_od = wrapped + 2 * foil_thickness + 0.05  // 50 µm tape + adhesive
+  const ring_area_m2 = Math.PI * (Math.pow(shielded_od * 1e-3 / 2, 2) - Math.pow(wrapped * 1e-3 / 2, 2))
+  const overlap_factor = 1 + p.overlap_pct / 100
+  const foil_mass = ring_area_m2 * f.density * 1000 * 1000 * overlap_factor
+  let foil_cost = (foil_mass / 1000) * f.cost_kg
+  // Drain wire bonded to foil
+  let drain_mass = 0, drain_cost = 0
+  if (p.drain_wire) {
+    const drain_d = awgToMm(p.drain_awg)
+    const drain_area = Math.PI * Math.pow(drain_d * 1e-3 / 2, 2)
+    drain_mass = drain_area * 8.96 * 1000 * 1000  // Cu g/m
+    drain_cost = (drain_mass / 1000) * 9.5  // Cu cost / kg
+  }
+  const yield_pct = 95
+  const warn = []
+  if (p.overlap_pct < 25) warn.push('Foil overlap < 25 %: longitudinal seam may open at low bend radius — Zt jumps at HF')
+  if (!p.drain_wire) warn.push('No drain wire: harder to terminate foil at connector → pigtail effect raises HF Zt')
+  if (p.material === 'cu_polyester') warn.push('Cu foil: heavier and ~2× cost of Al foil; only needed for ultra-low-Zt')
+  // Pair Zt model: ideal foil ≈ 1 mΩ/m at LF rising to ~10 mΩ/m at GHz; compromised by overlap quality
+  const zt = 1 + (50 - p.overlap_pct) * 0.4
+  return {
+    shielded_pair_od_mm: shielded_od,
+    mass_g_per_m: prev.mass_g_per_m + foil_mass + drain_mass,
+    cost_per_m: prev.cost_per_m + foil_cost + drain_cost,
+    yield_pct,
+    warn,
+    foil: f,
+    drain: p.drain_wire ? { awg: p.drain_awg, mass_g_per_m: drain_mass } : null,
+    z_diff: prev.z_diff,
+    skew_ps_per_m: prev.skew_ps_per_m,
+    lay_mm: prev.lay_mm,
+    pair_zt_mohm_per_m: zt,
+  }
+}
+
 function computeBundle(p, prev) {
   const N = p.pair_count
-  // Bundle OD: pair_count pairs around a central spline
-  const bundle_d_mm = prev.pair_od_mm * (N === 4 ? 2.4 : N === 2 ? 2.05 : 2.5)
-  // NEXT estimate: lay diversity + pair count
-  // Each pair gets different lay length (e.g. Cat 6A: 11/13/15/17 mm) → cancellation helps
+  // Use the shielded pair OD if available, else fall back to bare pair OD
+  const single_pair_od = prev.shielded_pair_od_mm || prev.wrapped_pair_od_mm || prev.pair_od_mm
+  const bundle_d_mm = single_pair_od * (N === 4 ? 2.4 : N === 2 ? 2.05 : 2.5)
+  // NEXT estimate: lay diversity + pair count + per-pair foil shielding
   let next_db = 35
   if (p.lay_diversity) next_db += 12
   if (p.filler === 'x_spline') next_db += 3
-  // Fewer pairs = less crosstalk concern
   if (N === 2) next_db += 6
+  // Per-pair foil shield gives a big NEXT bonus (~15 dB typical for Cat 6A S/FTP)
+  if (prev.foil && prev.foil.thickness_mm > 0) next_db += 15
   // Mass: pairs + filler
   const filler_mass = p.filler === 'x_spline' ? 8 : p.filler === 'foam_filler' ? 4 : 2
   const mass_g_per_m = prev.mass_g_per_m * N + filler_mass
@@ -285,7 +379,9 @@ export default function ProcessSim() {
     const stranding = computeStranding(recipe.stranding, conductor)
     const insulation = computeInsulation(recipe.insulation, stranding)
     const pair = computePair(recipe.pair, insulation)
-    const bundle = computeBundle(recipe.bundle, pair)
+    const pair_wrap = computePairWrap(recipe.pair_wrap, pair)
+    const pair_foil = computePairFoil(recipe.pair_foil, pair_wrap)
+    const bundle = computeBundle(recipe.bundle, pair_foil)
     const shield = computeShield(recipe.shield, bundle)
     const jacket = computeJacket(recipe.jacket, shield)
     const il_db = computeIL(jacket, recipe.test.freq_mhz, recipe.test.length_m)
@@ -294,10 +390,12 @@ export default function ProcessSim() {
       (stranding.yield_pct / 100) *
       (insulation.yield_pct / 100) *
       (pair.yield_pct / 100) *
+      (pair_wrap.yield_pct / 100) *
+      (pair_foil.yield_pct / 100) *
       (bundle.yield_pct / 100) *
       (shield.yield_pct / 100) *
       (jacket.yield_pct / 100) * 100
-    return { conductor, stranding, insulation, pair, bundle, shield, jacket, il_db, total_yield_pct }
+    return { conductor, stranding, insulation, pair, pair_wrap, pair_foil, bundle, shield, jacket, il_db, total_yield_pct }
   }, [recipe])
 
   const std = STANDARDS[recipe.product.target]
@@ -437,9 +535,9 @@ export default function ProcessSim() {
         </ul>
       </div>
 
-      {/* Manufacturing flow (vertical stack of stages) */}
-      <div className="space-y-3">
-        <Stage title="① Conductor draw" icon={Atom} stage={sim.conductor} accent={C.copper}>
+      {/* Manufacturing flow — vertical timeline with per-stage cross-section + status */}
+      <div className="relative">
+        <Stage idx={1} title="Conductor draw" icon={Atom} accent={C.copper} stage={sim.conductor} preview={<XSConductor d={sim.conductor.strand_d_mm * 8} />}>
           <KnobRow>
             <Knob label="Rod Ø (mm)" value={recipe.conductor.rod_d_mm} onChange={(v) => update('conductor.rod_d_mm')(parseFloat(v))} type="number" step="0.5" />
             <Knob label="Target AWG" value={recipe.conductor.target_awg} onChange={(v) => update('conductor.target_awg')(parseInt(v, 10))} type="number" />
@@ -457,7 +555,7 @@ export default function ProcessSim() {
           <Warns warns={sim.conductor.warn} />
         </Stage>
 
-        <Stage title="② Stranding (optional)" icon={GitMerge} stage={sim.stranding} accent={C.copper}>
+        <Stage idx={2} title="Stranding (optional)" icon={GitMerge} accent={C.copper} stage={sim.stranding} preview={recipe.stranding.enabled ? <XSStranded n={recipe.stranding.strand_count} d={sim.stranding.strand_d_mm * 8} /> : <XSConductor d={sim.stranding.conductor_d_mm * 8} />}>
           <KnobRow>
             <Knob label="Enabled" value={recipe.stranding.enabled} onChange={update('stranding.enabled')} type="bool" />
             {recipe.stranding.enabled && <>
@@ -474,7 +572,7 @@ export default function ProcessSim() {
           <Warns warns={sim.stranding.warn} />
         </Stage>
 
-        <Stage title="③ Insulation extrusion" icon={Layers} stage={sim.insulation} accent={C.copper}>
+        <Stage idx={3} title="Insulation extrusion" icon={Layers} accent={C.copper} stage={sim.insulation} preview={<XSInsulated cd={sim.stranding.conductor_d_mm} od={sim.insulation.insulated_d_mm} dielectricColor={dielectricColor(recipe.insulation.material)} />}>
           <KnobRow>
             <Knob label="Material" value={recipe.insulation.material} onChange={update('insulation.material')} options={DIELECTRICS} />
             <Knob label="Wall (mm)" value={recipe.insulation.wall_mm} onChange={(v) => update('insulation.wall_mm')(parseFloat(v))} type="number" step="0.05" />
@@ -492,7 +590,7 @@ export default function ProcessSim() {
           <Warns warns={sim.insulation.warn} />
         </Stage>
 
-        <Stage title="④ Pair twisting" icon={Activity} stage={sim.pair} accent={C.copper}>
+        <Stage idx={4} title="Pair twisting" icon={Activity} accent={C.copper} stage={sim.pair} preview={<XSPair od={sim.insulation.insulated_d_mm} dielectricColor={dielectricColor(recipe.insulation.material)} />}>
           <KnobRow>
             <Knob label="Pair lay (mm)" value={recipe.pair.lay_mm} onChange={(v) => update('pair.lay_mm')(parseFloat(v))} type="number" step="0.5" />
             <Knob label="Direction" value={recipe.pair.direction} onChange={update('pair.direction')} options={{ S: { name: 'S' }, Z: { name: 'Z' } }} />
@@ -507,7 +605,44 @@ export default function ProcessSim() {
           <Warns warns={sim.pair.warn} />
         </Stage>
 
-        <Stage title="⑤ Bundle / lay-up" icon={Box} stage={sim.bundle} accent={C.copper}>
+        <Stage idx={5} title="Pair binder / wrap" icon={ScrollText} accent={C.copper} stage={sim.pair_wrap} preview={<XSPairWrap pairOD={sim.pair.pair_od_mm} wrapOD={sim.pair_wrap.wrapped_pair_od_mm} dielectricColor={dielectricColor(recipe.insulation.material)} />}>
+          <KnobRow>
+            <Knob label="Material" value={recipe.pair_wrap.material} onChange={update('pair_wrap.material')} options={WRAP_MATERIALS} />
+            {recipe.pair_wrap.material !== 'none' && <>
+              <Knob label="Wall (mm)" value={recipe.pair_wrap.wall_mm} onChange={(v) => update('pair_wrap.wall_mm')(parseFloat(v))} type="number" step="0.01" />
+              <Knob label="Overlap %" value={recipe.pair_wrap.overlap_pct} onChange={(v) => update('pair_wrap.overlap_pct')(parseFloat(v))} type="number" />
+            </>}
+          </KnobRow>
+          <Outputs items={[
+            ['Wrapped Ø', `${sim.pair_wrap.wrapped_pair_od_mm.toFixed(3)} mm`],
+            ['Wrap εr', sim.pair_wrap.wrap?.er || '—'],
+            ['Mass total', `${sim.pair_wrap.mass_g_per_m.toFixed(2)} g/m`],
+            ['Cost', `$${sim.pair_wrap.cost_per_m.toFixed(3)}/m`],
+            ['Yield', `${sim.pair_wrap.yield_pct.toFixed(1)}%`],
+          ]} />
+          <Warns warns={sim.pair_wrap.warn} />
+        </Stage>
+
+        <Stage idx={6} title="Pair foil shield" icon={Waves} accent={C.copper} stage={sim.pair_foil} preview={<XSPairFoil pairOD={sim.pair.pair_od_mm} wrapOD={sim.pair_wrap.wrapped_pair_od_mm} foilOD={sim.pair_foil.shielded_pair_od_mm} dielectricColor={dielectricColor(recipe.insulation.material)} foilOn={recipe.pair_foil.material !== 'none'} drainOn={recipe.pair_foil.drain_wire} />}>
+          <KnobRow>
+            <Knob label="Material" value={recipe.pair_foil.material} onChange={update('pair_foil.material')} options={FOIL_MATERIALS} />
+            {recipe.pair_foil.material !== 'none' && <>
+              <Knob label="Overlap %" value={recipe.pair_foil.overlap_pct} onChange={(v) => update('pair_foil.overlap_pct')(parseFloat(v))} type="number" />
+              <Knob label="Drain wire" value={recipe.pair_foil.drain_wire} onChange={update('pair_foil.drain_wire')} type="bool" />
+              {recipe.pair_foil.drain_wire && <Knob label="Drain AWG" value={recipe.pair_foil.drain_awg} onChange={(v) => update('pair_foil.drain_awg')(parseInt(v, 10))} type="number" />}
+            </>}
+          </KnobRow>
+          <Outputs items={[
+            ['Shielded pair Ø', `${sim.pair_foil.shielded_pair_od_mm.toFixed(3)} mm`],
+            ['Pair Zt @ 100MHz', `${sim.pair_foil.pair_zt_mohm_per_m.toFixed(0)} mΩ/m`],
+            ['Mass total', `${sim.pair_foil.mass_g_per_m.toFixed(2)} g/m`],
+            ['Cost', `$${sim.pair_foil.cost_per_m.toFixed(3)}/m`],
+            ['Yield', `${sim.pair_foil.yield_pct.toFixed(1)}%`],
+          ]} />
+          <Warns warns={sim.pair_foil.warn} />
+        </Stage>
+
+        <Stage idx={7} title="Bundle / lay-up" icon={Box} accent={C.copper} stage={sim.bundle} preview={<XSBundle pairCount={recipe.bundle.pair_count} pairOD={sim.pair_foil.shielded_pair_od_mm} bundleD={sim.bundle.bundle_d_mm} filler={recipe.bundle.filler} dielectricColor={dielectricColor(recipe.insulation.material)} foilOn={recipe.pair_foil.material !== 'none'} />}>
           <KnobRow>
             <Knob label="Pair count" value={recipe.bundle.pair_count} onChange={(v) => update('bundle.pair_count')(parseInt(v, 10))} type="number" />
             <Knob label="Lay diversity" value={recipe.bundle.lay_diversity} onChange={update('bundle.lay_diversity')} type="bool" />
@@ -524,7 +659,7 @@ export default function ProcessSim() {
           <Warns warns={sim.bundle.warn} />
         </Stage>
 
-        <Stage title="⑥ Shielding" icon={Shield} stage={sim.shield} accent={C.copper}>
+        <Stage idx={8} title="Outer shielding" icon={Shield} accent={C.copper} stage={sim.shield} preview={<XSOuterShield bundleD={sim.bundle.bundle_d_mm} shieldedD={sim.shield.shielded_d_mm} foilOn={recipe.shield.foil} braidOn={recipe.shield.braid_enabled} />}>
           <KnobRow>
             <Knob label="Foil" value={recipe.shield.foil} onChange={update('shield.foil')} type="bool" />
             <Knob label="Foil overlap %" value={recipe.shield.foil_overlap} onChange={(v) => update('shield.foil_overlap')(parseFloat(v))} type="number" />
@@ -547,7 +682,7 @@ export default function ProcessSim() {
           <Warns warns={sim.shield.warn} />
         </Stage>
 
-        <Stage title="⑦ Jacketing" icon={Cable} stage={sim.jacket} accent={C.copper}>
+        <Stage idx={9} title="Jacketing" icon={Cable} accent={C.copper} stage={sim.jacket} isLast preview={<XSJacket innerD={sim.shield.shielded_d_mm} outerD={sim.jacket.final_od_mm} jacketColor={jacketColor(recipe.jacket.material)} />}>
           <KnobRow>
             <Knob label="Material" value={recipe.jacket.material} onChange={update('jacket.material')} options={JACKETS} />
             <Knob label="Wall (mm)" value={recipe.jacket.wall_mm} onChange={(v) => update('jacket.wall_mm')(parseFloat(v))} type="number" step="0.05" />
@@ -566,15 +701,216 @@ export default function ProcessSim() {
   )
 }
 
-function Stage({ title, icon: Icon, accent, children }) {
+function Stage({ idx, title, icon: Icon, accent, stage, preview, isLast, children }) {
+  // Status: green if no warnings + yield ok, amber if warnings, red if yield < 80
+  const yieldVal = stage?.yield_pct ?? 100
+  const warnCount = stage?.warn?.length || 0
+  const status = yieldVal < 80 ? 'red' : warnCount > 0 ? 'amber' : 'green'
+  const statusColor = status === 'red' ? C.red : status === 'amber' ? C.amber : C.teal
   return (
-    <div className="bg-[#12171a] border border-[#252e33] rounded p-3">
-      <div className="flex items-center gap-2 mb-2 pb-2 border-b border-[#252e33]">
-        <Icon size={14} style={{ color: accent }} />
-        <h3 className="font-mono text-[12px] uppercase tracking-wider" style={{ color: accent }}>{title}</h3>
+    <div className="relative pl-12 md:pl-14">
+      {/* Vertical timeline line */}
+      {!isLast && (
+        <div className="absolute left-[19px] md:left-[23px] top-12 bottom-[-12px] w-px"
+          style={{ background: 'linear-gradient(to bottom, ' + statusColor + '60, ' + C.border + '00)' }} />
+      )}
+      {/* Stage number badge */}
+      <div
+        className="absolute left-0 top-2 w-10 h-10 md:w-12 md:h-12 rounded-full border-2 flex items-center justify-center font-mono text-[14px] font-semibold backdrop-blur-md"
+        style={{
+          borderColor: statusColor,
+          background: '#0a0d0f',
+          color: statusColor,
+          boxShadow: '0 0 20px ' + statusColor + '30',
+        }}
+      >
+        {idx}
       </div>
-      {children}
+      <div className="bg-[#12171a] border border-[#252e33] rounded-md mb-3 overflow-hidden hover:border-[#384249] transition-colors">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-[#252e33] bg-gradient-to-r from-[#12171a] to-[#0d1416]">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <Icon size={14} style={{ color: accent }} className="shrink-0" />
+            <h3 className="font-mono text-[12px] uppercase tracking-wider truncate" style={{ color: accent }}>{title}</h3>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <StatusBadge status={status} yieldPct={yieldVal} warnCount={warnCount} />
+            {preview && <div className="hidden sm:block">{preview}</div>}
+          </div>
+        </div>
+        <div className="p-3">
+          {children}
+        </div>
+      </div>
     </div>
+  )
+}
+
+function StatusBadge({ status, yieldPct, warnCount }) {
+  const color = status === 'red' ? C.red : status === 'amber' ? C.amber : C.teal
+  const dot = status === 'red' ? '●' : status === 'amber' ? '◐' : '✓'
+  return (
+    <div
+      className="flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] uppercase tracking-wider"
+      style={{ color, border: `1px solid ${color}40`, background: 'transparent' }}
+      title={`Yield ${yieldPct.toFixed(1)}%${warnCount ? ` · ${warnCount} warning(s)` : ''}`}
+    >
+      <span>{dot}</span>
+      <span>{yieldPct.toFixed(1)}%</span>
+    </div>
+  )
+}
+
+// ── Cross-section SVG previews ──────────────────────────
+function dielectricColor(id) {
+  if (!id) return '#fbbf24'
+  if (id.includes('foamed')) return '#9ec5e8'
+  if (id.includes('eptfe')) return '#e8d5b0'
+  if (id.includes('ptfe') || id.includes('fep') || id.includes('pfa')) return '#f5e6d3'
+  if (id.includes('pe')) return '#9ec5e8'
+  return '#fbbf24'
+}
+function jacketColor(id) {
+  if (id === 'lszh') return '#1a2226'
+  if (id === 'pvc') return '#2a1f15'
+  if (id === 'fep_jkt') return '#e8d5b0'
+  if (id === 'tpu') return '#1f2933'
+  if (id === 'pur') return '#2a2330'
+  return '#1a2226'
+}
+
+function XSWrap({ children, size = 36 }) {
+  return <svg width={size} height={size} viewBox={`-50 -50 100 100`}>{children}</svg>
+}
+
+function XSConductor({ d = 20 }) {
+  return (
+    <XSWrap>
+      <circle cx="0" cy="0" r={Math.min(d, 36)} fill="#c97b3f" stroke="#e89357" strokeWidth="1" />
+    </XSWrap>
+  )
+}
+function XSStranded({ n = 7, d = 20 }) {
+  const r = Math.min(d / 3, 12)
+  const ring = []
+  for (let i = 0; i < Math.max(0, n - 1); i++) {
+    const a = (i / (n - 1)) * 2 * Math.PI
+    ring.push({ x: Math.cos(a) * r * 1.6, y: Math.sin(a) * r * 1.6 })
+  }
+  return (
+    <XSWrap>
+      <circle cx="0" cy="0" r={r} fill="#c97b3f" />
+      {ring.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={r} fill="#c97b3f" stroke="#e89357" strokeWidth="0.5" />)}
+    </XSWrap>
+  )
+}
+function XSInsulated({ cd, od, dielectricColor }) {
+  const ratio = Math.min(40, Math.max(8, (cd / od) * 36))
+  return (
+    <XSWrap>
+      <circle cx="0" cy="0" r="40" fill={dielectricColor || '#fbbf24'} fillOpacity="0.7" stroke="#fbbf24" strokeOpacity="0.6" strokeWidth="1" />
+      <circle cx="0" cy="0" r={ratio * 0.6} fill="#c97b3f" />
+    </XSWrap>
+  )
+}
+function XSPair({ od, dielectricColor }) {
+  const r = 24
+  return (
+    <XSWrap>
+      <g>
+        <circle cx="-22" cy="0" r={r} fill={dielectricColor} fillOpacity="0.8" stroke="#fbbf24" strokeOpacity="0.5" strokeWidth="0.8" />
+        <circle cx="-22" cy="0" r="6" fill="#c97b3f" />
+        <circle cx="22" cy="0" r={r} fill={dielectricColor} fillOpacity="0.8" stroke="#fbbf24" strokeOpacity="0.5" strokeWidth="0.8" />
+        <circle cx="22" cy="0" r="6" fill="#c97b3f" />
+      </g>
+    </XSWrap>
+  )
+}
+function XSPairWrap({ pairOD, wrapOD, dielectricColor }) {
+  const ratio = wrapOD > 0 ? wrapOD / pairOD : 1
+  return (
+    <XSWrap>
+      <ellipse cx="0" cy="0" rx={48 * ratio} ry={26 * ratio} fill="#1a2226" stroke="#5eead4" strokeWidth="1" strokeDasharray="3 2" opacity="0.85" />
+      <circle cx="-22" cy="0" r="22" fill={dielectricColor} fillOpacity="0.8" />
+      <circle cx="-22" cy="0" r="6" fill="#c97b3f" />
+      <circle cx="22" cy="0" r="22" fill={dielectricColor} fillOpacity="0.8" />
+      <circle cx="22" cy="0" r="6" fill="#c97b3f" />
+    </XSWrap>
+  )
+}
+function XSPairFoil({ pairOD, wrapOD, foilOD, dielectricColor, foilOn, drainOn }) {
+  const ratio = foilOD > 0 ? foilOD / pairOD : 1
+  return (
+    <XSWrap>
+      {foilOn && (
+        <ellipse cx="0" cy="0" rx={48 * ratio} ry={28 * ratio} fill="#384249" stroke="#a7b0b6" strokeWidth="1.5" opacity="0.8" />
+      )}
+      <ellipse cx="0" cy="0" rx={48} ry={26} fill="#1a2226" stroke="#5eead4" strokeWidth="0.8" strokeDasharray="3 2" opacity="0.7" />
+      <circle cx="-22" cy="0" r="22" fill={dielectricColor} fillOpacity="0.8" />
+      <circle cx="-22" cy="0" r="6" fill="#c97b3f" />
+      <circle cx="22" cy="0" r="22" fill={dielectricColor} fillOpacity="0.8" />
+      <circle cx="22" cy="0" r="6" fill="#c97b3f" />
+      {drainOn && foilOn && (
+        <circle cx="-46" cy="22" r="4" fill="#c97b3f" stroke="#e89357" strokeWidth="0.5" />
+      )}
+    </XSWrap>
+  )
+}
+function XSBundle({ pairCount = 4, dielectricColor, foilOn }) {
+  const positions = pairCount === 4
+    ? [{ x: -22, y: -22 }, { x: 22, y: -22 }, { x: -22, y: 22 }, { x: 22, y: 22 }]
+    : pairCount === 2 ? [{ x: 0, y: -22 }, { x: 0, y: 22 }]
+    : [{ x: -22, y: 0 }, { x: 22, y: -19 }, { x: 22, y: 19 }]
+  const pairR = pairCount === 4 ? 22 : 26
+  return (
+    <XSWrap>
+      {/* X-spline filler in center */}
+      <g stroke="#384249" strokeWidth="1.5" opacity="0.5">
+        <line x1="0" y1="-44" x2="0" y2="44" />
+        <line x1="-44" y1="0" x2="44" y2="0" />
+      </g>
+      {positions.map((p, i) => (
+        <g key={i} transform={`translate(${p.x},${p.y})`}>
+          {foilOn && <circle r={pairR * 0.7} fill="none" stroke="#a7b0b6" strokeWidth="1" />}
+          <circle r={pairR * 0.65} fill={dielectricColor} fillOpacity="0.7" />
+          <circle r="3" fill="#c97b3f" />
+        </g>
+      ))}
+    </XSWrap>
+  )
+}
+function XSOuterShield({ foilOn, braidOn }) {
+  return (
+    <XSWrap>
+      {braidOn && (
+        <>
+          <circle cx="0" cy="0" r="44" fill="none" stroke="#8b8478" strokeWidth="3" strokeDasharray="2 1" opacity="0.7" />
+          <circle cx="0" cy="0" r="42" fill="none" stroke="#8b8478" strokeWidth="2" strokeDasharray="2 1" transform="rotate(45)" opacity="0.7" />
+        </>
+      )}
+      {foilOn && (
+        <circle cx="0" cy="0" r="38" fill="none" stroke="#5eead4" strokeWidth="2" strokeDasharray="3 2" opacity="0.7" />
+      )}
+      <circle cx="0" cy="0" r="32" fill="#171d20" stroke="#384249" strokeWidth="0.5" />
+      {/* Hint of pairs inside */}
+      <circle cx="-12" cy="-12" r="8" fill="#fbbf24" fillOpacity="0.3" />
+      <circle cx="12" cy="-12" r="8" fill="#fbbf24" fillOpacity="0.3" />
+      <circle cx="-12" cy="12" r="8" fill="#fbbf24" fillOpacity="0.3" />
+      <circle cx="12" cy="12" r="8" fill="#fbbf24" fillOpacity="0.3" />
+    </XSWrap>
+  )
+}
+function XSJacket({ innerD, outerD, jacketColor }) {
+  return (
+    <XSWrap>
+      <circle cx="0" cy="0" r="46" fill={jacketColor || '#1a2226'} stroke="#384249" strokeWidth="1" />
+      <circle cx="0" cy="0" r="38" fill="#171d20" stroke="#384249" strokeWidth="0.5" />
+      <circle cx="0" cy="0" r="34" fill="none" stroke="#5eead4" strokeWidth="1.2" strokeDasharray="3 2" opacity="0.6" />
+      <circle cx="-12" cy="-12" r="8" fill="#fbbf24" fillOpacity="0.3" />
+      <circle cx="12" cy="-12" r="8" fill="#fbbf24" fillOpacity="0.3" />
+      <circle cx="-12" cy="12" r="8" fill="#fbbf24" fillOpacity="0.3" />
+      <circle cx="12" cy="12" r="8" fill="#fbbf24" fillOpacity="0.3" />
+    </XSWrap>
   )
 }
 
