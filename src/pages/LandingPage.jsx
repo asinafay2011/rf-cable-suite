@@ -70,6 +70,7 @@ export default function LandingPage() {
           <nav className="hidden md:flex items-center gap-5 text-[12px] font-mono uppercase tracking-wider">
             <Link to="/rf" className="text-[#a7b0b6] hover:text-[#fbbf24] transition-colors">RF</Link>
             <Link to="/highspeed" className="text-[#a7b0b6] hover:text-[#fbbf24] transition-colors">CABLE.LAB</Link>
+            <Link to="/builder" className="text-[#a7b0b6] hover:text-[#fbbf24] transition-colors">BUILDER</Link>
             <Link to="/about" className="text-[#a7b0b6] hover:text-[#fbbf24] transition-colors">Methodology</Link>
           </nav>
         </div>
@@ -156,7 +157,7 @@ export default function LandingPage() {
             tag="Coax · Connectors · Link Budget"
             bullets={[
               'Z₀, attenuation, Smith chart',
-              '11-cable + 9-connector database',
+              '20+ cable + 29-connector database',
               'Friis NF cascade · VSWR / RL',
               'Path loss + link margin verdict',
             ]}
@@ -169,25 +170,25 @@ export default function LandingPage() {
             tag="High-speed cable manufacturing"
             bullets={[
               'Conductor → twisted pair → bundle',
-              'Braid coverage · NEXT · skew · eye',
-              'Glenair Series 963 reference',
-              '16 modules + live calculators',
+              'Process Sim · auto-fix optimizer',
+              'Braid · NEXT · skew · eye · 3D · QC',
+              'Tape Suckout · 38 vendor presets',
             ]}
             accent={C.copper}
           />
           <ProductCard
-            to="/highspeed"
-            icon={FlaskConical}
-            title="VNA Lab"
-            tag="Touchstone analysis · pair skew"
+            to="/builder"
+            icon={GitBranch}
+            title="Cable Builder"
+            tag="Stage-by-stage interactive build"
             bullets={[
-              '.s1p / .s2p ingest from any VNA',
-              'TDR via windowed IFFT, ft or m',
-              'Pair skew prediction · ps/m',
-              'Pass/fail vs Cat 6A / Cat 8 / USB4 / MIL-1553B',
+              'Pick wire → insulate → twist pair',
+              'Add wrap · foil · bundle · braid · jacket',
+              'Live 3D + live spec readouts',
+              'Sandbox or Challenge vs target standard',
             ]}
             accent={C.teal}
-            badge="Try the demo"
+            badge="New"
           />
         </div>
       </section>
@@ -237,6 +238,7 @@ export default function LandingPage() {
           <div className="flex gap-4">
             <Link to="/rf" className="hover:text-[#fbbf24]">RF</Link>
             <Link to="/highspeed" className="hover:text-[#fbbf24]">CABLE.LAB</Link>
+            <Link to="/builder" className="hover:text-[#fbbf24]">BUILDER</Link>
             <Link to="/about" className="hover:text-[#fbbf24]">Methodology</Link>
           </div>
         </div>

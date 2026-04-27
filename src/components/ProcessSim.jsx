@@ -23,13 +23,13 @@ const C = {
 }
 
 // ── Material library ─────────────────────────────────────
-const MATERIALS = {
+export const MATERIALS = {
   cu: { name: 'Copper (Cu)', rho_ohm_m: 1.68e-8, density: 8.96, cost_kg: 9.5 },
   spc: { name: 'Silver-plated Cu (SPC)', rho_ohm_m: 1.59e-8, density: 8.96, cost_kg: 17.5 },
   tc: { name: 'Tin-plated Cu (TC)', rho_ohm_m: 1.72e-8, density: 8.93, cost_kg: 10.0 },
   npc: { name: 'Nickel-plated Cu (NPC)', rho_ohm_m: 1.75e-8, density: 8.95, cost_kg: 12.5 },
 }
-const DIELECTRICS = {
+export const DIELECTRICS = {
   pe_solid: { name: 'Solid PE', er: 2.30, density: 0.94, cost_kg: 1.40, tmax: 80 },
   pe_foamed: { name: 'Foamed PE', er: 1.55, density: 0.55, cost_kg: 1.80, tmax: 80 },
   ptfe: { name: 'PTFE', er: 2.10, density: 2.20, cost_kg: 22.0, tmax: 200 },
@@ -38,7 +38,7 @@ const DIELECTRICS = {
   pfa: { name: 'PFA', er: 2.05, density: 2.15, cost_kg: 35.0, tmax: 250 },
   eptfe: { name: 'ePTFE', er: 1.30, density: 0.60, cost_kg: 45.0, tmax: 200 },
 }
-const JACKETS = {
+export const JACKETS = {
   pvc: { name: 'PVC', density: 1.40, cost_kg: 1.20, flex: 'good', tmax: 80 },
   lszh: { name: 'LSZH', density: 1.50, cost_kg: 2.20, flex: 'fair', tmax: 90 },
   fep_jkt: { name: 'FEP', density: 2.15, cost_kg: 28.0, flex: 'fair', tmax: 200 },
@@ -47,7 +47,7 @@ const JACKETS = {
 }
 
 // ── Standard targets ────────────────────────────────────
-const STANDARDS = {
+export const STANDARDS = {
   custom: { name: 'Custom', z0_diff: 100, z0_tol: 5, max_il_db_per_100m: 30, freq_il_mhz: 500, min_next_db: 40, freq_next_mhz: 100, max_skew_ps_per_m: 45 },
   cat6a:  { name: 'Cat 6A',  z0_diff: 100, z0_tol: 8, max_il_db_per_100m: 30.5, freq_il_mhz: 500,  min_next_db: 39.9, freq_next_mhz: 100, max_skew_ps_per_m: 45 },
   cat8:   { name: 'Cat 8',   z0_diff: 100, z0_tol: 8, max_il_db_per_100m: 67.0, freq_il_mhz: 2000, min_next_db: 13.1, freq_next_mhz: 2000, max_skew_ps_per_m: 25 },
@@ -56,7 +56,7 @@ const STANDARDS = {
 }
 
 // ── Pair-wrap (binder) materials ────────────────────────
-const WRAP_MATERIALS = {
+export const WRAP_MATERIALS = {
   none:         { name: 'None (no wrap)', er: 1.0, density: 0, cost_kg: 0, tmax: 0 },
   ptfe_tape:    { name: 'PTFE tape',      er: 2.10, density: 2.20, cost_kg: 22.0, tmax: 200 },
   eptfe_tape:   { name: 'ePTFE tape',     er: 1.30, density: 0.60, cost_kg: 45.0, tmax: 200 },
@@ -65,7 +65,7 @@ const WRAP_MATERIALS = {
   polyimide:    { name: 'Polyimide (Kapton)', er: 3.40, density: 1.42, cost_kg: 25.0, tmax: 250 },
 }
 // Pair-foil shield materials (laminated foil + carrier)
-const FOIL_MATERIALS = {
+export const FOIL_MATERIALS = {
   al_polyester: { name: 'Al / polyester', density: 1.50, cost_kg: 4.00, thickness_mm: 0.025 },
   cu_polyester: { name: 'Cu / polyester', density: 4.00, cost_kg: 9.00, thickness_mm: 0.025 },
   al_polyimide: { name: 'Al / polyimide', density: 1.55, cost_kg: 18.0, thickness_mm: 0.025 },
@@ -73,7 +73,7 @@ const FOIL_MATERIALS = {
 }
 
 // ── Default recipe ──────────────────────────────────────
-const DEFAULT_RECIPE = {
+export const DEFAULT_RECIPE = {
   product: { target: 'cat6a' },
   conductor: { rod_d_mm: 8.0, target_awg: 24, material: 'spc', anneal_c: 480, line_m_min: 800 },
   stranding: { enabled: false, strand_count: 7, lay_mm: 12 },
@@ -462,7 +462,7 @@ function computeJacket(p, prev) {
 }
 
 // Final IL calculation: skin loss + dielectric loss
-function computeIL(prev, freq_mhz, length_m) {
+export function computeIL(prev, freq_mhz, length_m) {
   // Skin-effect loss (rough): α_R ≈ R_per_m / (2 × Z₀) with R from skin depth
   // We don't have all data; use empirical from atten table approx for foamed FEP Cat 6A:
   // 100 MHz: 5 dB/100m; 500 MHz: 18 dB/100m; 2 GHz: 38 dB/100m for Cat 6A
@@ -473,7 +473,7 @@ function computeIL(prev, freq_mhz, length_m) {
 }
 
 // ── Pipeline runner used by the auto-fix optimizer (pure, no React state) ──
-function runPipeline(recipe) {
+export function runPipeline(recipe) {
   const conductor = computeConductor(recipe.conductor)
   const stranding = computeStranding(recipe.stranding, conductor)
   const insulation = computeInsulation(recipe.insulation, stranding)

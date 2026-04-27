@@ -12,6 +12,7 @@ function ConditionalAppSwitcher() {
 
 const RFApp = lazy(() => import('./pages/RFApp.jsx'))
 const CableApp = lazy(() => import('./pages/CableApp.jsx'))
+const BuilderApp = lazy(() => import('./pages/BuilderApp.jsx'))
 const AboutPage = lazy(() => import('./pages/AboutPage.jsx'))
 const LandingPage = lazy(() => import('./pages/LandingPage.jsx'))
 
@@ -46,6 +47,7 @@ export default function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/rf" element={<RFApp />} />
             <Route path="/highspeed" element={<CableApp />} />
+            <Route path="/builder" element={<BuilderApp />} />
             <Route path="/about" element={<AboutPage />} />
           </Routes>
         </Suspense>

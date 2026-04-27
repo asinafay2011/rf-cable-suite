@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Radio, Cable, BookOpen } from 'lucide-react'
+import { Radio, Cable, BookOpen, Wrench } from 'lucide-react'
 import { useIsMobile } from './useIsMobile.js'
 
 const baseTab =
@@ -27,6 +27,10 @@ export default function AppSwitcher() {
       <NavLink to="/highspeed" className={cls}>
         <Cable size={13} strokeWidth={2} />
         <span>Highspeed</span>
+      </NavLink>
+      <NavLink to="/builder" className={cls}>
+        <Wrench size={13} strokeWidth={2} />
+        <span>Builder</span>
       </NavLink>
       <NavLink to="/about" className={cls} title="Methodology & references">
         <BookOpen size={13} strokeWidth={2} />
