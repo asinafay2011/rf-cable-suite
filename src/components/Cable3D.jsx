@@ -1,11 +1,18 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { RotateCcw, Eye, EyeOff, Layers as LayersIcon } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────
-// 3D Cable Visualizer (pure CSS / SVG, no external 3D dep)
-// Uses CSS perspective + transform-style:preserve-3d to fake a 3D cable
-// rendered as a stack of concentric tubular layers viewed at an angle.
-// User can drag-rotate, zoom, toggle layer visibility, and load presets.
+// 3D Cable Visualizer — isometric SVG cutaway view
+//
+// Renders the cable as a horizontal lying cylinder using SVG primitives.
+// Each layer = body parallelogram (between two end ellipses) + front
+// ellipse cross-section (showing layer cut) + outer-arc that gives the
+// barrel its volume.  Pitch slider flattens the ellipses (head-on vs
+// barrel view); yaw shifts the cutaway angle.  Explode pushes successive
+// layers further apart along the cable axis so the engineer can see
+// what each contributes — exactly like an exploded engineering drawing.
+//
+// No external 3D library: just SVG, ~few hundred elements, GPU-friendly.
 // ─────────────────────────────────────────────────────────
 
 const C = {
@@ -23,76 +30,78 @@ const C = {
   textMuted: '#6b7479',
 }
 
-// Visual presets — each layer has color, label, and inner/outer radius (relative)
+// Each layer's `to` is the OUTER radius (0..1, normalised to baseR).
+// `kind` controls how the body is filled (solid / striped / cross-hatched).
 const PRESETS = {
   cat6a_uutp: {
     label: 'Cat 6A U/UTP',
     z0: '100 Ω diff',
     layers: [
-      { name: 'Conductor (×8)', color: '#c97b3f', from: 0, to: 0.18, kind: 'core', count: 4 },
-      { name: 'Insulation', color: '#fbbf24', from: 0.18, to: 0.32, kind: 'ring' },
-      { name: 'Cross-spline', color: '#5eead4', from: 0.32, to: 0.5, kind: 'spline' },
-      { name: 'Jacket', color: '#1a2226', from: 0.85, to: 1.0, kind: 'ring' },
+      { name: 'Conductor', color: '#c97b3f', to: 0.18, kind: 'core' },
+      { name: 'Insulation', color: '#fbbf24', to: 0.32, kind: 'solid' },
+      { name: 'Cross-spline filler', color: '#5eead4', to: 0.55, kind: 'spline' },
+      { name: 'Binder tape', color: '#a78bfa', to: 0.62, kind: 'striped' },
+      { name: 'Jacket (LSZH)', color: '#1a2226', to: 1.0, kind: 'solid', textColor: '#a7b0b6' },
     ],
   },
   cat6a_sftp: {
     label: 'Cat 6A S/FTP (full)',
     z0: '100 Ω diff',
     layers: [
-      { name: 'Conductor (×8)', color: '#c97b3f', from: 0, to: 0.15, kind: 'core', count: 4 },
-      { name: 'Insulation', color: '#fbbf24', from: 0.15, to: 0.28, kind: 'ring' },
-      { name: 'Pair wrap', color: '#a78bfa', from: 0.28, to: 0.32, kind: 'ring' },
-      { name: 'Per-pair foil', color: '#a7b0b6', from: 0.32, to: 0.36, kind: 'ring' },
-      { name: 'Bundle / spline', color: '#5eead4', from: 0.36, to: 0.62, kind: 'spline' },
-      { name: 'Outer foil', color: '#cbd5e1', from: 0.62, to: 0.68, kind: 'ring' },
-      { name: 'Outer braid', color: '#c97b3f', from: 0.68, to: 0.82, kind: 'braid' },
-      { name: 'Jacket', color: '#1a2226', from: 0.82, to: 1.0, kind: 'ring' },
+      { name: 'Conductor', color: '#c97b3f', to: 0.14, kind: 'core' },
+      { name: 'Insulation', color: '#fbbf24', to: 0.26, kind: 'solid' },
+      { name: 'Pair binder wrap', color: '#a78bfa', to: 0.30, kind: 'striped' },
+      { name: 'Per-pair foil', color: '#a7b0b6', to: 0.36, kind: 'foil' },
+      { name: 'Bundle / X-spline', color: '#5eead4', to: 0.62, kind: 'spline' },
+      { name: 'Outer foil', color: '#cbd5e1', to: 0.68, kind: 'foil' },
+      { name: 'Outer braid', color: '#c97b3f', to: 0.82, kind: 'braid' },
+      { name: 'Jacket (LSZH)', color: '#1a2226', to: 1.0, kind: 'solid', textColor: '#a7b0b6' },
     ],
   },
   rg58: {
     label: 'RG-58 (50 Ω coax)',
     z0: '50 Ω',
     layers: [
-      { name: 'Conductor', color: '#c97b3f', from: 0, to: 0.18, kind: 'core', count: 1 },
-      { name: 'Dielectric (PE)', color: '#fbbf24', from: 0.18, to: 0.55, kind: 'ring' },
-      { name: 'Braid (TC)', color: '#e89357', from: 0.55, to: 0.78, kind: 'braid' },
-      { name: 'Jacket (PVC)', color: '#1a2226', from: 0.78, to: 1.0, kind: 'ring' },
+      { name: 'Conductor (Cu)', color: '#c97b3f', to: 0.18, kind: 'core' },
+      { name: 'Dielectric (PE)', color: '#fbbf24', to: 0.55, kind: 'solid' },
+      { name: 'Braid (TC)', color: '#e89357', to: 0.78, kind: 'braid' },
+      { name: 'Jacket (PVC)', color: '#1a2226', to: 1.0, kind: 'solid', textColor: '#a7b0b6' },
     ],
   },
   semirigid: {
-    label: 'UT-141 Semi-Rigid + spiral',
+    label: 'UT-141 + spiral SPC + braid',
     z0: '50 Ω',
     layers: [
-      { name: 'Conductor', color: '#c97b3f', from: 0, to: 0.20, kind: 'core', count: 1 },
-      { name: 'PTFE tape (10 layers)', color: '#fbbf24', from: 0.20, to: 0.55, kind: 'ring-striped' },
-      { name: 'Spiral SPC (8 bobbin)', color: '#cbd5e1', from: 0.55, to: 0.66, kind: 'spiral' },
-      { name: 'Outer braid', color: '#c97b3f', from: 0.66, to: 0.85, kind: 'braid' },
-      { name: 'FEP jacket', color: '#1a2226', from: 0.85, to: 1.0, kind: 'ring' },
+      { name: 'Conductor', color: '#c97b3f', to: 0.20, kind: 'core' },
+      { name: 'PTFE tape ×10', color: '#fbbf24', to: 0.55, kind: 'striped' },
+      { name: 'Spiral SPC (8 bobbin)', color: '#cbd5e1', to: 0.66, kind: 'spiral' },
+      { name: 'Outer braid', color: '#c97b3f', to: 0.85, kind: 'braid' },
+      { name: 'FEP jacket', color: '#7dd3fc', to: 1.0, kind: 'solid' },
     ],
   },
   usb4: {
     label: 'USB4 / TB4 passive',
     z0: '90 Ω diff (× 2)',
     layers: [
-      { name: 'Conductor (×4)', color: '#c97b3f', from: 0, to: 0.12, kind: 'core', count: 2 },
-      { name: 'Insulation', color: '#fbbf24', from: 0.12, to: 0.28, kind: 'ring' },
-      { name: 'Per-pair foil', color: '#a7b0b6', from: 0.28, to: 0.40, kind: 'ring' },
-      { name: 'Bundle filler', color: '#5eead4', from: 0.40, to: 0.62, kind: 'spline' },
-      { name: 'Outer foil', color: '#cbd5e1', from: 0.62, to: 0.72, kind: 'ring' },
-      { name: 'Outer braid', color: '#c97b3f', from: 0.72, to: 0.88, kind: 'braid' },
-      { name: 'TPU jacket', color: '#7dd3fc', from: 0.88, to: 1.0, kind: 'ring' },
+      { name: 'Conductor', color: '#c97b3f', to: 0.12, kind: 'core' },
+      { name: 'Insulation', color: '#fbbf24', to: 0.26, kind: 'solid' },
+      { name: 'Per-pair foil', color: '#a7b0b6', to: 0.36, kind: 'foil' },
+      { name: 'Bundle filler', color: '#5eead4', to: 0.58, kind: 'spline' },
+      { name: 'Outer foil', color: '#cbd5e1', to: 0.68, kind: 'foil' },
+      { name: 'Outer braid', color: '#c97b3f', to: 0.86, kind: 'braid' },
+      { name: 'TPU jacket', color: '#7dd3fc', to: 1.0, kind: 'solid' },
     ],
   },
   qsfp_dac: {
     label: 'QSFP28 100G DAC',
     z0: '100 Ω twinax × 4',
     layers: [
-      { name: 'Conductor (×8)', color: '#c97b3f', from: 0, to: 0.14, kind: 'core', count: 4 },
-      { name: 'Foamed dielectric', color: '#fbbf24', from: 0.14, to: 0.30, kind: 'ring' },
-      { name: 'Per-pair foil', color: '#a7b0b6', from: 0.30, to: 0.42, kind: 'ring' },
-      { name: 'Bundle', color: '#5eead4', from: 0.42, to: 0.65, kind: 'spline' },
-      { name: 'Outer braid', color: '#c97b3f', from: 0.65, to: 0.85, kind: 'braid' },
-      { name: 'Jacket', color: '#1a2226', from: 0.85, to: 1.0, kind: 'ring' },
+      { name: 'Conductor', color: '#c97b3f', to: 0.14, kind: 'core' },
+      { name: 'Foamed dielectric', color: '#fbbf24', to: 0.28, kind: 'solid' },
+      { name: 'Per-pair foil', color: '#a7b0b6', to: 0.40, kind: 'foil' },
+      { name: 'Bundle', color: '#5eead4', to: 0.62, kind: 'spline' },
+      { name: 'Outer braid', color: '#c97b3f', to: 0.84, kind: 'braid' },
+      { name: 'Jacket', color: '#1a2226', to: 1.0, kind: 'solid', textColor: '#a7b0b6' },
     ],
   },
 }
@@ -101,14 +110,13 @@ export default function Cable3D() {
   const [presetId, setPresetId] = useState('cat6a_sftp')
   const preset = PRESETS[presetId]
   const [hidden, setHidden] = useState({})
-  const [rotX, setRotX] = useState(-22)  // pitch
-  const [rotY, setRotY] = useState(0)    // yaw — animated
-  const [rotZ, setRotZ] = useState(0)    // ignored, length-axis rotation
+  const [yaw, setYaw] = useState(0)        // -180 .. 180 — rotates the cutaway face around the axis
+  const [pitch, setPitch] = useState(0.45) // 0 .. 1 — 0 = head-on (full circles); 1 = edge-on (lines)
   const [zoom, setZoom] = useState(1)
   const [autoSpin, setAutoSpin] = useState(true)
   const [exploded, setExploded] = useState(false)
 
-  // Auto-spin
+  // Auto-spin yaw
   useEffect(() => {
     if (!autoSpin) return
     let raf
@@ -116,7 +124,7 @@ export default function Cable3D() {
     const tick = (now) => {
       const dt = (now - last) / 1000
       last = now
-      setRotY((r) => r + dt * 18)  // 18 deg / sec
+      setYaw((y) => (y + dt * 18) % 360)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -127,15 +135,15 @@ export default function Cable3D() {
   const dragStartRef = useRef(null)
   const onPointerDown = (e) => {
     setAutoSpin(false)
-    dragStartRef.current = { x: e.clientX, y: e.clientY, rx: rotX, ry: rotY }
+    dragStartRef.current = { x: e.clientX, y: e.clientY, yaw, pitch }
     e.currentTarget.setPointerCapture?.(e.pointerId)
   }
   const onPointerMove = (e) => {
     if (!dragStartRef.current) return
     const dx = e.clientX - dragStartRef.current.x
     const dy = e.clientY - dragStartRef.current.y
-    setRotY(dragStartRef.current.ry + dx * 0.4)
-    setRotX(Math.max(-80, Math.min(20, dragStartRef.current.rx - dy * 0.3)))
+    setYaw(dragStartRef.current.yaw + dx * 0.4)
+    setPitch(Math.max(0, Math.min(1, dragStartRef.current.pitch + dy * 0.003)))
   }
   const onPointerUp = (e) => {
     dragStartRef.current = null
@@ -143,20 +151,39 @@ export default function Cable3D() {
   }
 
   const reset = () => {
-    setRotX(-22); setRotY(0); setZoom(1); setHidden({}); setAutoSpin(true); setExploded(false)
+    setYaw(0); setPitch(0.45); setZoom(1); setHidden({}); setAutoSpin(true); setExploded(false)
   }
+
+  // Geometry: cable lies horizontally along x.  Front cap at the right (+x_end).
+  // Body length is BL.  Each layer has its own outer radius `to * baseR`.
+  const VW = 800
+  const VH = 360
+  const baseR = 110
+  const BL = 380               // body length (px)
+  const cx = 0                 // SVG centred on (0,0)
+  const cy = 0
+  const xFront = BL / 2        // x of front end-cap
+  const xBack = -BL / 2        // x of back end-cap
+
+  // Pitch sets the ellipse rx/ry ratio (rx is fixed at radius, ry shrinks with pitch)
+  const ryFor = (r) => r * (1 - pitch * 0.85)  // never quite 0 so we still see something
+
+  // Lighting: yaw determines which side faces the light source. Use yaw to bias
+  // the surface gradient highlight position so the body looks "lit".
+  const yawRad = (yaw * Math.PI) / 180
+  const litX = -Math.cos(yawRad) * 0.3 + 0.5  // 0.2..0.8
 
   return (
     <section className="space-y-4">
       <style>{`
-        @keyframes c3dShine { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.9; } }
+        @keyframes c3dGlow { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.9; } }
       `}</style>
 
       <div className="grid md:grid-cols-[1fr_280px] gap-4">
         {/* Stage */}
         <div
-          className="relative bg-[#0a0d0f] border border-[#252e33] rounded overflow-hidden"
-          style={{ minHeight: 420, perspective: '1200px', cursor: dragStartRef.current ? 'grabbing' : 'grab' }}
+          className="relative bg-[#0a0d0f] border border-[#252e33] rounded overflow-hidden select-none"
+          style={{ minHeight: 420, cursor: dragStartRef.current ? 'grabbing' : 'grab' }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -172,17 +199,176 @@ export default function Cable3D() {
             <rect width="100%" height="100%" fill="url(#c3d-grid)" />
           </svg>
 
-          {/* The cable — preserve3d stack */}
-          <div
-            className="absolute inset-0 flex items-center justify-center pointer-events-none"
-            style={{
-              transformStyle: 'preserve-3d',
-              transform: `rotateX(${rotX}deg) rotateY(${rotY}deg) scale(${zoom})`,
-              transition: dragStartRef.current ? 'none' : 'transform 0.18s ease-out',
-            }}
+          {/* Cable SVG */}
+          <svg
+            viewBox={`${-VW / 2} ${-VH / 2} ${VW} ${VH}`}
+            preserveAspectRatio="xMidYMid meet"
+            className="absolute inset-0 w-full h-full"
+            style={{ transform: `scale(${zoom})`, transformOrigin: 'center', transition: dragStartRef.current ? 'none' : 'transform 0.18s ease-out' }}
           >
-            <CableTube preset={preset} hidden={hidden} exploded={exploded} />
-          </div>
+            <defs>
+              {/* Patterns */}
+              <pattern id="c3d-braid" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(0,0,0,0.45)" strokeWidth="2" />
+                <line x1="4" y1="0" x2="4" y2="8" stroke="rgba(255,255,255,0.18)" strokeWidth="1.4" />
+              </pattern>
+              <pattern id="c3d-spiral" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(70)">
+                <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(0,0,0,0.55)" strokeWidth="1.6" />
+              </pattern>
+              <pattern id="c3d-striped" width="14" height="14" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="14" y2="0" stroke="rgba(0,0,0,0.35)" strokeWidth="2" />
+                <line x1="0" y1="7" x2="14" y2="7" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
+              </pattern>
+              <pattern id="c3d-spline" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(30)">
+                <line x1="0" y1="0" x2="0" y2="10" stroke="rgba(255,255,255,0.18)" strokeWidth="1" />
+                <line x1="5" y1="0" x2="5" y2="10" stroke="rgba(0,0,0,0.45)" strokeWidth="1" />
+              </pattern>
+              <pattern id="c3d-foil" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(15)">
+                <line x1="0" y1="0" x2="0" y2="14" stroke="rgba(0,0,0,0.25)" strokeWidth="0.8" />
+              </pattern>
+            </defs>
+
+            {/* In non-exploded mode the cable is one solid cylinder with a
+                multi-ring cross-section visible at the front. In exploded mode
+                each layer is rendered as its own short cylinder pushed apart
+                along the cable axis. Two completely different render paths. */}
+            {(() => {
+              const visible = preset.layers
+                .map((l, idx) => ({ l, idx }))
+                .filter(({ idx }) => !hidden[idx])
+              if (visible.length === 0) return null
+
+              if (exploded) {
+                // Each layer = its own little cylinder, spaced along x
+                return visible.map(({ l, idx }, vi) => {
+                  const r = baseR * l.to
+                  const rPrev = idx === 0 ? 0 : baseR * (preset.layers[idx - 1]?.to || 0)
+                  // Spread along x — each segment ~ 100 px wide
+                  const segW = 95
+                  const totalW = visible.length * segW
+                  const segX = -totalW / 2 + vi * segW + segW / 2
+                  return (
+                    <ExplodedSegment
+                      key={idx}
+                      layer={l}
+                      rOuter={r}
+                      rInner={rPrev}
+                      cx={segX}
+                      width={segW * 0.78}
+                      ryFor={ryFor}
+                      litX={litX}
+                    />
+                  )
+                })
+              }
+
+              // Non-exploded: single body + concentric front rings
+              const outermost = visible[visible.length - 1].l
+              const rOut = baseR * outermost.to
+              const ryOut = ryFor(rOut)
+              const lighter = mixHex(outermost.color, '#ffffff', 0.18)
+              const darker = mixHex(outermost.color, '#000000', 0.45)
+              const gradId = 'mainBodyGrad'
+              const patternFill = patternForKind(outermost.kind)
+
+              return (
+                <>
+                  <defs>
+                    <linearGradient id={gradId} x1="0" y1="-1" x2="0" y2="1">
+                      <stop offset="0%" stopColor={darker} />
+                      <stop offset={`${litX * 100}%`} stopColor={lighter} />
+                      <stop offset="100%" stopColor={darker} />
+                    </linearGradient>
+                  </defs>
+
+                  {/* Back cap of the OUTER layer (dimmer) */}
+                  <ellipse
+                    cx={xBack} cy={0}
+                    rx={rOut} ry={ryOut}
+                    fill={mixHex(outermost.color, '#000', 0.6)}
+                    stroke="rgba(0,0,0,0.6)"
+                    strokeWidth="0.6"
+                  />
+
+                  {/* Body rectangle (outer layer color) */}
+                  <rect
+                    x={xBack} y={-ryOut}
+                    width={xFront - xBack}
+                    height={ryOut * 2}
+                    fill={`url(#${gradId})`}
+                    stroke="rgba(0,0,0,0.55)"
+                    strokeWidth="0.5"
+                  />
+                  {patternFill && (
+                    <rect
+                      x={xBack} y={-ryOut}
+                      width={xFront - xBack}
+                      height={ryOut * 2}
+                      fill={patternFill}
+                      opacity="0.55"
+                    />
+                  )}
+                  {/* Top edge highlight + bottom shadow */}
+                  <line x1={xBack} y1={-ryOut} x2={xFront} y2={-ryOut} stroke="rgba(255,255,255,0.18)" strokeWidth="0.6" />
+                  <line x1={xBack} y1={ryOut} x2={xFront} y2={ryOut} stroke="rgba(0,0,0,0.5)" strokeWidth="0.8" />
+
+                  {/* Front cross-section: concentric ellipses, OUTERMOST first
+                      so inner ones paint on top. Each ellipse fills its layer's
+                      annulus (or a solid disc for the innermost). */}
+                  {visible.slice().reverse().map(({ l, idx }) => {
+                    const r = baseR * l.to
+                    const ry = ryFor(r)
+                    const lay_lighter = mixHex(l.color, '#ffffff', 0.22)
+                    const pattern = patternForKind(l.kind)
+                    const isCore = l.kind === 'core'
+                    return (
+                      <g key={`fc-${idx}`}>
+                        <ellipse
+                          cx={xFront} cy={0}
+                          rx={r} ry={ry}
+                          fill={lay_lighter}
+                          stroke="rgba(0,0,0,0.55)"
+                          strokeWidth={isCore ? 0.6 : 0.5}
+                        />
+                        {pattern && (
+                          <ellipse
+                            cx={xFront} cy={0}
+                            rx={r} ry={ry}
+                            fill={pattern}
+                            opacity="0.5"
+                            pointerEvents="none"
+                          />
+                        )}
+                        {isCore && (
+                          <ellipse
+                            cx={xFront - r * 0.35} cy={-ry * 0.35}
+                            rx={r * 0.18} ry={Math.max(2, ry * 0.22)}
+                            fill="#fbbf24"
+                            opacity="0.65"
+                          />
+                        )}
+                      </g>
+                    )
+                  })}
+
+                  {/* Layer labels on the body — only for the outermost (jacket) */}
+                  {zoom >= 0.9 && (
+                    <text
+                      x={(xBack + xFront) / 2}
+                      y={ryOut + 16}
+                      fontSize="11"
+                      fill={outermost.textColor || outermost.color}
+                      fontFamily="JetBrains Mono, monospace"
+                      textAnchor="middle"
+                      opacity="0.8"
+                    >
+                      {outermost.name}
+                    </text>
+                  )}
+                </>
+              )
+            })()}
+          </svg>
 
           {/* Overlay info */}
           <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: C.copperBright }}>
@@ -192,7 +378,7 @@ export default function Cable3D() {
             {preset.z0} · drag to rotate
           </div>
           <div className="absolute bottom-2 left-2 font-mono text-[9px]" style={{ color: C.textMuted }}>
-            yaw {rotY.toFixed(0)}° · pitch {rotX.toFixed(0)}° · zoom {zoom.toFixed(1)}×
+            yaw {Math.round(yaw)}° · pitch {(pitch * 100).toFixed(0)}% · zoom {zoom.toFixed(1)}×
           </div>
         </div>
 
@@ -231,8 +417,8 @@ export default function Cable3D() {
           <div className="space-y-1.5">
             <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: C.copperBright }}>View</div>
             <SlideRow label="Zoom" value={zoom} onChange={setZoom} min={0.5} max={2.5} step={0.05} />
-            <SlideRow label="Pitch" value={rotX} onChange={(v) => { setAutoSpin(false); setRotX(v) }} min={-80} max={20} step={1} unit="°" />
-            <SlideRow label="Yaw" value={rotY} onChange={(v) => { setAutoSpin(false); setRotY(v) }} min={-360} max={360} step={1} unit="°" />
+            <SlideRow label="Pitch" value={pitch} onChange={(v) => { setAutoSpin(false); setPitch(v) }} min={0} max={1} step={0.02} fmt={(v) => (v * 100).toFixed(0) + '%'} />
+            <SlideRow label="Yaw" value={yaw} onChange={(v) => { setAutoSpin(false); setYaw(v) }} min={-360} max={360} step={1} fmt={(v) => Math.round(v) + '°'} />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -264,13 +450,117 @@ export default function Cable3D() {
       {/* Legend / engineering note */}
       <div className="bg-[#12171a] border border-[#252e33] rounded p-3 text-[12px] leading-relaxed" style={{ color: C.textDim }}>
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: C.teal }}>How to use</div>
-        Drag the stage to rotate freely. Auto-spin slowly orbits the cable for hands-off review. Toggle layers off to peek inside, or click <span className="text-[#fbbf24]">Explode</span> to space the layers apart and reveal what each contributes. Useful for explaining cable construction in design reviews and customer presentations — no manufacturing realism, just the topological structure.
+        Drag horizontally to spin the cable around its length axis (yaw). Drag vertically to tilt between head-on (full cross-section circles) and side-on (flat barrel). Click <span className="text-[#fbbf24]">Explode</span> to space layers apart along the cable axis so each layer's contribution is visible. Toggle individual layers off to peek inside.
       </div>
     </section>
   )
 }
 
-function SlideRow({ label, value, onChange, min, max, step, unit = '' }) {
+function patternForKind(kind) {
+  switch (kind) {
+    case 'braid': return 'url(#c3d-braid)'
+    case 'spiral': return 'url(#c3d-spiral)'
+    case 'striped': return 'url(#c3d-striped)'
+    case 'spline': return 'url(#c3d-spline)'
+    case 'foil': return 'url(#c3d-foil)'
+    default: return null
+  }
+}
+
+// In Explode mode each layer becomes a tiny stand-alone cylinder showing
+// (a) its annular cross-section on the front, (b) its body, (c) its back cap.
+// All laid out in a row with labels underneath.
+function ExplodedSegment({ layer, rOuter, rInner, cx, width, ryFor, litX }) {
+  const ryOut = ryFor(rOuter)
+  const ryIn = ryFor(rInner)
+  const xL = cx - width / 2
+  const xR = cx + width / 2
+  const lighter = mixHex(layer.color, '#ffffff', 0.20)
+  const darker = mixHex(layer.color, '#000000', 0.45)
+  const pattern = patternForKind(layer.kind)
+  const isCore = layer.kind === 'core'
+  const gradId = `expGrad-${cx | 0}`
+  return (
+    <g>
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="-1" x2="0" y2="1">
+          <stop offset="0%" stopColor={darker} />
+          <stop offset={`${litX * 100}%`} stopColor={lighter} />
+          <stop offset="100%" stopColor={darker} />
+        </linearGradient>
+      </defs>
+      {/* Back cap */}
+      <ellipse
+        cx={xL} cy={0}
+        rx={rOuter} ry={ryOut}
+        fill={mixHex(layer.color, '#000', 0.55)}
+        stroke="rgba(0,0,0,0.6)"
+        strokeWidth="0.6"
+      />
+      {/* Body */}
+      <rect
+        x={xL} y={-ryOut}
+        width={xR - xL}
+        height={ryOut * 2}
+        fill={`url(#${gradId})`}
+        stroke="rgba(0,0,0,0.5)"
+        strokeWidth="0.5"
+      />
+      {pattern && (
+        <rect
+          x={xL} y={-ryOut}
+          width={xR - xL}
+          height={ryOut * 2}
+          fill={pattern}
+          opacity="0.55"
+        />
+      )}
+      <line x1={xL} y1={-ryOut} x2={xR} y2={-ryOut} stroke="rgba(255,255,255,0.18)" strokeWidth="0.6" />
+      <line x1={xL} y1={ryOut} x2={xR} y2={ryOut} stroke="rgba(0,0,0,0.5)" strokeWidth="0.8" />
+      {/* Front cap: outer ring */}
+      <ellipse
+        cx={xR} cy={0}
+        rx={rOuter} ry={ryOut}
+        fill={lighter}
+        stroke="rgba(0,0,0,0.6)"
+        strokeWidth="0.8"
+      />
+      {pattern && (
+        <ellipse cx={xR} cy={0} rx={rOuter} ry={ryOut} fill={pattern} opacity="0.45" pointerEvents="none" />
+      )}
+      {/* Inner cutout on front cap (annulus) */}
+      {!isCore && rInner > 0 && (
+        <ellipse
+          cx={xR} cy={0}
+          rx={rInner} ry={ryIn}
+          fill="#0a0d0f"
+        />
+      )}
+      {isCore && (
+        <ellipse
+          cx={xR - rOuter * 0.35} cy={-ryOut * 0.35}
+          rx={rOuter * 0.18} ry={Math.max(2, ryOut * 0.22)}
+          fill="#fbbf24"
+          opacity="0.65"
+        />
+      )}
+      {/* Label below */}
+      <text
+        x={cx}
+        y={ryOut + 16}
+        fontSize="10"
+        fill={layer.textColor || layer.color}
+        fontFamily="JetBrains Mono, monospace"
+        textAnchor="middle"
+        opacity="0.85"
+      >
+        {layer.name}
+      </text>
+    </g>
+  )
+}
+
+function SlideRow({ label, value, onChange, min, max, step, fmt }) {
   return (
     <div className="flex items-center gap-2">
       <label className="font-mono text-[10px] uppercase tracking-wider w-12 shrink-0" style={{ color: C.textMuted }}>{label}</label>
@@ -285,186 +575,13 @@ function SlideRow({ label, value, onChange, min, max, step, unit = '' }) {
         style={{ accentColor: C.copper }}
       />
       <span className="font-mono text-[10px] w-12 text-right" style={{ color: C.amber }}>
-        {Number(value).toFixed(step < 1 ? 2 : 0)}{unit}
+        {fmt ? fmt(value) : Number(value).toFixed(step < 1 ? 2 : 0)}
       </span>
     </div>
   )
 }
 
-// The actual cable model — concentric tubes rendered as <CableLayer> stacked
-function CableTube({ preset, hidden, exploded }) {
-  const baseR = 100   // px outer radius
-  const length = 360  // px cable length
-
-  return (
-    <div
-      style={{
-        transformStyle: 'preserve-3d',
-        position: 'relative',
-        width: 1,
-        height: 1,
-      }}
-    >
-      {preset.layers.map((layer, i) => {
-        if (hidden[i]) return null
-        const innerR = baseR * layer.from
-        const outerR = baseR * layer.to
-        // Exploded mode pushes outer layers outward along radial axis
-        const offset = exploded ? i * 32 : 0
-        return (
-          <CableLayer
-            key={i}
-            layer={layer}
-            inner={innerR}
-            outer={outerR}
-            length={length}
-            offset={offset}
-          />
-        )
-      })}
-    </div>
-  )
-}
-
-// One concentric tube at radius `outer` (and visible inner cut on the cross-section ends).
-// We approximate the tube using N angular slices — each a thin oriented "wall" panel.
-function CableLayer({ layer, inner, outer, length, offset }) {
-  const N = 18  // angular slices
-  const slices = []
-  for (let i = 0; i < N; i++) {
-    const a0 = (i / N) * 360
-    slices.push(a0)
-  }
-
-  // Slight darken/lighten by angle for shading
-  const shade = (deg, base) => {
-    const lightAngle = 60  // light from top-right-ish
-    const ang = ((deg - lightAngle + 540) % 360) - 180  // -180..180
-    const t = Math.cos((ang * Math.PI) / 180) * 0.5 + 0.5  // 0..1
-    return mixHex(base, '#000', 0.45 - t * 0.35)
-  }
-
-  const hatchBackground = (kind, baseColor) => {
-    if (kind === 'braid') {
-      return `repeating-linear-gradient(45deg, ${baseColor} 0 3px, ${mixHex(baseColor, '#000', 0.3)} 3px 6px)`
-    }
-    if (kind === 'spiral') {
-      return `repeating-linear-gradient(70deg, ${baseColor} 0 2px, ${mixHex(baseColor, '#fff', 0.2)} 2px 4px)`
-    }
-    if (kind === 'ring-striped') {
-      return `repeating-linear-gradient(90deg, ${baseColor} 0 6px, ${mixHex(baseColor, '#000', 0.2)} 6px 8px)`
-    }
-    return baseColor
-  }
-
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        left: -outer,
-        top: -outer,
-        width: outer * 2,
-        height: outer * 2,
-        transformStyle: 'preserve-3d',
-        transform: `translateZ(${offset}px)`,
-        transition: 'transform 0.4s cubic-bezier(0.32, 0.72, 0.0, 1)',
-      }}
-    >
-      {/* Outer cylinder surface */}
-      {slices.map((deg) => (
-        <div
-          key={`o${deg}`}
-          style={{
-            position: 'absolute',
-            left: outer,
-            top: -length / 2,
-            width: 1,
-            height: length,
-            background: hatchBackground(layer.kind, shade(deg, layer.color)),
-            transform: `rotateY(${deg}deg) translateX(-${outer}px) rotateY(0deg) translateZ(${outer}px)`,
-            transformOrigin: 'left center',
-            backfaceVisibility: 'hidden',
-            border: 'none',
-            boxShadow: deg < 180 ? 'none' : 'inset 0 0 4px rgba(0,0,0,0.3)',
-          }}
-        />
-      ))}
-      {/* Render as wedge slats — actual tube approximation */}
-      {Array.from({ length: N }).map((_, i) => {
-        const a0 = (i / N) * 2 * Math.PI
-        const a1 = ((i + 1) / N) * 2 * Math.PI
-        const midAng = ((a0 + a1) / 2) * 180 / Math.PI
-        const slatWidth = 2 * Math.PI * outer / N
-        return (
-          <div
-            key={`s${i}`}
-            style={{
-              position: 'absolute',
-              left: outer - slatWidth / 2,
-              top: -length / 2,
-              width: slatWidth + 0.4,
-              height: length,
-              background: hatchBackground(layer.kind, shade(midAng, layer.color)),
-              transform: `rotateY(${(midAng + 90)}deg) translateZ(${outer}px) rotateY(-90deg)`,
-              transformOrigin: `${slatWidth / 2}px center`,
-              backfaceVisibility: 'hidden',
-            }}
-          />
-        )
-      })}
-      {/* End cap (cross-section ring, front) */}
-      <div
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          width: outer * 2,
-          height: outer * 2,
-          borderRadius: '50%',
-          background: layer.color,
-          opacity: 0.9,
-          transform: `translateZ(${length / 2}px)`,
-          backfaceVisibility: 'hidden',
-          border: '1px solid #0a0d0f',
-        }}
-      />
-      {/* Inner cutout on front end-cap if not solid core */}
-      {layer.kind !== 'core' && inner > 0 && (
-        <div
-          style={{
-            position: 'absolute',
-            left: outer - inner,
-            top: outer - inner,
-            width: inner * 2,
-            height: inner * 2,
-            borderRadius: '50%',
-            background: '#0a0d0f',
-            transform: `translateZ(${length / 2 + 0.5}px)`,
-            backfaceVisibility: 'hidden',
-          }}
-        />
-      )}
-      {/* Back end-cap (mirror) */}
-      <div
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          width: outer * 2,
-          height: outer * 2,
-          borderRadius: '50%',
-          background: mixHex(layer.color, '#000', 0.4),
-          opacity: 0.85,
-          transform: `translateZ(-${length / 2}px) rotateY(180deg)`,
-          backfaceVisibility: 'hidden',
-          border: '1px solid #0a0d0f',
-        }}
-      />
-    </div>
-  )
-}
-
-// ── Helpers ──
+// ── Color helpers ──
 function mixHex(a, b, t) {
   const pa = parseHex(a)
   const pb = parseHex(b)
