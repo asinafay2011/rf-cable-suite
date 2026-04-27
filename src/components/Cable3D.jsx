@@ -165,13 +165,16 @@ export default function Cable3D() {
   const xFront = BL / 2        // x of front end-cap
   const xBack = -BL / 2        // x of back end-cap
 
-  // Pitch sets the ellipse rx/ry ratio (rx is fixed at radius, ry shrinks with pitch)
-  const ryFor = (r) => r * (1 - pitch * 0.85)  // never quite 0 so we still see something
+  // Pitch sets the ellipse aspect (rx fixed; ry shrinks). Capped at 0.65 so the
+  // cable never gets so thin that it disappears — at full pitch you still see
+  // a clear barrel, just very head-on.
+  const ryFor = (r) => r * (1 - pitch * 0.65)
 
   // Lighting: yaw determines which side faces the light source. Use yaw to bias
-  // the surface gradient highlight position so the body looks "lit".
+  // the surface gradient highlight position so the body looks "lit". Strong
+  // amplitude (0.0..1.0) so the moving glint is clearly visible.
   const yawRad = (yaw * Math.PI) / 180
-  const litX = -Math.cos(yawRad) * 0.3 + 0.5  // 0.2..0.8
+  const litX = (Math.cos(yawRad) * 0.5 + 0.5)  // 0..1, 0.5 at yaw=90/270, 1 at yaw=0, 0 at yaw=180
 
   return (
     <section className="space-y-4">
@@ -207,24 +210,45 @@ export default function Cable3D() {
             style={{ transform: `scale(${zoom})`, transformOrigin: 'center', transition: dragStartRef.current ? 'none' : 'transform 0.18s ease-out' }}
           >
             <defs>
-              {/* Patterns */}
-              <pattern id="c3d-braid" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(0,0,0,0.45)" strokeWidth="2" />
-                <line x1="4" y1="0" x2="4" y2="8" stroke="rgba(255,255,255,0.18)" strokeWidth="1.4" />
+              {/* Patterns — patternTransform's translate uses yaw so the surface
+                  hatch slides horizontally as the cable "spins" around its
+                  length axis. This is what makes auto-spin VISIBLE. */}
+              <pattern id="c3d-braid" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform={`rotate(45) translate(${yaw * 0.4}, 0)`}>
+                <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(0,0,0,0.5)" strokeWidth="2" />
+                <line x1="4" y1="0" x2="4" y2="8" stroke="rgba(255,255,255,0.22)" strokeWidth="1.4" />
               </pattern>
-              <pattern id="c3d-spiral" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(70)">
+              <pattern id="c3d-spiral" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform={`rotate(70) translate(${yaw * 0.3}, 0)`}>
                 <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(0,0,0,0.55)" strokeWidth="1.6" />
               </pattern>
-              <pattern id="c3d-striped" width="14" height="14" patternUnits="userSpaceOnUse">
-                <line x1="0" y1="0" x2="14" y2="0" stroke="rgba(0,0,0,0.35)" strokeWidth="2" />
-                <line x1="0" y1="7" x2="14" y2="7" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
+              <pattern id="c3d-striped" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform={`translate(${yaw * 0.6}, 0)`}>
+                <line x1="0" y1="0" x2="14" y2="0" stroke="rgba(0,0,0,0.4)" strokeWidth="2.4" />
+                <line x1="0" y1="7" x2="14" y2="7" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
               </pattern>
-              <pattern id="c3d-spline" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(30)">
-                <line x1="0" y1="0" x2="0" y2="10" stroke="rgba(255,255,255,0.18)" strokeWidth="1" />
-                <line x1="5" y1="0" x2="5" y2="10" stroke="rgba(0,0,0,0.45)" strokeWidth="1" />
+              <pattern id="c3d-spline" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform={`rotate(30) translate(${yaw * 0.4}, 0)`}>
+                <line x1="0" y1="0" x2="0" y2="10" stroke="rgba(255,255,255,0.22)" strokeWidth="1" />
+                <line x1="5" y1="0" x2="5" y2="10" stroke="rgba(0,0,0,0.5)" strokeWidth="1" />
               </pattern>
-              <pattern id="c3d-foil" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(15)">
-                <line x1="0" y1="0" x2="0" y2="14" stroke="rgba(0,0,0,0.25)" strokeWidth="0.8" />
+              <pattern id="c3d-foil" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform={`rotate(15) translate(${yaw * 0.4}, 0)`}>
+                <line x1="0" y1="0" x2="0" y2="14" stroke="rgba(0,0,0,0.3)" strokeWidth="0.9" />
+              </pattern>
+              {/* Front-cap patterns — rotate these around the centre so the cross-
+                  section's hatch APPEARS to spin with the cable. */}
+              <pattern id="c3d-braid-cap" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform={`rotate(${45 + yaw})`}>
+                <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(0,0,0,0.5)" strokeWidth="2" />
+                <line x1="4" y1="0" x2="4" y2="8" stroke="rgba(255,255,255,0.22)" strokeWidth="1.4" />
+              </pattern>
+              <pattern id="c3d-spiral-cap" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform={`rotate(${70 + yaw * 0.5})`}>
+                <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(0,0,0,0.55)" strokeWidth="1.6" />
+              </pattern>
+              <pattern id="c3d-striped-cap" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform={`rotate(${yaw * 0.6})`}>
+                <line x1="0" y1="0" x2="14" y2="0" stroke="rgba(0,0,0,0.4)" strokeWidth="2.4" />
+              </pattern>
+              <pattern id="c3d-spline-cap" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform={`rotate(${30 + yaw * 0.5})`}>
+                <line x1="0" y1="0" x2="0" y2="10" stroke="rgba(255,255,255,0.22)" strokeWidth="1" />
+                <line x1="5" y1="0" x2="5" y2="10" stroke="rgba(0,0,0,0.5)" strokeWidth="1" />
+              </pattern>
+              <pattern id="c3d-foil-cap" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform={`rotate(${15 + yaw * 0.5})`}>
+                <line x1="0" y1="0" x2="0" y2="14" stroke="rgba(0,0,0,0.3)" strokeWidth="0.9" />
               </pattern>
             </defs>
 
@@ -319,7 +343,7 @@ export default function Cable3D() {
                     const r = baseR * l.to
                     const ry = ryFor(r)
                     const lay_lighter = mixHex(l.color, '#ffffff', 0.22)
-                    const pattern = patternForKind(l.kind)
+                    const pattern = patternForKind(l.kind, true)  // cap pattern rotates with yaw
                     const isCore = l.kind === 'core'
                     return (
                       <g key={`fc-${idx}`}>
@@ -456,13 +480,14 @@ export default function Cable3D() {
   )
 }
 
-function patternForKind(kind) {
+function patternForKind(kind, isCap = false) {
+  const suf = isCap ? '-cap' : ''
   switch (kind) {
-    case 'braid': return 'url(#c3d-braid)'
-    case 'spiral': return 'url(#c3d-spiral)'
-    case 'striped': return 'url(#c3d-striped)'
-    case 'spline': return 'url(#c3d-spline)'
-    case 'foil': return 'url(#c3d-foil)'
+    case 'braid':   return `url(#c3d-braid${suf})`
+    case 'spiral':  return `url(#c3d-spiral${suf})`
+    case 'striped': return `url(#c3d-striped${suf})`
+    case 'spline':  return `url(#c3d-spline${suf})`
+    case 'foil':    return `url(#c3d-foil${suf})`
     default: return null
   }
 }
