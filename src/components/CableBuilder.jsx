@@ -682,142 +682,466 @@ function CompletionCard({ recipe, sim, std, mode, onReset, onBack }) {
 }
 
 // ─────────────────────────────────────────────────────────
-// 3D-ish SVG renderer for the in-progress build
-// Same isometric cutaway approach as Cable3D, kept focused / simpler.
+// Structural visualisation: TWO panels.
+//
+//   1. Cross-section (left)  — shows the actual conductor arrangement:
+//                              1 wire → 2 wires → 4 pairs around X-spline.
+//                              Auto-rotates so it feels 3D.
+//
+//   2. Side / helix view (right) — shows the cable lying horizontally.
+//                                  Each conductor draws its sine-wave
+//                                  helical path along the length so the
+//                                  engineer SEES the twist visibly.
+//
+// Both panels animate together — `phase` advances every frame for the
+// helices; `spin` rotates the cross-section.
+// ─────────────────────────────────────────────────────────
+
+// Determine the structural "tier" from applied stages
+function structureTier(appliedStages) {
+  if (!appliedStages || appliedStages.size === 0) return 'empty'
+  if (appliedStages.has('bundle')) return 'bundle'
+  if (appliedStages.has('pair_foil')) return 'pair_foil'
+  if (appliedStages.has('pair_wrap')) return 'pair_wrap'
+  if (appliedStages.has('pair')) return 'pair'
+  if (appliedStages.has('insulation')) return 'insulated'
+  return 'conductor'
+}
+
+// Conductor positions inside the cross-section, depending on tier.
+// Returns an array of { x, y, conductorR, insulationR, color, insColor, groupIdx }
+function conductorsFor(tier, recipe) {
+  const condColor = '#c97b3f'
+  const insColor = '#fbbf24'
+  const condR = 6
+  const insR = condR + 6
+  if (tier === 'empty') return []
+  if (tier === 'conductor' || tier === 'insulated') {
+    return [{ x: 0, y: 0, conductorR: condR, insulationR: tier === 'insulated' ? insR : condR + 2, insColor: tier === 'insulated' ? insColor : '#0a0d0f', condColor, groupIdx: 0 }]
+  }
+  if (tier === 'pair' || tier === 'pair_wrap' || tier === 'pair_foil') {
+    // 2 insulated wires touching at center
+    return [
+      { x: -insR, y: 0, conductorR: condR, insulationR: insR, condColor, insColor: '#fbbf24', groupIdx: 0 },
+      { x:  insR, y: 0, conductorR: condR, insulationR: insR, condColor, insColor: '#7dd3fc', groupIdx: 0 },
+    ]
+  }
+  if (tier === 'bundle') {
+    const pairCount = recipe?.bundle?.pair_count || 4
+    if (pairCount === 1) {
+      return [{ x: 0, y: 0, conductorR: condR, insulationR: insR, condColor, insColor, groupIdx: 0 }]
+    }
+    if (pairCount === 2) {
+      // 2 pairs side-by-side
+      const out = []
+      const yOff = 0
+      const xOff = insR + 2
+      out.push({ x: -2*insR - xOff, y: yOff, conductorR: condR, insulationR: insR, condColor, insColor: '#fbbf24', groupIdx: 0 })
+      out.push({ x: -xOff,           y: yOff, conductorR: condR, insulationR: insR, condColor, insColor: '#7dd3fc', groupIdx: 0 })
+      out.push({ x:  xOff,           y: yOff, conductorR: condR, insulationR: insR, condColor, insColor: '#fbbf24', groupIdx: 1 })
+      out.push({ x:  2*insR + xOff,  y: yOff, conductorR: condR, insulationR: insR, condColor, insColor: '#a78bfa', groupIdx: 1 })
+      return out
+    }
+    // 4 pairs in quadrants — each pair has 2 conductors arranged tangentially
+    const RR = insR * 1.6  // distance from center to pair center
+    const pairCenters = [
+      { cx: 0,  cy: -RR, ang: 0   },     // top
+      { cx: RR, cy: 0,   ang: 90  },     // right
+      { cx: 0,  cy: RR,  ang: 180 },     // bottom
+      { cx: -RR, cy: 0,  ang: 270 },     // left
+    ]
+    const pairColors = [
+      ['#fbbf24', '#7dd3fc'],   // orange / blue
+      ['#fb923c', '#fbbf24'],   // orange / orange (different shade)
+      ['#a78bfa', '#7dd3fc'],   // purple / blue
+      ['#5eead4', '#fbbf24'],   // teal / yellow (mock Cat 6A pair colors)
+    ]
+    const out = []
+    pairCenters.forEach((pc, i) => {
+      // 2 conductors of the pair, tangent to the bundle circumference
+      // (perpendicular to the radial direction). Tangent direction at
+      // angle ang (CW from "top"): (cos ang, sin ang).
+      const tx = Math.cos((pc.ang * Math.PI) / 180) * insR
+      const ty = Math.sin((pc.ang * Math.PI) / 180) * insR
+      out.push({
+        x: pc.cx + tx, y: pc.cy + ty,
+        conductorR: condR, insulationR: insR, condColor,
+        insColor: pairColors[i][0], groupIdx: i,
+      })
+      out.push({
+        x: pc.cx - tx, y: pc.cy - ty,
+        conductorR: condR, insulationR: insR, condColor,
+        insColor: pairColors[i][1], groupIdx: i,
+      })
+    })
+    return out
+  }
+  return []
+}
+
+// Outer ring layers (from inside out) for the cross-section panel
+function outerLayersFor(appliedStages, recipe) {
+  const tier = structureTier(appliedStages)
+  // Compute the inner-most "core radius" of the structure (so outer
+  // layers stack outside that)
+  let coreR
+  if (tier === 'bundle') {
+    coreR = recipe?.bundle?.pair_count >= 4 ? 36 : 28
+  } else if (tier === 'pair_foil' || tier === 'pair_wrap' || tier === 'pair') {
+    coreR = 18
+  } else if (tier === 'insulated') {
+    coreR = 14
+  } else {
+    coreR = 8
+  }
+  const layers = []
+  // Pair wrap (only inside pair, before foil — drawn in pair tier already)
+  // For bundle tier we don't render pair wrap as a separate ring (it's per-pair, baked in)
+  if (tier === 'pair_wrap' || tier === 'pair_foil') {
+    const wrap = WRAP_MATERIALS[recipe?.pair_wrap?.material] || WRAP_MATERIALS.ptfe_tape
+    if (recipe?.pair_wrap?.material && recipe.pair_wrap.material !== 'none') {
+      layers.push({ kind: 'striped', color: '#a78bfa', label: wrap.name, thick: 4, isPairLevel: true })
+      coreR += 4
+    }
+  }
+  if (tier === 'pair_foil') {
+    layers.push({ kind: 'foil', color: '#a7b0b6', label: 'Per-pair foil', thick: 5, isPairLevel: true })
+    coreR += 5
+  }
+  if (tier === 'bundle') {
+    if (appliedStages.has('outer_foil') && recipe?.outer_foil?.foil) {
+      layers.push({ kind: 'foil', color: '#cbd5e1', label: 'Outer foil', thick: 6 })
+      coreR += 6
+    }
+    if (appliedStages.has('shield') && recipe?.shield?.braid_enabled) {
+      layers.push({ kind: 'braid', color: '#c97b3f', label: 'Outer braid', thick: 10 })
+      coreR += 10
+    }
+    if (appliedStages.has('jacket')) {
+      layers.push({ kind: 'jacket', color: '#1a2226', label: (JACKETS[recipe?.jacket?.material] || JACKETS.lszh).name, thick: 14 })
+      coreR += 14
+    }
+  }
+  return { layers, finalR: coreR + 4 }
+}
+
+// ─────────────────────────────────────────────────────────
+// Main split-view renderer
 // ─────────────────────────────────────────────────────────
 function CableBuildSvg({ recipe, appliedStages }) {
-  const [yaw, setYaw] = useState(0)
-  // Auto-spin
+  const [phase, setPhase] = useState(0)  // helical animation phase 0..1
+  const [spin, setSpin] = useState(0)     // cross-section rotation, deg
   useEffect(() => {
-    let raf
-    let last = performance.now()
+    let raf, last = performance.now()
     const tick = (now) => {
       const dt = (now - last) / 1000
       last = now
-      setYaw((y) => (y + dt * 14) % 360)
+      setPhase((p) => (p + dt * 0.3) % 1)
+      setSpin((s) => (s + dt * 14) % 360)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  const pitch = 0.45
-  const layers = useMemo(() => buildLayersFromRecipe(recipe, appliedStages), [recipe, appliedStages])
-  const baseR = 110
-  const BL = 320
-  const xFront = BL / 2
-  const xBack = -BL / 2
-  const ryFor = (r) => r * (1 - pitch * 0.65)
-  const yawRad = (yaw * Math.PI) / 180
-  const litX = Math.cos(yawRad) * 0.5 + 0.5
+  return (
+    <div className="absolute inset-0 grid lg:grid-cols-[260px_1fr] gap-2 p-2">
+      {/* Cross-section square */}
+      <div className="bg-[#0a0d0f] border border-[#252e33] rounded relative overflow-hidden">
+        <div className="absolute top-2 left-2 font-mono text-[9px] uppercase tracking-[0.2em] text-[#5eead4] z-10">
+          ◆ Cross-section
+        </div>
+        <CrossSectionSvg recipe={recipe} appliedStages={appliedStages} spin={spin} />
+      </div>
+      {/* Helical side view */}
+      <div className="bg-[#0a0d0f] border border-[#252e33] rounded relative overflow-hidden">
+        <div className="absolute top-2 left-2 font-mono text-[9px] uppercase tracking-[0.2em] text-[#fbbf24] z-10">
+          ◆ Side view · twist visible
+        </div>
+        <HelixSideSvg recipe={recipe} appliedStages={appliedStages} phase={phase} />
+      </div>
+    </div>
+  )
+}
 
-  const VW = 720
-  const VH = 320
+// ─────────────────────────────────────────────────────────
+// Cross-section SVG: shows the actual conductor arrangement.
+// ─────────────────────────────────────────────────────────
+function CrossSectionSvg({ recipe, appliedStages, spin }) {
+  const tier = structureTier(appliedStages)
+  const conductors = useMemo(() => conductorsFor(tier, recipe), [tier, recipe])
+  const { layers, finalR } = useMemo(() => outerLayersFor(appliedStages, recipe), [appliedStages, recipe])
 
-  if (layers.length === 0) {
-    return (
-      <svg viewBox={`${-VW / 2} ${-VH / 2} ${VW} ${VH}`} className="absolute inset-0 w-full h-full" />
-    )
-  }
-
-  const outermost = layers[layers.length - 1]
-  const rOut = baseR * outermost.to
-  const ryOut = ryFor(rOut)
-  const lighter = mixHex(outermost.color, '#ffffff', 0.18)
-  const darker = mixHex(outermost.color, '#000000', 0.45)
-  const patternFill = patternForKind(outermost.kind, false, yaw)
+  const VW = 240
+  const VH = 240
+  // Radii of outer ring stack
+  let runningR = (() => {
+    // Compute the inner radius where outer layers start
+    if (tier === 'bundle') return recipe?.bundle?.pair_count >= 4 ? 36 : 28
+    if (tier === 'pair_foil' || tier === 'pair_wrap' || tier === 'pair') return 18
+    if (tier === 'insulated') return 14
+    return 8
+  })()
 
   return (
     <svg viewBox={`${-VW / 2} ${-VH / 2} ${VW} ${VH}`} className="absolute inset-0 w-full h-full">
       <defs>
-        <linearGradient id="cb-bodyGrad" x1="0" y1="-1" x2="0" y2="1">
-          <stop offset="0%" stopColor={darker} />
-          <stop offset={`${litX * 100}%`} stopColor={lighter} />
-          <stop offset="100%" stopColor={darker} />
-        </linearGradient>
-        <pattern id="cb-braid" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform={`rotate(45) translate(${yaw * 0.4}, 0)`}>
-          <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(0,0,0,0.5)" strokeWidth="2" />
-          <line x1="4" y1="0" x2="4" y2="8" stroke="rgba(255,255,255,0.22)" strokeWidth="1.4" />
+        <pattern id="xs-braid" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(0,0,0,0.5)" strokeWidth="1.6" />
+          <line x1="3" y1="0" x2="3" y2="6" stroke="rgba(255,255,255,0.22)" strokeWidth="1.1" />
         </pattern>
-        <pattern id="cb-spline" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform={`rotate(30) translate(${yaw * 0.4}, 0)`}>
-          <line x1="0" y1="0" x2="0" y2="10" stroke="rgba(255,255,255,0.22)" strokeWidth="1" />
-          <line x1="5" y1="0" x2="5" y2="10" stroke="rgba(0,0,0,0.5)" strokeWidth="1" />
+        <pattern id="xs-foil" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(20)">
+          <line x1="0" y1="0" x2="0" y2="10" stroke="rgba(0,0,0,0.3)" strokeWidth="0.7" />
         </pattern>
-        <pattern id="cb-striped" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform={`translate(${yaw * 0.6}, 0)`}>
-          <line x1="0" y1="0" x2="14" y2="0" stroke="rgba(0,0,0,0.4)" strokeWidth="2.4" />
-          <line x1="0" y1="7" x2="14" y2="7" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
+        <pattern id="xs-striped" width="8" height="8" patternUnits="userSpaceOnUse">
+          <line x1="0" y1="0" x2="8" y2="0" stroke="rgba(0,0,0,0.4)" strokeWidth="1.6" />
+          <line x1="0" y1="4" x2="8" y2="4" stroke="rgba(255,255,255,0.1)" strokeWidth="0.7" />
         </pattern>
-        <pattern id="cb-foil" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform={`rotate(15) translate(${yaw * 0.4}, 0)`}>
-          <line x1="0" y1="0" x2="0" y2="14" stroke="rgba(0,0,0,0.3)" strokeWidth="0.9" />
-        </pattern>
-        <pattern id="cb-braid-cap" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform={`rotate(${45 + yaw})`}>
-          <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(0,0,0,0.5)" strokeWidth="2" />
-          <line x1="4" y1="0" x2="4" y2="8" stroke="rgba(255,255,255,0.22)" strokeWidth="1.4" />
-        </pattern>
-        <pattern id="cb-spline-cap" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform={`rotate(${30 + yaw * 0.5})`}>
-          <line x1="0" y1="0" x2="0" y2="10" stroke="rgba(255,255,255,0.22)" strokeWidth="1" />
-          <line x1="5" y1="0" x2="5" y2="10" stroke="rgba(0,0,0,0.5)" strokeWidth="1" />
-        </pattern>
-        <pattern id="cb-striped-cap" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform={`rotate(${yaw * 0.6})`}>
-          <line x1="0" y1="0" x2="14" y2="0" stroke="rgba(0,0,0,0.4)" strokeWidth="2.4" />
-        </pattern>
-        <pattern id="cb-foil-cap" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform={`rotate(${15 + yaw * 0.5})`}>
-          <line x1="0" y1="0" x2="0" y2="14" stroke="rgba(0,0,0,0.3)" strokeWidth="0.9" />
-        </pattern>
+        <radialGradient id="xs-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#c97b3f" stopOpacity="0.12" />
+          <stop offset="100%" stopColor="#0a0d0f" stopOpacity="0" />
+        </radialGradient>
       </defs>
 
-      {/* Back cap */}
-      <ellipse cx={xBack} cy={0} rx={rOut} ry={ryOut} fill={mixHex(outermost.color, '#000', 0.6)} stroke="rgba(0,0,0,0.6)" strokeWidth="0.6" />
+      {/* Subtle background glow */}
+      <rect x={-VW / 2} y={-VH / 2} width={VW} height={VH} fill="url(#xs-glow)" />
 
-      {/* Body */}
-      <rect x={xBack} y={-ryOut} width={xFront - xBack} height={ryOut * 2} fill="url(#cb-bodyGrad)" stroke="rgba(0,0,0,0.55)" strokeWidth="0.5" />
-      {patternFill && <rect x={xBack} y={-ryOut} width={xFront - xBack} height={ryOut * 2} fill={patternFill} opacity="0.55" />}
-      <line x1={xBack} y1={-ryOut} x2={xFront} y2={-ryOut} stroke="rgba(255,255,255,0.18)" strokeWidth="0.6" />
-      <line x1={xBack} y1={ryOut} x2={xFront} y2={ryOut} stroke="rgba(0,0,0,0.5)" strokeWidth="0.8" />
+      {/* Rotate the entire structure for the auto-spin "3D" feel */}
+      <g transform={`rotate(${spin})`}>
+        {tier === 'empty' && (
+          <text x="0" y="0" fontSize="10" fill="#6b7479" fontFamily="JetBrains Mono, monospace" textAnchor="middle">
+            empty
+          </text>
+        )}
 
-      {/* Front cross-section: outermost first, then inner rings on top */}
-      {layers.slice().reverse().map((l, i) => {
-        const r = baseR * l.to
-        const ry = ryFor(r)
-        const lay_lighter = mixHex(l.color, '#ffffff', 0.22)
-        const pattern = patternForKind(l.kind, true, yaw)
-        const isCore = l.kind === 'core'
-        return (
-          <g key={i}>
-            <ellipse cx={xFront} cy={0} rx={r} ry={ry} fill={lay_lighter} stroke="rgba(0,0,0,0.55)" strokeWidth={isCore ? 0.6 : 0.5} />
-            {pattern && <ellipse cx={xFront} cy={0} rx={r} ry={ry} fill={pattern} opacity="0.5" pointerEvents="none" />}
-            {isCore && (
-              <ellipse cx={xFront - r * 0.35} cy={-ry * 0.35} rx={r * 0.18} ry={Math.max(2, ry * 0.22)} fill="#fbbf24" opacity="0.65" />
+        {/* Bundle's X-spline filler (rendered behind conductors) */}
+        {tier === 'bundle' && (recipe?.bundle?.pair_count >= 2) && (recipe?.bundle?.filler === 'x_spline' || recipe?.bundle?.filler == null) && (
+          <g>
+            <rect x={-2} y={-(recipe?.bundle?.pair_count >= 4 ? 36 : 28)} width="4" height={(recipe?.bundle?.pair_count >= 4 ? 72 : 56)} fill="#5eead4" opacity="0.35" />
+            {recipe?.bundle?.pair_count >= 4 && (
+              <rect x={-(recipe?.bundle?.pair_count >= 4 ? 36 : 28)} y={-2} width={(recipe?.bundle?.pair_count >= 4 ? 72 : 56)} height="4" fill="#5eead4" opacity="0.35" />
             )}
           </g>
-        )
-      })}
+        )}
 
-      {/* Outermost layer label below */}
-      <text
-        x={(xBack + xFront) / 2}
-        y={ryOut + 18}
-        fontSize="11"
-        fill={outermost.textColor || outermost.color}
-        fontFamily="JetBrains Mono, monospace"
-        textAnchor="middle"
-        opacity="0.8"
-      >
-        {outermost.name}
-      </text>
+        {/* Conductors */}
+        {conductors.map((c, i) => (
+          <g key={i}>
+            {/* Insulation ring */}
+            <circle cx={c.x} cy={c.y} r={c.insulationR} fill={c.insColor} stroke="rgba(0,0,0,0.5)" strokeWidth="0.5" />
+            {/* Copper core */}
+            <circle cx={c.x} cy={c.y} r={c.conductorR} fill={c.condColor} stroke="rgba(0,0,0,0.4)" strokeWidth="0.4" />
+            {/* Highlight on copper */}
+            <circle cx={c.x - c.conductorR * 0.3} cy={c.y - c.conductorR * 0.3} r={c.conductorR * 0.3} fill="#fbbf24" opacity="0.6" />
+          </g>
+        ))}
+
+        {/* Pair-level wrap / foil for tier='pair_wrap' or 'pair_foil' — drawn around the 2 wires */}
+        {(tier === 'pair_wrap' || tier === 'pair_foil') && (
+          <g>
+            {/* Stadium-shaped pair-level wrap */}
+            <rect
+              x={-26} y={-13}
+              width={52} height={26}
+              rx={13} ry={13}
+              fill="none"
+              stroke={tier === 'pair_foil' ? '#a7b0b6' : '#a78bfa'}
+              strokeWidth={tier === 'pair_foil' ? 5 : 3}
+              strokeDasharray={tier === 'pair_foil' ? 'none' : '3 2'}
+              opacity={tier === 'pair_foil' ? 0.85 : 0.7}
+            />
+            {tier === 'pair_foil' && (
+              <circle cx={28} cy={0} r={2.5} fill="#fbbf24" stroke="rgba(0,0,0,0.6)" strokeWidth="0.5" />
+            )}
+          </g>
+        )}
+
+        {/* Bundle: subtle pair-level outline (stadium) around each quadrant pair.
+            Each pair spans ~4×insR tangentially × 2×insR radially. */}
+        {tier === 'bundle' && recipe?.bundle?.pair_count >= 4 && (
+          <g>
+            {[0, 90, 180, 270].map((ang, i) => {
+              const insR = 12
+              const RR = insR * 1.6
+              const cx = Math.sin((ang * Math.PI) / 180) * RR
+              const cy = -Math.cos((ang * Math.PI) / 180) * RR
+              return (
+                <g key={i} transform={`translate(${cx} ${cy}) rotate(${ang})`}>
+                  <rect
+                    x={-2 * insR - 2} y={-insR - 2}
+                    width={4 * insR + 4} height={2 * insR + 4}
+                    rx={insR + 2} ry={insR + 2}
+                    fill="none"
+                    stroke="#6b7479"
+                    strokeWidth="0.8"
+                    strokeDasharray="2 2"
+                    opacity="0.55"
+                  />
+                </g>
+              )
+            })}
+          </g>
+        )}
+
+        {/* Outer ring stack (jacket / braid / outer foil etc.) — drawn as
+            stroked annuli so the inner conductors stay visible. */}
+        {layers.filter((l) => !l.isPairLevel).map((layer, i) => {
+          const innerR = runningR
+          runningR += layer.thick
+          const midR = (innerR + runningR) / 2
+          const stroke =
+            layer.kind === 'braid' ? 'url(#xs-braid)' :
+            layer.kind === 'foil' ? layer.color :
+            layer.color
+          return (
+            <g key={i}>
+              <circle cx={0} cy={0} r={midR} fill="none" stroke={stroke} strokeWidth={layer.thick} />
+              {/* Subtle outline edge */}
+              <circle cx={0} cy={0} r={runningR} fill="none" stroke="rgba(0,0,0,0.6)" strokeWidth="0.6" />
+              <circle cx={0} cy={0} r={innerR} fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth="0.4" />
+            </g>
+          )
+        })}
+      </g>
     </svg>
   )
 }
 
-function patternForKind(kind, isCap, yaw) {
-  // yaw arg is included so the caller can change it; we only need it inline
-  // for pattern rotation declared in <defs>.
-  const suf = isCap ? '-cap' : ''
-  if (kind === 'braid') return `url(#cb-braid${suf})`
-  if (kind === 'spline') return `url(#cb-spline${suf})`
-  if (kind === 'striped') return `url(#cb-striped${suf})`
-  if (kind === 'foil') return `url(#cb-foil${suf})`
-  return null
+// ─────────────────────────────────────────────────────────
+// Helical side view — shows the actual twist of pairs / bundle
+// ─────────────────────────────────────────────────────────
+function HelixSideSvg({ recipe, appliedStages, phase }) {
+  const tier = structureTier(appliedStages)
+  const VW = 600
+  const VH = 240
+  const centerY = 0
+  const N = 100  // points per helix
+
+  // Decide what threads to draw based on tier
+  const threads = useMemo(() => {
+    const list = []
+    const condColor = '#c97b3f'
+    const insColor1 = '#fbbf24'
+    const insColor2 = '#7dd3fc'
+    if (tier === 'empty') return []
+    if (tier === 'conductor' || tier === 'insulated') {
+      list.push({ baseY: 0, ampY: 0, phase: 0, color: tier === 'insulated' ? insColor1 : condColor, condColor, width: tier === 'insulated' ? 16 : 6 })
+    }
+    if (tier === 'pair' || tier === 'pair_wrap' || tier === 'pair_foil') {
+      // 2 helices, opposite phase, lay 50 px (visual)
+      list.push({ baseY: 0, ampY: 14, phase: 0,    color: insColor1, condColor, width: 14 })
+      list.push({ baseY: 0, ampY: 14, phase: 0.5,  color: insColor2, condColor, width: 14 })
+    }
+    if (tier === 'bundle') {
+      const pairCount = recipe?.bundle?.pair_count || 4
+      const pairColors = [
+        ['#fbbf24', '#7dd3fc'],
+        ['#fb923c', '#fbbf24'],
+        ['#a78bfa', '#7dd3fc'],
+        ['#5eead4', '#fbbf24'],
+      ]
+      const bundleAmp = pairCount >= 4 ? 36 : 18
+      // Each pair has its own internal twist + the bundle twist
+      for (let p = 0; p < pairCount; p++) {
+        const pairPhase = p / pairCount  // bundle phase
+        const colors = pairColors[p % 4]
+        list.push({
+          baseY: 0,
+          ampY: bundleAmp,
+          phase: pairPhase,
+          color: colors[0], condColor, width: 11,
+          internalAmp: 8, internalPhase: 0,
+        })
+        list.push({
+          baseY: 0,
+          ampY: bundleAmp,
+          phase: pairPhase,
+          color: colors[1], condColor, width: 11,
+          internalAmp: 8, internalPhase: 0.5,
+        })
+      }
+    }
+    return list
+  }, [tier, recipe])
+
+  const buildPath = (thread) => {
+    // Helical sine curve from x=-(VW/2 - 20) to +(VW/2 - 20)
+    const x0 = -VW / 2 + 30
+    const x1 =  VW / 2 - 30
+    const span = x1 - x0
+    const cycles = 4 // 4 wavelengths visible
+    const pts = []
+    for (let i = 0; i <= N; i++) {
+      const t = i / N
+      const x = x0 + t * span
+      const helix = Math.sin((t * cycles + thread.phase + phase) * 2 * Math.PI) * thread.ampY
+      const internal = thread.internalAmp != null ? Math.sin((t * cycles * 2 + thread.internalPhase + phase * 2) * 2 * Math.PI) * thread.internalAmp : 0
+      const y = thread.baseY + helix + internal
+      pts.push([x, y])
+    }
+    return pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ')
+  }
+
+  return (
+    <svg viewBox={`${-VW / 2} ${-VH / 2} ${VW} ${VH}`} className="absolute inset-0 w-full h-full">
+      <defs>
+        <linearGradient id="hx-fade-l" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#0a0d0f" stopOpacity="1" />
+          <stop offset="8%" stopColor="#0a0d0f" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id="hx-fade-r" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#0a0d0f" stopOpacity="0" />
+          <stop offset="100%" stopColor="#0a0d0f" stopOpacity="1" />
+        </linearGradient>
+      </defs>
+
+      {/* When outer layers exist, draw the outer cylinder envelope */}
+      {(appliedStages.has('jacket') || appliedStages.has('shield') || appliedStages.has('outer_foil')) && (() => {
+        const r = appliedStages.has('jacket') ? 80 : appliedStages.has('shield') ? 65 : 55
+        const jColor = appliedStages.has('jacket') ? '#1a2226'
+                     : appliedStages.has('shield') ? '#c97b3f'
+                     : '#cbd5e1'
+        const fillPattern = appliedStages.has('shield') && !appliedStages.has('jacket') ? 'url(#xs-braid-side)' : null
+        return (
+          <g>
+            <defs>
+              <pattern id="xs-braid-side" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(0,0,0,0.45)" strokeWidth="2" />
+                <line x1="4" y1="0" x2="4" y2="8" stroke="rgba(255,255,255,0.18)" strokeWidth="1.4" />
+              </pattern>
+            </defs>
+            <rect x={-VW / 2 + 20} y={-r} width={VW - 40} height={r * 2} fill={fillPattern || jColor} stroke={mixHex(jColor, '#000', 0.3)} strokeWidth="0.6" />
+            {fillPattern && (
+              <rect x={-VW / 2 + 20} y={-r} width={VW - 40} height={r * 2} fill={jColor} opacity="0.35" />
+            )}
+            {/* End cap ellipses */}
+            <ellipse cx={-VW / 2 + 20} cy={0} rx={6} ry={r} fill={mixHex(jColor, '#000', 0.4)} stroke="rgba(0,0,0,0.5)" strokeWidth="0.5" />
+            <ellipse cx={ VW / 2 - 20} cy={0} rx={6} ry={r} fill={mixHex(jColor, '#fff', 0.15)} stroke="rgba(0,0,0,0.5)" strokeWidth="0.5" />
+          </g>
+        )
+      })()}
+
+      {/* Helical threads */}
+      {threads.map((t, i) => (
+        <g key={i}>
+          {/* Insulation outer (thick semi-transparent stroke) */}
+          <path d={buildPath(t)} stroke={t.color} strokeWidth={t.width} fill="none" strokeLinecap="round" opacity="0.85" />
+          {/* Copper core (thin stroke inside) */}
+          <path d={buildPath(t)} stroke={t.condColor} strokeWidth={Math.max(2, t.width * 0.35)} fill="none" strokeLinecap="round" opacity="0.95" />
+        </g>
+      ))}
+
+      {/* Subtle fade-out at the ends */}
+      <rect x={-VW / 2} y={-VH / 2} width={36} height={VH} fill="url(#hx-fade-l)" />
+      <rect x={ VW / 2 - 36} y={-VH / 2} width={36} height={VH} fill="url(#hx-fade-r)" />
+
+      {tier === 'empty' && (
+        <text x="0" y="0" fontSize="11" fill="#6b7479" fontFamily="JetBrains Mono, monospace" textAnchor="middle">
+          waiting for first stage
+        </text>
+      )}
+    </svg>
+  )
 }
 
 function mixHex(a, b, t) {
