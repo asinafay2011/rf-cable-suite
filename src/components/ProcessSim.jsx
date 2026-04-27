@@ -820,6 +820,17 @@ export default function ProcessSim() {
     toast.success('Recipe pinned to history')
   }
 
+  // ── Compare two pinned recipes side-by-side ──
+  const [compareIds, setCompareIds] = useState([])
+  const [compareOpen, setCompareOpen] = useState(false)
+  const toggleCompare = (id) => {
+    setCompareIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id)
+      if (prev.length >= 2) return [prev[1], id]  // FIFO when full
+      return [...prev, id]
+    })
+  }
+
   // ── Diff explainer ────────────────────────────────────────
   // Compare current recipe to the most recent annotation. Surface key metric
   // deltas (Z₀, IL, mass, cost) so the engineer can see what their last tweak
@@ -959,28 +970,56 @@ export default function ProcessSim() {
               No history yet. Click <span style={{ color: C.teal }}>Pin</span> to bookmark the current recipe, or load a template / run Auto-fix — those are recorded automatically.
             </div>
           ) : (
-            <ul className="space-y-1 max-h-64 overflow-y-auto pr-1">
-              {annotations.map((a) => (
-                <li key={a.id} className="flex items-center gap-2 text-[11px] py-1 px-2 rounded hover:bg-[#171d20] group">
-                  <button
-                    onClick={() => restoreAnnotation(a.id)}
-                    className="flex-1 text-left truncate"
-                    title={`${a.label}\n${new Date(a.timestamp).toLocaleString()}`}
-                  >
-                    <span style={{ color: C.copperBright }}>{a.label}</span>
-                    <span className="text-[#6b7479] ml-2">· {new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    <span className="text-[#6b7479] ml-2">· {a.target}</span>
-                  </button>
-                  <button
-                    onClick={() => deleteAnnotation(a.id)}
-                    title="Remove from history"
-                    className="opacity-0 group-hover:opacity-100 text-[#6b7479] hover:text-[#f87171] text-[10px] font-mono"
-                  >
-                    ✕
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              {compareIds.length > 0 && (
+                <div className="mb-2 px-2 py-1.5 bg-[#0d1f1d] border border-[#2f7a6e] rounded text-[10px] font-mono flex items-center justify-between gap-2">
+                  <span style={{ color: C.teal }}>
+                    {compareIds.length === 1 ? 'Pick a 2nd recipe to compare against, or' : `${compareIds.length} pinned for compare ·`}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {compareIds.length === 2 && (
+                      <button onClick={() => setCompareOpen(true)} className="px-2 py-1 rounded border" style={{ borderColor: C.teal, color: C.teal, background: 'transparent' }}>
+                        → Open compare
+                      </button>
+                    )}
+                    <button onClick={() => setCompareIds([])} className="text-[#6b7479] hover:text-[#f87171]">clear</button>
+                  </div>
+                </div>
+              )}
+              <ul className="space-y-1 max-h-64 overflow-y-auto pr-1">
+                {annotations.map((a) => {
+                  const inCompare = compareIds.includes(a.id)
+                  return (
+                    <li key={a.id} className={`flex items-center gap-2 text-[11px] py-1 px-2 rounded hover:bg-[#171d20] group`} style={inCompare ? { background: '#0d1f1d', borderLeft: `2px solid ${C.teal}` } : undefined}>
+                      <button
+                        onClick={() => toggleCompare(a.id)}
+                        title={inCompare ? 'Remove from compare' : 'Add to compare (max 2)'}
+                        className="text-[10px] font-mono w-5 h-5 rounded border flex items-center justify-center"
+                        style={{ borderColor: inCompare ? C.teal : C.border, color: inCompare ? C.teal : C.textMuted }}
+                      >
+                        {inCompare ? '✓' : '+'}
+                      </button>
+                      <button
+                        onClick={() => restoreAnnotation(a.id)}
+                        className="flex-1 text-left truncate"
+                        title={`${a.label}\n${new Date(a.timestamp).toLocaleString()}`}
+                      >
+                        <span style={{ color: C.copperBright }}>{a.label}</span>
+                        <span className="text-[#6b7479] ml-2">· {new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="text-[#6b7479] ml-2">· {a.target}</span>
+                      </button>
+                      <button
+                        onClick={() => deleteAnnotation(a.id)}
+                        title="Remove from history"
+                        className="opacity-0 group-hover:opacity-100 text-[#6b7479] hover:text-[#f87171] text-[10px] font-mono"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </>
           )}
         </div>
       )}
@@ -1224,6 +1263,141 @@ export default function ProcessSim() {
           ]} />
           <Warns warns={sim.jacket.warn} />
         </Stage>
+      </div>
+      {compareOpen && compareIds.length === 2 && (
+        <RecipeCompareModal
+          left={annotations.find((a) => a.id === compareIds[0])}
+          right={annotations.find((a) => a.id === compareIds[1])}
+          onClose={() => setCompareOpen(false)}
+          onLoad={(rec) => { setRecipe(rec); setCompareOpen(false); toast.success('Recipe loaded into editor') }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Recipe compare modal — side-by-side delta of two pinned recipes
+// ─────────────────────────────────────────────────────────────────
+function RecipeCompareModal({ left, right, onClose, onLoad }) {
+  if (!left || !right) return null
+  const lSim = runPipeline(left.recipe)
+  const rSim = runPipeline(right.recipe)
+  const lStd = STANDARDS[left.recipe.product?.target || 'cat6a']
+  const rStd = STANDARDS[right.recipe.product?.target || 'cat6a']
+
+  const fmt = (v, d = 2) => (v == null || isNaN(v) ? '—' : Number(v).toFixed(d))
+  const delta = (l, r, d = 2, betterLow = true) => {
+    if (l == null || r == null) return { dStr: '—', mood: 'neutral' }
+    const dv = r - l
+    if (Math.abs(dv) < Math.pow(10, -d)) return { dStr: '0', mood: 'neutral' }
+    const dStr = (dv > 0 ? '+' : '') + dv.toFixed(d)
+    const mood = (betterLow ? dv < 0 : dv > 0) ? 'good' : 'bad'
+    return { dStr, mood }
+  }
+
+  // Metric rows comparing the two simulated outputs
+  const metrics = [
+    { label: 'Z₀ diff (Ω)',     l: lSim.jacket.z_diff, r: rSim.jacket.z_diff, d: 1, betterLow: false, target: lStd.z0_diff },
+    { label: 'IL @ 100m (dB)',  l: computeIL(lSim.jacket, lStd.freq_il_mhz, 100), r: computeIL(rSim.jacket, rStd.freq_il_mhz, 100), d: 1, betterLow: true },
+    { label: 'NEXT (dB)',       l: lSim.jacket.next_db_estimate, r: rSim.jacket.next_db_estimate, d: 1, betterLow: false },
+    { label: 'Skew (ps/m)',     l: lSim.jacket.pair_skew_ps_per_m, r: rSim.jacket.pair_skew_ps_per_m, d: 1, betterLow: true },
+    { label: 'Mass (g/m)',      l: lSim.jacket.mass_g_per_m, r: rSim.jacket.mass_g_per_m, d: 0, betterLow: true },
+    { label: 'Cost / m ($)',    l: lSim.jacket.cost_per_m, r: rSim.jacket.cost_per_m, d: 3, betterLow: true },
+    { label: 'Final OD (mm)',   l: lSim.jacket.final_od_mm, r: rSim.jacket.final_od_mm, d: 2, betterLow: false },
+  ]
+
+  // Recipe parameter rows — show every leaf field
+  const paramRows = []
+  const walk = (path, lv, rv) => {
+    if (lv && typeof lv === 'object' && !Array.isArray(lv)) {
+      const keys = new Set([...Object.keys(lv), ...Object.keys(rv || {})])
+      for (const k of keys) walk(`${path}.${k}`, lv[k], rv?.[k])
+    } else {
+      paramRows.push({ key: path, l: lv, r: rv, changed: JSON.stringify(lv) !== JSON.stringify(rv) })
+    }
+  }
+  walk('recipe', left.recipe, right.recipe)
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: 'rgba(10,13,15,0.85)' }}>
+      <div className="bg-[#0a0d0f] border border-[#252e33] rounded max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-[#0a0d0f] border-b border-[#252e33] p-4 flex items-center justify-between gap-2 flex-wrap z-10">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: C.teal }}>◆ Recipe compare</div>
+            <div className="text-[14px] mt-1" style={{ color: C.text, fontFamily: 'Bricolage Grotesque, sans-serif' }}>
+              <span style={{ color: C.copperBright }}>{left.label}</span>
+              <span className="mx-2" style={{ color: C.textMuted }}>vs</span>
+              <span style={{ color: C.amber }}>{right.label}</span>
+            </div>
+          </div>
+          <button onClick={onClose} className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider rounded border" style={{ borderColor: C.border, color: C.textDim }}>
+            ✕ Close
+          </button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {/* Metric comparison */}
+          <div className="bg-[#12171a] border border-[#252e33] rounded">
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] px-3 py-2" style={{ color: C.amber, borderBottom: `1px solid ${C.border}` }}>
+              Predicted spec output
+            </div>
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="font-mono text-[10px] uppercase" style={{ color: C.textMuted }}>
+                  <th className="text-left px-3 py-1.5 w-1/3">Metric</th>
+                  <th className="text-right px-3 py-1.5">A</th>
+                  <th className="text-right px-3 py-1.5">B</th>
+                  <th className="text-right px-3 py-1.5">Δ (B − A)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.map((m, i) => {
+                  const dx = delta(m.l, m.r, m.d, m.betterLow)
+                  const moodColor = dx.mood === 'good' ? C.teal : dx.mood === 'bad' ? C.red : C.textDim
+                  return (
+                    <tr key={i} className="border-t" style={{ borderColor: C.border }}>
+                      <td className="px-3 py-1.5" style={{ color: C.textDim }}>{m.label}</td>
+                      <td className="px-3 py-1.5 text-right font-mono" style={{ color: C.copperBright }}>{fmt(m.l, m.d)}</td>
+                      <td className="px-3 py-1.5 text-right font-mono" style={{ color: C.amber }}>{fmt(m.r, m.d)}</td>
+                      <td className="px-3 py-1.5 text-right font-mono" style={{ color: moodColor }}>{dx.dStr}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Recipe parameters */}
+          <div className="bg-[#12171a] border border-[#252e33] rounded">
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] px-3 py-2 flex items-center justify-between" style={{ color: C.teal, borderBottom: `1px solid ${C.border}` }}>
+              <span>Recipe parameters · {paramRows.filter((r) => r.changed).length} differ</span>
+            </div>
+            <table className="w-full text-[11px]">
+              <tbody>
+                {paramRows.filter((r) => r.changed).map((r, i) => (
+                  <tr key={i} className="border-t" style={{ borderColor: C.border, background: '#0d1416' }}>
+                    <td className="px-3 py-1 font-mono" style={{ color: C.textDim }}>{r.key.replace('recipe.', '')}</td>
+                    <td className="px-3 py-1 text-right font-mono" style={{ color: C.copperBright }}>{JSON.stringify(r.l)}</td>
+                    <td className="px-3 py-1 text-right font-mono" style={{ color: C.amber }}>→ {JSON.stringify(r.r)}</td>
+                  </tr>
+                ))}
+                {paramRows.filter((r) => r.changed).length === 0 && (
+                  <tr><td colSpan={3} className="px-3 py-3 italic text-center" style={{ color: C.textMuted }}>No parameter differences (only output reads differ).</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button onClick={() => onLoad(left.recipe)} className="px-3 py-2 text-[10px] font-mono uppercase tracking-wider rounded border" style={{ borderColor: C.copperBright, color: C.copperBright }}>
+              Load A into editor
+            </button>
+            <button onClick={() => onLoad(right.recipe)} className="px-3 py-2 text-[10px] font-mono uppercase tracking-wider rounded border" style={{ borderColor: C.amber, color: C.amber }}>
+              Load B into editor
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

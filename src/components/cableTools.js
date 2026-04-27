@@ -1,6 +1,7 @@
 // Tools exposed to the Cable agent. Pure-math + small DB, client-side dispatch.
 import { getCustomCableCables, addCustomCableCable, deleteCustomCableCable } from './customCableStore.js'
 import { getCompanyDefaults, setCompanyDefaults, resetCompanyDefaults } from './companyDefaults.js'
+import { addDefectEntry, getDefectLog } from './defectLog.js'
 
 // ── Compact cable database (key high-speed / RF coax + datacable specs) ────
 // Sources: Belden / Times Microwave / CommScope datasheets, Glenair Series 963.
@@ -554,6 +555,58 @@ export const CABLE_TOOLS = [
       },
     },
   },
+  {
+    name: 'log_defect',
+    description:
+      'Log a manufacturing defect classified from a shop-floor photo into the persistent defect history. Call this AFTER you have classified a defect from an attached image so the engineer can build a pattern-history of recurring shop-floor issues. Defect history persists in localStorage and is visible in the Library tab.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          description: 'Defect class: kink | crush | scratch | void | eccentricity | pair-untwist | foil-tear | braid-pigtail | OD-ovality | color-bleed | other',
+        },
+        stage: {
+          type: 'string',
+          description: 'Process Sim stage most likely responsible: conductor | stranding | insulation | pair | pair_wrap | pair_foil | bundle | shield | jacket',
+        },
+        severity: { type: 'string', description: 'low | medium | high — engineering judgement' },
+        root_cause: { type: 'string', description: 'One-sentence root cause (e.g., "die gap too tight + take-up tension > 110 N")' },
+        suggested_fix: { type: 'string', description: 'Specific machine setting change recommended' },
+        recipe_id: { type: 'string', description: 'Optional id linking this defect to a saved recipe annotation' },
+        notes: { type: 'string', description: 'Free-form notes (operator initials, line number, batch, etc.)' },
+      },
+      required: ['type'],
+    },
+  },
+  {
+    name: 'list_defect_log',
+    description:
+      'Read the persistent defect log. Use when the engineer asks "what defects have we seen lately?", "show me Monday-morning failures", or wants to spot recurring patterns. Returns up to 200 most-recent entries.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'generate_diagram',
+    description:
+      'Render an inline SVG diagram in the chat. Useful for visualising things the engineer asks about that aren\'t already covered by another tool. Supported kinds: smith_chart (with optional impedance points), atten_curve (atten dB vs MHz), cross_section (concentric layers), eye_diagram (synthetic), z_step_chart (TDR Z vs distance), bargraph (categorical comparisons). Returns a tool result with `_inline_svg` so the chat renders the picture inline.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', description: 'smith_chart | atten_curve | cross_section | eye_diagram | z_step_chart | bargraph' },
+        title: { type: 'string', description: 'Caption shown above the diagram' },
+        // Per-kind data fields:
+        impedances:    { type: 'array', description: 'For smith_chart: array of { real, imag, label } points (Z normalised to 50 Ω).' },
+        atten_table:   { type: 'object', description: 'For atten_curve: { freq_MHz: dB_per_100ft } map.' },
+        layers:        { type: 'array', description: 'For cross_section: array of { name, color, t_mm } from inner to outer.' },
+        bars:          { type: 'array', description: 'For bargraph: array of { label, value, unit, color }.' },
+        z_trace:       { type: 'array', description: 'For z_step_chart: array of { x_m, z_ohm } pairs.' },
+        bit_rate_gbps: { type: 'number', description: 'For eye_diagram: bit rate in Gbps' },
+        eye_jitter_ps: { type: 'number', description: 'For eye_diagram: total jitter peak-peak in ps' },
+        annotation:    { type: 'string', description: 'One-line annotation under the diagram' },
+      },
+      required: ['kind', 'title'],
+    },
+  },
 ];
 
 // ── helpers ─────────────────────────────────────────────
@@ -975,6 +1028,31 @@ export function dispatchCableTool(name, input) {
       case 'set_company_defaults': {
         const updated = setCompanyDefaults(input || {});
         return { ok: true, defaults: updated, note: 'Saved to browser localStorage. Future sessions will see these values.' };
+      }
+      case 'log_defect': {
+        const entry = addDefectEntry(input || {});
+        return { ok: true, entry, note: 'Defect logged to persistent history. Visible in Library tab.' };
+      }
+      case 'list_defect_log': {
+        const list = getDefectLog();
+        return { count: list.length, entries: list };
+      }
+      case 'generate_diagram': {
+        // Validation per kind. The actual SVG is built by the FloatingAgent
+        // ToolPill renderer when it sees `_inline_svg` in the result, so here
+        // we just pass through the structured spec it needs to render.
+        const { kind, title } = input || {};
+        if (!kind || !title) throw new Error('kind and title are required');
+        const allowed = ['smith_chart', 'atten_curve', 'cross_section', 'eye_diagram', 'z_step_chart', 'bargraph'];
+        if (!allowed.includes(kind)) throw new Error(`Unsupported diagram kind "${kind}". Use one of: ${allowed.join(', ')}`);
+        return {
+          ok: true,
+          kind,
+          title,
+          annotation: input.annotation || '',
+          spec: input,
+          _inline_svg: input,  // Magic flag — ToolPill renders this as a diagram
+        };
       }
       default:
         return { error: `Unknown tool: ${name}` };

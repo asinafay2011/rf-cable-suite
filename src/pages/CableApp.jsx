@@ -13,6 +13,7 @@ import CustomCablesPanel from '../components/CustomCablesPanel.jsx';
 import CompanyDefaultsPanel from '../components/CompanyDefaultsPanel.jsx';
 import ProcessSim from '../components/ProcessSim.jsx';
 import SuckoutSim from '../components/SuckoutSim.jsx';
+import QCStats from '../components/QCStats.jsx';
 import { useIsMobile } from '../components/useIsMobile.js';
 import { Menu, X as XIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -93,7 +94,8 @@ Proactive behavior:
    • Z₀ / impedance → \`propose_z0_preset\` (applies to Z₀ Calc tab or Process Sim stage ③ insulation)
    • Pair / lay design → \`propose_pair_preset\` (applies to Lay Design tab or Process Sim stages ④ / ⑦)
    The user never needs to type values into sliders — clicking Apply pushes them in. When the user is on Process Sim, the apply lands inside the simulator without changing tabs.
-- If the user has a PDF datasheet, ask them to paste the relevant text or attach a screenshot — PDFs aren't directly readable.
+- If the user attaches a PDF datasheet (📎 button accepts PDFs up to 32 MB), READ IT DIRECTLY — modern Claude can parse PDF documents natively. Extract: cable id (slug), name, family, Z₀ Ω, VF (fraction), OD mm, AWG, attenuation table { freq_MHz: dB_per_100ft }, materials, datasheet URL (use the manufacturer's product page if listed). Cite which page each value came from. After extracting, propose saving via \`add_cable\` so it lands in the user's local library.
+- If the user attaches a CABLE DEFECT PHOTO (image of cable cross-section, jacket, braid, foil, kink, crush, etc.), classify the defect (kink / crush / scratch / void / eccentricity / pair-untwist / foil-tear / braid-pigtail / OD-ovality / color-bleed) and identify which manufacturing stage in the 9-stage Process Sim pipeline most likely caused it. Then suggest specific machine settings to fix (die gap, take-up tension, capstan pressure, line speed, tape head alignment, etc.). If the user wants to log it for future reference, call the \`log_defect\` tool.
 
 Multi-tool orchestration (chain calls in one turn whenever the engineer's question implies multiple steps):
 - "Quote a 50 m Cat 6A cable" → \`get_company_defaults\` (read Cu price + jacket pref) → \`lookup_cable\` → \`compute_attenuation\` → \`bom_generator\`. ONE response, all tool calls in parallel where possible.
@@ -101,7 +103,22 @@ Multi-tool orchestration (chain calls in one turn whenever the engineer's questi
 - "Save this datasheet as our spec" → call \`add_cable\` AND \`set_company_defaults\` if the spec implies factory standardisation.
 - ALWAYS call \`get_company_defaults\` at the start of cost / quoting / material questions. Use the values you read instead of generic defaults.
 - When the user states a stable factory fact ("Cu is $11/kg here", "we always use FEP", "max line speed 850 m/min"), call \`set_company_defaults\` immediately to persist it — don't just acknowledge in text.
-- Prefer parallel tool calls (multiple tool_use blocks in one turn) when the calls are independent. Only chain sequentially when one call's output feeds the next.`;
+- Prefer parallel tool calls (multiple tool_use blocks in one turn) when the calls are independent. Only chain sequentially when one call's output feeds the next.
+
+Multi-tab workflow orchestration (drive the UI across tabs in a single turn):
+- The engineer is on ONE section (\`context.section\` tells you which). You can drive other tabs without making them switch first by calling the right propose_*_preset tool — the user gets an Apply button that updates the target tab even when they're not on it. Then summarise the chain of tools you ran.
+- Example: user is on Z₀ Calc and asks "what whole stack would hit 100 Ω diff with foamed PE on Cat 6A?". You can in ONE turn:
+  1. \`calc_z0_coax\` to verify the geometry
+  2. \`propose_pair_preset\` for the pair lay
+  3. \`propose_braid_preset\` for the outer shield
+  4. \`propose_eye_preset\` for an eye-diagram preview
+  Then text-summarise: "I've staged 4 presets. Click Apply on each to push them into the right tab." The engineer can audit + approve incrementally.
+- When the engineer asks for a complete picture ("end-to-end build for this cable"), call \`generate_diagram\` with kind=\`cross_section\` to render the layered build inline so they see the whole structure at a glance.
+
+Inline diagrams (\`generate_diagram\` tool):
+- Use it sparingly but powerfully when a picture explains faster than text. Kinds: smith_chart, atten_curve, cross_section, eye_diagram, z_step_chart, bargraph.
+- Typical triggers: "show me X on a Smith chart" → smith_chart; "compare cost of 4 cables" → bargraph; "draw the build" → cross_section; "what would the TDR look like with a kink at 30 m" → z_step_chart.
+- Always include a useful \`title\` and \`annotation\` so the engineer knows what they're looking at.`;
 
 const CABLE_STARTERS = [
   'Compute Z₀ for D=2.95mm, d=0.91mm, foamed PE εr=1.55',
@@ -123,6 +140,7 @@ const SECTION_LABELS = {
   braid: 'Braid Coverage',
   atten: 'Attenuation Plot',
   suckout: 'Tape Suckout Sim',
+  qc: 'QC Stats Analyzer',
   next: 'NEXT Crosstalk',
   eye: 'Eye Diagram',
   cost: 'Cost Calc',
@@ -1221,6 +1239,14 @@ const TAB_INTROS = {
     desc: 'Cost roll-up with copper price, line speed, and CPK target. Compare construction trade-offs and see what really moves the unit cost.',
     accent: '#facc15',
     icon: Coins,
+  },
+  qc: {
+    eyebrow: 'QC Stats · Cpk + histogram + control chart',
+    title: 'Drop in QC test data, get capability + drift insight',
+    desc: 'Paste a single column or upload a CSV from your QC line (impedance, IL, NEXT, hipot, OD readings). Pick the spec column + LSL / USL → instant Cp / Cpk / σ + distribution histogram + run-order control chart. Out-of-spec samples flagged red.',
+    formula: 'Cpk = min(USL−μ, μ−LSL) / 3σ',
+    accent: '#5eead4',
+    icon: Activity,
   },
   lay: {
     eyebrow: 'Lay Designer · 4-pair compatibility',
@@ -7041,6 +7067,7 @@ function TopNav({ active, onChange }) {
     { id: 'next', label: 'NEXT', icon: Radio },
     { id: 'eye', label: 'Eye', icon: Eye },
     { id: 'cost', label: 'Cost', icon: Coins },
+    { id: 'qc', label: 'QC Stats', icon: Activity },
     { id: 'lay', label: 'Lay Design', icon: Settings },
     { id: 'library', label: 'Vendors', icon: Boxes },
     { id: 'catalog', label: '963 Catalog', icon: Library },
@@ -7323,6 +7350,7 @@ export default function CableApp() {
         {section === 'next' && <NEXTViz />}
         {section === 'eye' && <EyeDiagram />}
         {section === 'cost' && <CostCalc />}
+        {section === 'qc' && <QCStats />}
         {section === 'lay' && <LayDesigner />}
         {section === 'library' && (
           <>
@@ -7367,7 +7395,7 @@ export default function CableApp() {
         tools={CABLE_TOOLS}
         onToolUse={dispatchCableTool}
         onAttachData={summarizeTouchstoneFile}
-        attachAccept="image/*,.s1p,.s2p,.s3p,.s4p"
+        attachAccept="image/*,application/pdf,.pdf,.s1p,.s2p,.s3p,.s4p"
         context={{
           section,
           sectionLabel: SECTION_LABELS[section] || section,

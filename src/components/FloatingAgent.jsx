@@ -72,6 +72,7 @@ export default function FloatingAgent({
   }, [sizeKey, size])
   const [resizing, setResizing] = useState(false)
   const [pendingImage, setPendingImage] = useState(null) // { mediaType, data, dataUrl }
+  const [pendingPdf, setPendingPdf] = useState(null)     // { name, sizeKB, data }  PDF base64 sent as document block
   const [pendingData, setPendingData] = useState(null)   // { summary, chip: { name, info } }
   const fileInputRef = useRef(null)
 
@@ -260,6 +261,7 @@ export default function FloatingAgent({
             }
             if (b.type === 'text') return { type: 'text', text: b.text || '' }
             if (b.type === 'image') return { type: 'image', source: b.source }
+            if (b.type === 'document') return { type: 'document', source: b.source }
             return b
           }),
     }))
@@ -276,6 +278,20 @@ export default function FloatingAgent({
         resolve({ mediaType: m[1], data: m[2], dataUrl: url })
       }
       reader.onerror = () => reject(new Error('Failed to read image'))
+      reader.readAsDataURL(file)
+    })
+
+  // Read any file as base64 (used for PDF document blocks).
+  const readBase64 = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const url = reader.result
+        const m = /^data:[^;]+;base64,(.+)$/.exec(url)
+        if (!m) return reject(new Error('Bad file encoding'))
+        resolve(m[1])
+      }
+      reader.onerror = () => reject(new Error('Failed to read file'))
       reader.readAsDataURL(file)
     })
 
@@ -313,6 +329,20 @@ export default function FloatingAgent({
         return
       }
     }
+    // PDF — send as document content block (Anthropic supports PDFs natively)
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+      try {
+        if (file.size > 32 * 1024 * 1024) {
+          throw new Error('PDF too large (max 32 MB)')
+        }
+        const data = await readBase64(file)
+        setPendingPdf({ name: file.name, sizeKB: Math.round(file.size / 1024), data })
+        return
+      } catch (err) {
+        setError(err.message || 'Could not read PDF')
+        return
+      }
+    }
     // Fall back to data attachment handler if provided
     if (onAttachData) {
       try {
@@ -329,8 +359,9 @@ export default function FloatingAgent({
   const send = async (textOverride) => {
     const text = (textOverride ?? input).trim()
     const img = pendingImage
+    const pdf = pendingPdf
     const data = pendingData
-    if ((!text && !img && !data) || loading) return
+    if ((!text && !img && !pdf && !data) || loading) return
 
     // ── Slash commands (intercepted before sending to API) ──
     if (text.startsWith('/')) {
@@ -367,19 +398,43 @@ export default function FloatingAgent({
     setInput('')
     setError(null)
     setPendingImage(null)
+    setPendingPdf(null)
     setPendingData(null)
 
     const composedText = [
       data ? data.summary : null,
-      text || (img ? 'What do you see in this image?' : data ? 'Analyze this measurement and tell me anything notable.' : ''),
+      text || (img
+        ? 'What do you see in this image?'
+        : pdf
+          ? `Datasheet attached: ${pdf.name}. Extract the cable specs (id, name, family, Z₀ Ω, VF, OD mm, attenuation table { freq_MHz: dB_per_100ft }, AWG, materials, datasheet URL if present) and offer to save via add_cable. Be thorough — cite the page where each value appears.`
+          : data
+            ? 'Analyze this measurement and tell me anything notable.'
+            : ''),
     ].filter(Boolean).join('\n\n')
 
-    const userContent = img
-      ? [
-          { type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data }, _dataUrl: img.dataUrl },
-          { type: 'text', text: composedText },
-        ]
-      : composedText
+    // Build the user content blocks, supporting all combinations of attachments.
+    let userContent
+    if (img || pdf) {
+      const blocks = []
+      if (pdf) {
+        blocks.push({
+          type: 'document',
+          source: { type: 'base64', media_type: 'application/pdf', data: pdf.data },
+          _pdfMeta: { name: pdf.name, sizeKB: pdf.sizeKB },
+        })
+      }
+      if (img) {
+        blocks.push({
+          type: 'image',
+          source: { type: 'base64', media_type: img.mediaType, data: img.data },
+          _dataUrl: img.dataUrl,
+        })
+      }
+      blocks.push({ type: 'text', text: composedText })
+      userContent = blocks
+    } else {
+      userContent = composedText
+    }
     let history = [...messages, { role: 'user', content: userContent }]
     setMessages(history)
     setLoading(true)
@@ -856,6 +911,26 @@ export default function FloatingAgent({
             </button>
           </div>
         )}
+        {pendingPdf && (
+          <div className="flex items-center gap-2 px-2 py-1.5 bg-[#12171a] border rounded" style={{ borderColor: accent + '60' }}>
+            <div className="w-10 h-10 rounded border flex items-center justify-center shrink-0" style={{ borderColor: accent + '60', background: '#0a0d0f' }}>
+              <span style={{ color: accent, fontFamily: '"JetBrains Mono", monospace', fontSize: 9, fontWeight: 700 }}>PDF</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[11px] text-[#a7b0b6] truncate" style={{ fontFamily: '"JetBrains Mono", monospace' }} title={pendingPdf.name}>
+                {pendingPdf.name}
+              </div>
+              <div className="text-[10px] text-[#6b7479]">{pendingPdf.sizeKB} KB · datasheet · agent will extract specs</div>
+            </div>
+            <button
+              onClick={() => setPendingPdf(null)}
+              className="p-1 text-[#6b7479] hover:text-[#f87171] rounded"
+              title="Remove PDF"
+            >
+              <XIcon size={13} />
+            </button>
+          </div>
+        )}
         {pendingData && (
           <div className="flex items-center gap-2 px-2 py-1.5 bg-[#12171a] border rounded" style={{ borderColor: accent + '60' }}>
             <div className="w-10 h-10 rounded border flex items-center justify-center shrink-0" style={{ borderColor: accent + '60', background: '#0a0d0f' }}>
@@ -911,7 +986,7 @@ export default function FloatingAgent({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKey}
             onPaste={onPaste}
-            placeholder={pendingImage || pendingData ? 'Add a question (optional)…' : placeholder}
+            placeholder={pendingImage || pendingPdf || pendingData ? 'Add a question (optional)…' : placeholder}
             className="flex-1 resize-none bg-[#12171a] border border-[#252e33] focus:outline-none rounded px-2.5 py-2 text-[13px] text-[#f0ebe2] placeholder:text-[#6b7479] max-h-[120px]"
             style={{ fontFamily: 'inherit' }}
             onFocus={(e) => (e.currentTarget.style.borderColor = accent)}
@@ -920,9 +995,9 @@ export default function FloatingAgent({
           />
           <button
             onClick={() => send()}
-            disabled={loading || (!input.trim() && !pendingImage && !pendingData)}
+            disabled={loading || (!input.trim() && !pendingImage && !pendingPdf && !pendingData)}
             className="shrink-0 px-3 py-2 disabled:bg-[#252e33] disabled:text-[#6b7479] disabled:cursor-not-allowed text-[#0a0d0f] rounded transition-colors flex items-center gap-1"
-            style={{ background: loading || (!input.trim() && !pendingImage && !pendingData) ? undefined : accent }}
+            style={{ background: loading || (!input.trim() && !pendingImage && !pendingPdf && !pendingData) ? undefined : accent }}
             onMouseEnter={(e) => {
               if (!loading && (input.trim() || pendingImage)) e.currentTarget.style.background = accentBright
             }}
@@ -1114,6 +1189,11 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
           <ToolChart name={name} result={parsedResult} accent={accent} />
         )}
 
+        {/* Inline diagram for tool results that include _inline_svg */}
+        {!partial && !parsedResult?.error && parsedResult?._inline_svg && (
+          <ToolDiagram spec={parsedResult._inline_svg} title={parsedResult.title} annotation={parsedResult.annotation} accent={accent} />
+        )}
+
         {/* Inline Apply button when the tool result carries a preset */}
         {canApplyPreset && (
           <div className="flex items-center justify-between px-2.5 py-1.5 border-t" style={{ borderColor: '#1a2226', background: '#0a0d0f' }}>
@@ -1273,6 +1353,191 @@ const tooltipStyle = {
   fontSize: 11,
   fontFamily: 'JetBrains Mono, monospace',
   color: '#f0ebe2',
+}
+
+// Render the SVG diagram described by a generate_diagram tool spec
+function ToolDiagram({ spec, title, annotation, accent }) {
+  const kind = spec?.kind
+  const W = 320
+  const H = 220
+
+  const renderSvg = () => {
+    if (kind === 'smith_chart') {
+      // Normalised Smith chart
+      const c = W / 2, cy = H / 2, R = Math.min(c, cy) - 8
+      const points = Array.isArray(spec.impedances) ? spec.impedances : []
+      // Smith mapping: Γ = (Z - 1) / (Z + 1) where Z is normalised
+      const gammaOf = (re, im) => {
+        const a = re - 1, b = im
+        const c2 = re + 1
+        const denom = c2 * c2 + b * b
+        return [(a * c2 + b * b) / denom, (b * c2 - a * b) / denom]
+      }
+      return (
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+          <circle cx={c} cy={cy} r={R} fill="none" stroke="#384249" strokeWidth="1" />
+          {[0.5, 1, 2].map((rval, i) => {
+            // Constant resistance circle r: center (r/(1+r), 0), radius 1/(1+r) (in Γ plane, scaled)
+            const cx = c + R * (rval / (1 + rval))
+            const cR = R / (1 + rval)
+            return <circle key={`r${i}`} cx={cx} cy={cy} r={cR} fill="none" stroke="#384249" strokeOpacity="0.5" strokeWidth="0.6" />
+          })}
+          {[0.5, 1, 2, -0.5, -1, -2].map((xval, i) => {
+            // Constant reactance arc x: center (1, 1/x) on right edge in Γ plane, radius 1/|x|
+            const cx = c + R
+            const cyArc = cy - R / xval
+            const arcR = R / Math.abs(xval)
+            return <circle key={`x${i}`} cx={cx} cy={cyArc} r={arcR} fill="none" stroke="#384249" strokeOpacity="0.4" strokeWidth="0.5" />
+          })}
+          <line x1={c - R} y1={cy} x2={c + R} y2={cy} stroke="#252e33" strokeWidth="0.5" />
+          {points.map((pt, i) => {
+            const [gr, gi] = gammaOf(pt.real || 0, pt.imag || 0)
+            const px = c + R * gr
+            const py = cy - R * gi
+            return (
+              <g key={i}>
+                <circle cx={px} cy={py} r={4} fill={accent} />
+                {pt.label && <text x={px + 6} y={py - 4} fontSize="9" fill={accent} fontFamily="JetBrains Mono, monospace">{pt.label}</text>}
+              </g>
+            )
+          })}
+        </svg>
+      )
+    }
+    if (kind === 'atten_curve') {
+      const tbl = spec.atten_table || {}
+      const rows = Object.entries(tbl).map(([f, db]) => ({ f: parseFloat(f), db: parseFloat(db) })).filter(p => !isNaN(p.f) && !isNaN(p.db)).sort((a, b) => a.f - b.f)
+      if (rows.length < 2) return <text x="10" y="20" fontSize="11" fill="#a7b0b6">need ≥ 2 atten points</text>
+      const fMin = Math.log10(Math.max(1, rows[0].f)), fMax = Math.log10(rows[rows.length - 1].f)
+      const dbMin = 0, dbMax = Math.max(...rows.map(r => r.db))
+      const xOf = (f) => 30 + (W - 50) * (Math.log10(Math.max(1, f)) - fMin) / Math.max(0.01, fMax - fMin)
+      const yOf = (db) => H - 26 - (H - 50) * (db - dbMin) / Math.max(0.1, dbMax - dbMin)
+      const path = rows.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(p.f)} ${yOf(p.db)}`).join(' ')
+      return (
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+          <line x1="30" y1={H - 26} x2={W - 10} y2={H - 26} stroke="#384249" strokeWidth="0.5" />
+          <line x1="30" y1="10" x2="30" y2={H - 26} stroke="#384249" strokeWidth="0.5" />
+          {[1, 10, 100, 1000, 10000].filter(f => Math.log10(f) >= fMin && Math.log10(f) <= fMax).map(f => (
+            <g key={f}>
+              <line x1={xOf(f)} y1={H - 26} x2={xOf(f)} y2={H - 22} stroke="#384249" />
+              <text x={xOf(f)} y={H - 12} fontSize="9" fill="#6b7479" textAnchor="middle" fontFamily="JetBrains Mono, monospace">
+                {f >= 1000 ? `${f / 1000}G` : `${f}M`}
+              </text>
+            </g>
+          ))}
+          <path d={path} stroke={accent} strokeWidth="1.5" fill="none" />
+          {rows.map((p, i) => <circle key={i} cx={xOf(p.f)} cy={yOf(p.db)} r="2.5" fill={accent} />)}
+          <text x="6" y="18" fontSize="9" fill="#6b7479" fontFamily="JetBrains Mono, monospace">dB/100ft</text>
+        </svg>
+      )
+    }
+    if (kind === 'cross_section') {
+      const layers = Array.isArray(spec.layers) ? spec.layers : []
+      const cx = W / 2, cy = H / 2
+      const totalT = layers.reduce((s, l) => s + (l.t_mm || 1), 0)
+      const innerR = 12
+      const maxR = Math.min(cx, cy) - 8
+      let r = innerR
+      const elems = []
+      // Inner conductor
+      elems.push(<circle key="cu" cx={cx} cy={cy} r={r} fill="#c97b3f" stroke="#e89357" strokeWidth="0.5" />)
+      layers.forEach((l, i) => {
+        const next = r + (l.t_mm / Math.max(0.5, totalT)) * (maxR - innerR)
+        elems.push(<circle key={`l${i}`} cx={cx} cy={cy} r={next} fill={l.color || '#384249'} fillOpacity="0.55" stroke={l.color || '#384249'} strokeWidth="0.5" />)
+        r = next
+      })
+      // Re-draw inner ones on top so they're visible
+      let r2 = innerR
+      layers.forEach((l, i) => {
+        const next = r2 + (l.t_mm / Math.max(0.5, totalT)) * (maxR - innerR)
+        if (i < layers.length) elems.push(<text key={`t${i}`} x={cx + next - 4} y={cy + 4 + i * 12} fontSize="8" fill={l.color || '#a7b0b6'} fontFamily="JetBrains Mono, monospace" textAnchor="end">{l.name}</text>)
+        r2 = next
+      })
+      elems.push(<circle key="ccu" cx={cx} cy={cy} r={innerR} fill="#c97b3f" stroke="#e89357" strokeWidth="0.5" />)
+      return <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>{elems}</svg>
+    }
+    if (kind === 'bargraph') {
+      const bars = Array.isArray(spec.bars) ? spec.bars : []
+      if (bars.length === 0) return null
+      const maxV = Math.max(...bars.map(b => b.value || 0))
+      const barH = 22, gap = 6
+      return (
+        <svg width={W} height={Math.max(H, bars.length * (barH + gap) + 40)} viewBox={`0 0 ${W} ${Math.max(H, bars.length * (barH + gap) + 40)}`}>
+          {bars.map((b, i) => {
+            const w = (W - 110) * (b.value / Math.max(0.001, maxV))
+            return (
+              <g key={i}>
+                <text x="6" y={20 + i * (barH + gap) + 14} fontSize="10" fill="#a7b0b6" fontFamily="JetBrains Mono, monospace">{b.label}</text>
+                <rect x="100" y={20 + i * (barH + gap)} width={w} height={barH} fill={b.color || accent} fillOpacity="0.7" rx="2" />
+                <text x={100 + w + 6} y={20 + i * (barH + gap) + 14} fontSize="10" fill={b.color || accent} fontFamily="JetBrains Mono, monospace">{b.value}{b.unit ? ` ${b.unit}` : ''}</text>
+              </g>
+            )
+          })}
+        </svg>
+      )
+    }
+    if (kind === 'z_step_chart') {
+      const trace = Array.isArray(spec.z_trace) ? spec.z_trace : []
+      if (trace.length < 2) return <text x="10" y="20" fontSize="11" fill="#a7b0b6">need ≥ 2 z trace points</text>
+      const xs = trace.map(p => p.x_m), zs = trace.map(p => p.z_ohm)
+      const xMin = Math.min(...xs), xMax = Math.max(...xs)
+      const zMin = Math.min(...zs) - 5, zMax = Math.max(...zs) + 5
+      const xOf = (x) => 30 + (W - 50) * (x - xMin) / Math.max(0.01, xMax - xMin)
+      const yOf = (z) => H - 26 - (H - 50) * (z - zMin) / Math.max(0.1, zMax - zMin)
+      const path = trace.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(p.x_m)} ${yOf(p.z_ohm)}`).join(' ')
+      return (
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+          <line x1="30" y1={yOf(50)} x2={W - 10} y2={yOf(50)} stroke="#384249" strokeDasharray="2 3" />
+          <text x={W - 14} y={yOf(50) - 3} fontSize="8" fill="#6b7479" textAnchor="end" fontFamily="JetBrains Mono, monospace">50 Ω</text>
+          <path d={path} stroke={accent} strokeWidth="1.5" fill="none" />
+          <text x="6" y="18" fontSize="9" fill="#6b7479" fontFamily="JetBrains Mono, monospace">Z (Ω)</text>
+          <text x={W - 6} y={H - 8} fontSize="9" fill="#6b7479" textAnchor="end" fontFamily="JetBrains Mono, monospace">x (m)</text>
+        </svg>
+      )
+    }
+    if (kind === 'eye_diagram') {
+      const br = spec.bit_rate_gbps || 5
+      const jit = spec.eye_jitter_ps || 15
+      const T = 1000 / br
+      const traces = []
+      for (let t = 0; t < 50; t++) {
+        const bits = [Math.random() > 0.5, Math.random() > 0.5, Math.random() > 0.5]
+        const points = []
+        const tau = 1000 / (2 * Math.PI * (br * 0.6))
+        let v = bits[0] ? 1 : -1
+        for (let i = 0; i < 100; i++) {
+          const tt = (i / 100) * 2 * T
+          const target = bits[Math.floor(i / 50) % bits.length] ? 1 : -1
+          v += (target - v) * 0.08
+          points.push([tt + (Math.random() - 0.5) * jit * 0.6, v])
+        }
+        traces.push(points)
+      }
+      const xMax = T * 2
+      const xOf = (x) => 30 + (W - 50) * (x / xMax)
+      const yOf = (v) => H / 2 - v * (H / 2 - 14)
+      return (
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+          {traces.map((pts, i) => (
+            <path key={i} d={pts.map((p, j) => `${j === 0 ? 'M' : 'L'} ${xOf(p[0])} ${yOf(p[1])}`).join(' ')} stroke={accent} strokeOpacity="0.18" strokeWidth="1" fill="none" />
+          ))}
+          <line x1="30" y1={H / 2} x2={W - 10} y2={H / 2} stroke="#384249" strokeWidth="0.5" />
+          <text x="6" y="18" fontSize="9" fill="#6b7479" fontFamily="JetBrains Mono, monospace">{br} Gb/s</text>
+        </svg>
+      )
+    }
+    return <text x="10" y="20" fontSize="11" fill="#f87171">unknown diagram kind: {String(kind)}</text>
+  }
+
+  return (
+    <div className="border-t" style={{ borderColor: '#1a2226', background: '#0a0d0f', padding: '8px 10px' }}>
+      <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479] mb-1">{title}</div>
+      <div className="bg-[#12171a] border border-[#252e33] rounded p-2 flex justify-center">
+        {renderSvg()}
+      </div>
+      {annotation && <div className="font-mono text-[10px] text-[#a7b0b6] mt-1.5">{annotation}</div>}
+    </div>
+  )
 }
 
 function summarizeInput(input) {

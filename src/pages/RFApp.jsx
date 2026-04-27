@@ -35,7 +35,7 @@ Proactive behavior:
 - When the user pastes a cable spec (datasheet excerpt, manufacturer table, etc.), ask if they want you to call \`add_cable\` to save it to their local library.
 - When the user mentions an upcoming measurement, link, or radio link with concrete numbers, offer to run \`link_budget\` / \`compute_attenuation\` / \`compare_cables\` without being asked.
 - When the user asks "which cable for…", run \`cable_selector\` instead of just listing options from memory.
-- If the user has a PDF datasheet, instruct them to either paste the relevant text into the chat or attach a screenshot of the relevant page (the agent's image tool can read it). PDFs themselves are not directly readable here.
+- If the user attaches a PDF datasheet (📎 button accepts PDFs up to 32 MB), READ IT DIRECTLY. Extract the cable specs (id, name, Z₀ Ω, VF, OD mm, AWG, atten table { freq_MHz: dB_per_100ft }, datasheet URL) and offer to save via \`add_cable\` so it lands in the user's local RF library. Cite the page where each value appears.
 
 Multi-tool orchestration (chain calls in one turn whenever the engineer's question implies multiple steps):
 - "Plan a 2.4 GHz link to my AP 100 m away" → \`get_company_defaults\` (read preferred materials / pricing) → \`free_space_path_loss\` AND \`compute_attenuation\` for both cables in parallel → \`link_budget\` to combine. ONE response, parallel tool_use blocks where independent.
@@ -43,7 +43,14 @@ Multi-tool orchestration (chain calls in one turn whenever the engineer's questi
 - "Save this datasheet" → \`add_cable\`. If the spec implies factory standardisation, also \`set_company_defaults\`.
 - ALWAYS call \`get_company_defaults\` first when the user asks about cost, BOM, or picking materials. Use the values you read.
 - When the user states a stable factory fact ("Cu is $11/kg here", "we always use SPC"), call \`set_company_defaults\` immediately to persist it.
-- Prefer parallel tool calls (multiple tool_use blocks in one turn) when calls are independent. Chain sequentially only when one feeds the next.`;
+- Prefer parallel tool calls (multiple tool_use blocks in one turn) when calls are independent. Chain sequentially only when one feeds the next.
+
+Inline diagrams (\`generate_diagram\` tool):
+- Use it when a picture beats text. Kinds: smith_chart, atten_curve, cross_section, eye_diagram, z_step_chart, bargraph.
+- "Plot this impedance on a Smith chart" → smith_chart with the impedances array.
+- "Compare cable A vs B vs C attenuation" → bargraph or atten_curve with both tables overlaid.
+- "What does a TDR with a kink at 30 m look like" → z_step_chart with synthesised z_trace.
+- Always include \`title\` and short \`annotation\` so the engineer knows what they're looking at.`;
 
 const RF_STARTERS = [
   'Build link budget: 30 dBm @ 2.4 GHz, 100 m, RX -85 dBm, 10 ft LMR-400 each side',
@@ -1881,6 +1888,7 @@ export default function RFCableSuite() {
         context={{ section: tab, sectionLabel: RF_SECTION_LABELS[tab] || tab }}
         toolToSection={RF_TOOL_TO_SECTION}
         onJumpToSection={setTab}
+        attachAccept="image/*,application/pdf,.pdf"
       />
     </SettingsContext.Provider>
   );

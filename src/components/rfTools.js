@@ -527,6 +527,27 @@ export const RF_TOOLS = [
     },
   },
   {
+    name: 'generate_diagram',
+    description:
+      'Render an inline SVG diagram in the chat. Useful for visualising RF concepts the engineer asks about. Supported kinds: smith_chart (with optional impedance points), atten_curve (atten dB vs MHz), cross_section (concentric layers), eye_diagram (synthetic), z_step_chart (TDR Z vs distance), bargraph (categorical comparisons). Returns a tool result with `_inline_svg` so the chat renders the picture inline.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', description: 'smith_chart | atten_curve | cross_section | eye_diagram | z_step_chart | bargraph' },
+        title: { type: 'string', description: 'Caption shown above the diagram' },
+        impedances:    { type: 'array', description: 'For smith_chart: array of { real, imag, label } points (Z normalised to 50 Ω).' },
+        atten_table:   { type: 'object', description: 'For atten_curve: { freq_MHz: dB_per_100ft } map.' },
+        layers:        { type: 'array', description: 'For cross_section: array of { name, color, t_mm } from inner to outer.' },
+        bars:          { type: 'array', description: 'For bargraph: array of { label, value, unit, color }.' },
+        z_trace:       { type: 'array', description: 'For z_step_chart: array of { x_m, z_ohm } pairs.' },
+        bit_rate_gbps: { type: 'number', description: 'For eye_diagram: bit rate in Gbps' },
+        eye_jitter_ps: { type: 'number', description: 'For eye_diagram: total jitter peak-peak in ps' },
+        annotation:    { type: 'string', description: 'One-line annotation under the diagram' },
+      },
+      required: ['kind', 'title'],
+    },
+  },
+  {
     name: 'get_company_defaults',
     description:
       "Read the engineer's persistent company-wide defaults stored on this device. Includes copper / SPC / FEP price per kg, preferred jacket / conductor / dielectric materials, max line speed and anneal temp, default tolerances, and free-form company name + notes. Call this BEFORE quoting cost or recommending materials so your answer matches the engineer's company.",
@@ -951,6 +972,20 @@ export function dispatchRfTool(name, input) {
       case 'set_company_defaults': {
         const updated = setCompanyDefaults(input || {})
         return { ok: true, defaults: updated, note: 'Saved to browser localStorage. Future sessions will see these values.' }
+      }
+      case 'generate_diagram': {
+        const { kind, title } = input || {}
+        if (!kind || !title) throw new Error('kind and title are required')
+        const allowed = ['smith_chart', 'atten_curve', 'cross_section', 'eye_diagram', 'z_step_chart', 'bargraph']
+        if (!allowed.includes(kind)) throw new Error(`Unsupported diagram kind "${kind}". Use one of: ${allowed.join(', ')}`)
+        return {
+          ok: true,
+          kind,
+          title,
+          annotation: input.annotation || '',
+          spec: input,
+          _inline_svg: input,
+        }
       }
       default:
         return { error: `Unknown tool: ${name}` }

@@ -9,7 +9,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(express.json({ limit: '2mb' }));
+// 40 MB cap supports a 32 MB PDF + base64 expansion overhead. Anthropic's PDF
+// limit is 32 MB; we leave headroom for base64 (~+33 %) plus message JSON.
+app.use(express.json({ limit: '40mb' }));
 
 app.post('/api/claude', async (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY) {
