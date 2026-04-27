@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown, Eye, EyeOff, Image as ImageIcon, X as XIcon, Paperclip, Download, Mic, MicOff, HelpCircle, Globe } from 'lucide-react'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { useIsMobile } from './useIsMobile.js'
@@ -86,6 +86,17 @@ export default function FloatingAgent({
     if (!webSearchKey) return
     try { localStorage.setItem(webSearchKey, webSearch ? '1' : '0') } catch {}
   }, [webSearchKey, webSearch])
+
+  // Extended thinking toggle (Claude's structured reasoning chain visible to the user)
+  const thinkingKey = storageKey ? `${storageKey}-thinking` : null
+  const [thinkingMode, setThinkingMode] = useState(() => {
+    if (!thinkingKey) return false
+    try { return localStorage.getItem(thinkingKey) === '1' } catch { return false }
+  })
+  useEffect(() => {
+    if (!thinkingKey) return
+    try { localStorage.setItem(thinkingKey, thinkingMode ? '1' : '0') } catch {}
+  }, [thinkingKey, thinkingMode])
 
   // Show/hide tool pills toggle — default hidden for cleaner look
   const showToolsKey = storageKey ? `${storageKey}-show-tools` : null
@@ -177,6 +188,13 @@ export default function FloatingAgent({
       messages: messagesPayload,
       stream: true,
     }
+    // Extended thinking — Claude's interleaved reasoning. Requires more tokens.
+    if (thinkingMode) {
+      body.thinking = { type: 'enabled', budget_tokens: 4000 }
+      body.max_tokens = Math.max(maxTokens, 8000)
+      // Thinking requires temperature unset (defaults to 1)
+      delete body.temperature
+    }
     const toolsList = []
     if (tools && tools.length) toolsList.push(...tools)
     if (webSearch) toolsList.push({ type: 'web_search_20250305', name: 'web_search', max_uses: 5 })
@@ -216,6 +234,7 @@ export default function FloatingAgent({
             if (ev.type === 'content_block_start') {
               const b = { ...ev.content_block }
               if (b.type === 'text') b.text = ''
+              else if (b.type === 'thinking') b.thinking = ''
               else if (b.type === 'tool_use') { b.input_json = ''; b.input = {} }
               blocks[ev.index] = b
               onUpdate?.(blocks.map(x => ({ ...x })))
@@ -225,6 +244,11 @@ export default function FloatingAgent({
               if (ev.delta.type === 'text_delta') {
                 b.text = (b.text || '') + ev.delta.text
                 onUpdate?.(blocks.map(x => ({ ...x })))
+              } else if (ev.delta.type === 'thinking_delta') {
+                b.thinking = (b.thinking || '') + (ev.delta.thinking || '')
+                onUpdate?.(blocks.map(x => ({ ...x })))
+              } else if (ev.delta.type === 'signature_delta') {
+                b.signature = (b.signature || '') + (ev.delta.signature || '')
               } else if (ev.delta.type === 'input_json_delta') {
                 b.input_json = (b.input_json || '') + ev.delta.partial_json
               }
@@ -262,6 +286,7 @@ export default function FloatingAgent({
             if (b.type === 'text') return { type: 'text', text: b.text || '' }
             if (b.type === 'image') return { type: 'image', source: b.source }
             if (b.type === 'document') return { type: 'document', source: b.source }
+            if (b.type === 'thinking') return { type: 'thinking', thinking: b.thinking || '', signature: b.signature || '' }
             return b
           }),
     }))
@@ -553,10 +578,66 @@ export default function FloatingAgent({
   // ── Voice input via Web Speech API ────────────────────
   const recognitionRef = useRef(null)
   const [voiceOn, setVoiceOn] = useState(false)
+  const [phoneMode, setPhoneMode] = useState(false)  // continuous conversation
   const voiceSupported = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
+  const ttsSupported = typeof window !== 'undefined' && !!window.speechSynthesis
 
   const voiceManualStopRef = useRef(false)
-  const toggleVoice = () => {
+  const phoneModeRef = useRef(false)  // mirror in ref for use inside callbacks
+  useEffect(() => { phoneModeRef.current = phoneMode }, [phoneMode])
+  const autoSendTimerRef = useRef(null)
+
+  // Voice command shortcuts — match before sending to LLM
+  const parseVoiceCommand = (rawText) => {
+    const text = rawText.trim().toLowerCase().replace(/[.!?,]+$/, '')
+    if (/^(?:hey )?(?:claude|cable|robot)?[,\s]*(?:please\s+)?(?:run\s+)?(?:the\s+)?auto[\s-]?fix$/i.test(text)) {
+      return { action: 'autofix' }
+    }
+    if (/^(?:hey )?(?:claude|cable|robot)?[,\s]*(?:please\s+)?clear (?:the )?(?:chat|conversation|history)$/i.test(text)) {
+      return { action: 'clear' }
+    }
+    if (/^(?:hey )?(?:claude|cable|robot)?[,\s]*(?:please\s+)?stop (?:listening|talking|the chat|the call)$/i.test(text)) {
+      return { action: 'stop_voice' }
+    }
+    const navMatch = text.match(/^(?:hey )?(?:claude|cable|robot)?[,\s]*(?:please\s+)?(?:show me|open|go to|switch to|take me to)\s+(?:the\s+)?(.+)$/i)
+    if (navMatch) {
+      return { action: 'navigate', target: navMatch[1].trim() }
+    }
+    return null
+  }
+
+  // Map a free-form voice navigation target to the closest section id
+  const resolveNavTarget = (target) => {
+    const t = target.toLowerCase()
+    const map = {
+      home: 'home', overview: 'home',
+      progression: 'progression', flow: 'progression',
+      conductor: 'm1', strand: 'm1', wire: 'm1',
+      'twisted pair': 'm2', pair: 'm2',
+      bundle: 'm3', '4-pair': 'm3',
+      'z calc': 'calc', 'impedance calc': 'calc', impedance: 'calc',
+      'tdr sim': 'tdr', tdr: 'tdr',
+      'vna lab': 'vna', vna: 'vna', touchstone: 'vna',
+      'process sim': 'sim', process: 'sim', recipe: 'sim',
+      braid: 'braid', shield: 'braid',
+      atten: 'atten', attenuation: 'atten',
+      suckout: 'suckout', notch: 'suckout', tape: 'suckout',
+      next: 'next', crosstalk: 'next',
+      eye: 'eye', 'eye diagram': 'eye',
+      cost: 'cost', bom: 'cost',
+      qc: 'qc', 'qc stats': 'qc', cpk: 'qc', stats: 'qc',
+      lay: 'lay', 'lay design': 'lay',
+      library: 'library', vendors: 'library',
+      catalog: 'catalog', glenair: 'catalog',
+    }
+    for (const [k, v] of Object.entries(map)) {
+      if (t === k || t.includes(k)) return v
+    }
+    return null
+  }
+
+  const toggleVoice = (opts = {}) => {
+    const { phone = false } = opts
     if (!voiceSupported) {
       setError('Voice input is not supported in this browser. Try Chrome or Edge.')
       return
@@ -565,37 +646,63 @@ export default function FloatingAgent({
       voiceManualStopRef.current = true
       recognitionRef.current?.stop()
       setVoiceOn(false)
+      setPhoneMode(false)
       return
     }
     voiceManualStopRef.current = false
+    setPhoneMode(phone)
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     const rec = new SR()
-    rec.continuous = true        // keep listening until user clicks stop
+    rec.continuous = true
     rec.interimResults = true
     rec.lang = 'en-US'
     let finalTranscript = ''
     rec.onresult = (e) => {
       let interim = ''
+      let newFinal = false
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const piece = e.results[i][0].transcript
-        if (e.results[i].isFinal) finalTranscript += piece
-        else interim += piece
+        if (e.results[i].isFinal) {
+          finalTranscript += piece
+          newFinal = true
+        } else {
+          interim += piece
+        }
       }
       setInput((finalTranscript + interim).trimStart())
+      // Phone mode: when user pauses (got a final), auto-send after a brief idle window
+      if (phoneModeRef.current && newFinal) {
+        if (autoSendTimerRef.current) clearTimeout(autoSendTimerRef.current)
+        autoSendTimerRef.current = setTimeout(() => {
+          const stash = finalTranscript.trim()
+          if (!stash) return
+          // Try a voice command first
+          const cmd = parseVoiceCommand(stash)
+          finalTranscript = ''
+          if (cmd) {
+            handleVoiceCommand(cmd)
+            setInput('')
+            return
+          }
+          // Otherwise: send as message
+          send(stash)
+          finalTranscript = ''
+        }, 1300)
+      }
     }
     rec.onerror = (e) => {
-      // 'no-speech' and 'aborted' are normal — user paused or stopped, not actual errors
       if (e.error === 'no-speech' || e.error === 'aborted') return
       setError(`Voice error: ${e.error || 'unknown'}`)
       voiceManualStopRef.current = true
       setVoiceOn(false)
+      setPhoneMode(false)
     }
     rec.onend = () => {
-      // Auto-restart unless user clicked the mic to stop
       if (!voiceManualStopRef.current) {
-        try { rec.start() } catch { setVoiceOn(false) }
+        try { rec.start() } catch { setVoiceOn(false); setPhoneMode(false) }
       } else {
         setVoiceOn(false)
+        setPhoneMode(false)
       }
     }
     recognitionRef.current = rec
@@ -606,6 +713,64 @@ export default function FloatingAgent({
       setError(`Voice start failed: ${err.message || err}`)
     }
   }
+
+  const handleVoiceCommand = (cmd) => {
+    if (cmd.action === 'autofix') {
+      // Trigger Process Sim auto-fix via the same custom event the tab uses
+      window.dispatchEvent(new CustomEvent('cable-suite:apply-preset', { detail: { section: 'sim-autofix', params: {}, label: 'Voice: auto-fix' } }))
+      // Fallback: ask the agent if we're not on sim
+      send('Run auto-fix on the current Process Sim recipe.')
+      return
+    }
+    if (cmd.action === 'clear') {
+      clear()
+      return
+    }
+    if (cmd.action === 'stop_voice') {
+      voiceManualStopRef.current = true
+      recognitionRef.current?.stop()
+      setVoiceOn(false)
+      setPhoneMode(false)
+      return
+    }
+    if (cmd.action === 'navigate') {
+      const targetId = resolveNavTarget(cmd.target)
+      if (targetId && onJumpToSection) {
+        onJumpToSection(targetId)
+      } else {
+        send(`Can you take me to ${cmd.target}?`)
+      }
+      return
+    }
+  }
+
+  // Phone-mode TTS: speak the agent's last text response
+  const speakResponse = (text) => {
+    if (!ttsSupported || !text) return
+    try {
+      window.speechSynthesis.cancel()
+      const utter = new SpeechSynthesisUtterance(text.slice(0, 1000).replace(/\[.+?\]/g, ''))  // strip citations
+      utter.rate = 1.05
+      utter.pitch = 1
+      utter.lang = 'en-US'
+      window.speechSynthesis.speak(utter)
+    } catch {}
+  }
+
+  // When phone-mode, after each completed response speak it aloud
+  const lastSpokenIndexRef = useRef(-1)
+  useEffect(() => {
+    if (!phoneMode || loading) return
+    const lastIdx = messages.length - 1
+    if (lastIdx <= lastSpokenIndexRef.current) return
+    const last = messages[lastIdx]
+    if (last?.role !== 'assistant') return
+    const text = Array.isArray(last.content)
+      ? last.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ')
+      : (typeof last.content === 'string' ? last.content : '')
+    if (text) speakResponse(text)
+    lastSpokenIndexRef.current = lastIdx
+  }, [messages, loading, phoneMode])
 
   if (!open) {
     return (
@@ -752,6 +917,14 @@ export default function FloatingAgent({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => setThinkingMode((v) => !v)}
+            className="p-1.5 text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded transition-colors"
+            title={thinkingMode ? 'Extended thinking ON — agent shows its reasoning chain before answering (slower, more thoughtful). Click to disable.' : 'Extended thinking OFF — fast direct answers. Click to enable Claude\'s reasoning chain.'}
+            style={thinkingMode ? { color: '#a78bfa' } : undefined}
+          >
+            <span className="font-mono text-[10px] font-bold tracking-tight">⊞</span>
+          </button>
           <button
             onClick={() => setWebSearch((v) => !v)}
             className="p-1.5 text-[#6b7479] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded transition-colors"
@@ -969,15 +1142,26 @@ export default function FloatingAgent({
             <Paperclip size={14} />
           </button>
           {voiceSupported && (
-            <button
-              onClick={toggleVoice}
-              disabled={loading}
-              className="shrink-0 p-2 hover:bg-[#1f1610] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
-              style={{ color: voiceOn ? '#f87171' : '#6b7479' }}
-              title={voiceOn ? 'Stop voice input' : 'Start voice input'}
-            >
-              {voiceOn ? <MicOff size={14} /> : <Mic size={14} />}
-            </button>
+            <>
+              <button
+                onClick={() => toggleVoice({ phone: false })}
+                disabled={loading}
+                className="shrink-0 p-2 hover:bg-[#1f1610] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
+                style={{ color: voiceOn && !phoneMode ? '#f87171' : '#6b7479' }}
+                title={voiceOn && !phoneMode ? 'Stop voice input' : 'Start voice dictation (transcribe + edit before send)'}
+              >
+                {voiceOn && !phoneMode ? <MicOff size={14} /> : <Mic size={14} />}
+              </button>
+              <button
+                onClick={() => toggleVoice({ phone: true })}
+                disabled={loading}
+                className="shrink-0 p-2 hover:bg-[#1f1610] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
+                style={{ color: phoneMode ? '#5eead4' : '#6b7479' }}
+                title={phoneMode ? 'End phone-mode call' : 'Start phone-mode call — continuous listen + speak. Try voice commands: "auto-fix", "open process sim", "clear chat".'}
+              >
+                <span className="text-[14px] leading-none">{phoneMode ? '☎' : '☏'}</span>
+              </button>
+            </>
           )}
           <textarea
             ref={inputRef}
@@ -1053,7 +1237,9 @@ function buildView(messages, streamBlocks) {
     } else if (m.role === 'assistant') {
       const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text', text: m.content }]
       for (const b of blocks) {
-        if (b.type === 'text' && (b.text || '').trim()) {
+        if (b.type === 'thinking' && (b.thinking || '').trim()) {
+          view.push({ kind: 'thinking', text: b.thinking })
+        } else if (b.type === 'text' && (b.text || '').trim()) {
           view.push({ kind: 'assistant', text: b.text })
         } else if (b.type === 'tool_use') {
           view.push({
@@ -1071,7 +1257,9 @@ function buildView(messages, streamBlocks) {
   if (streamBlocks && streamBlocks.length > 0) {
     for (const b of streamBlocks) {
       if (!b) continue
-      if (b.type === 'text' && (b.text || '').length > 0) {
+      if (b.type === 'thinking' && (b.thinking || '').length > 0) {
+        view.push({ kind: 'thinking', text: b.thinking, partial: true })
+      } else if (b.type === 'text' && (b.text || '').length > 0) {
         view.push({ kind: 'streaming', text: b.text })
       } else if (b.type === 'tool_use') {
         view.push({
@@ -1115,11 +1303,14 @@ function ViewItem({ item, accent, jumpTarget, onJumpToSection }) {
       </div>
     )
   }
+  if (item.kind === 'thinking') {
+    return <ThinkingPill text={item.text} accent={accent} partial={item.partial} />
+  }
   if (item.kind === 'assistant' || item.kind === 'streaming') {
     return (
       <div className="flex justify-start">
         <div className="max-w-[88%] px-3 py-2 rounded text-[13px] leading-relaxed whitespace-pre-wrap bg-[#12171a] border border-[#252e33] text-[#f0ebe2]">
-          {item.text}
+          {renderWithCitations(item.text, accent)}
           {item.kind === 'streaming' && (
             <span
               className="inline-block w-1.5 h-3.5 ml-0.5 animate-pulse"
@@ -1192,6 +1383,11 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
         {/* Inline diagram for tool results that include _inline_svg */}
         {!partial && !parsedResult?.error && parsedResult?._inline_svg && (
           <ToolDiagram spec={parsedResult._inline_svg} title={parsedResult.title} annotation={parsedResult.annotation} accent={accent} />
+        )}
+
+        {/* Inline what-if panel for results that include _whatif_panel */}
+        {!partial && !parsedResult?.error && parsedResult?._whatif_panel && (
+          <WhatIfPanel spec={parsedResult._whatif_panel} accent={accent} />
         )}
 
         {/* Inline Apply button when the tool result carries a preset */}
@@ -1353,6 +1549,204 @@ const tooltipStyle = {
   fontSize: 11,
   fontFamily: 'JetBrains Mono, monospace',
   color: '#f0ebe2',
+}
+
+// Collapsible "thinking" block — Claude's extended reasoning chain
+function ThinkingPill({ text, accent, partial }) {
+  const [open, setOpen] = useState(false)
+  const charCount = (text || '').length
+  return (
+    <div className="flex justify-start">
+      <div
+        className="max-w-[88%] w-full text-[12px] rounded border bg-[#0d1416]"
+        style={{ borderColor: '#252e33' }}
+      >
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-[#12171a] rounded-t"
+        >
+          <ChevronRight
+            size={11}
+            style={{ color: '#a78bfa', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}
+          />
+          <span className="font-mono text-[11px]" style={{ color: '#a78bfa' }}>thinking</span>
+          <span className="text-[#6b7479] font-mono text-[10px] flex-1">{charCount} chars · click to read</span>
+          {partial && <Loader2 size={10} className="animate-spin text-[#6b7479]" />}
+        </button>
+        {open && (
+          <div className="px-3 py-2 border-t text-[11px] leading-relaxed whitespace-pre-wrap text-[#a7b0b6] italic" style={{ borderColor: '#1a2226', background: '#0a0d0f' }}>
+            {text}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Render assistant text with [CITATION] tags styled as small chips and
+// inline math blocks ($$ ... $$) rendered in monospace formula style.
+const CITATION_INFO = {
+  WADELL: { full: 'Wadell — Transmission Line Design Handbook', color: '#5eead4' },
+  POZAR: { full: 'Pozar — Microwave Engineering', color: '#5eead4' },
+  FRIIS: { full: 'Friis path-loss equation', color: '#fbbf24' },
+  SCTE51: { full: 'SCTE 51 — Drop Cable Braid Coverage', color: '#a78bfa' },
+  TIA568: { full: 'TIA-568.2-D — Balanced Twisted-Pair Cabling', color: '#a78bfa' },
+  IEC61156: { full: 'IEC 61156 — Multicore Symmetric Cables', color: '#a78bfa' },
+  IEEE: { full: 'IEEE specification', color: '#a78bfa' },
+  ITUR: { full: 'ITU-R recommendations', color: '#a78bfa' },
+  MILDTL17: { full: 'MIL-DTL-17 — Cables, Coaxial', color: '#fb923c' },
+  USB4: { full: 'USB4 Specification', color: '#7dd3fc' },
+  HDMI21: { full: 'HDMI 2.1 Specification', color: '#7dd3fc' },
+  SFF8431: { full: 'SFF-8431 — SFP+ DAC', color: '#7dd3fc' },
+  ASTM: { full: 'ASTM B3 / B33 / B298 conductor specs', color: '#84cc16' },
+  ISO13660: { full: 'ISO 13660 — Cpk capability', color: '#84cc16' },
+  knowledge: { full: 'General training knowledge — no primary source', color: '#6b7479' },
+}
+function citationColor(tag) {
+  if (CITATION_INFO[tag]) return CITATION_INFO[tag].color
+  if (tag.startsWith('DATASHEET')) return '#e89357'
+  return '#a7b0b6'
+}
+function citationLabel(tag) {
+  if (CITATION_INFO[tag]) return CITATION_INFO[tag].full
+  if (tag.startsWith('DATASHEET-')) return `Manufacturer datasheet · ${tag.slice(10)}`
+  return tag
+}
+// Render the input text into a flat React array, scanning for in this priority:
+//   1. Display math:  $$ ... $$        (block, larger, monospace)
+//   2. Inline math:   $ ... $          (small mono chip)
+//   3. Code:          ` ... `          (inline mono)
+//   4. Citation tags: [SOURCE] / [SOURCE §X.Y]
+function renderWithCitations(text, accent) {
+  if (!text) return null
+  // We tokenise in one pass with a combined regex.
+  // Order matters: block math before inline math before code before citation.
+  const combined = /(\$\$([^$]+)\$\$)|(\$([^$\n]{1,200})\$)|(`([^`\n]{1,200})`)|\[([A-Z][A-Z0-9-]+(?:\s+(?:p\.|§|ch\.|fig\.)\s*[\w.\-]+)?|knowledge)\]/g
+  const out = []
+  let lastIndex = 0
+  let m
+  let key = 0
+  while ((m = combined.exec(text)) !== null) {
+    const before = text.slice(lastIndex, m.index)
+    if (before) out.push(<span key={`t${key++}`}>{before}</span>)
+    if (m[1]) {
+      // Display math
+      out.push(
+        <div key={`bm${key++}`} className="my-1.5 px-3 py-2 rounded font-mono text-[13px]" style={{ background: '#0a0d0f', border: `1px solid ${accent}30`, color: accent, overflowX: 'auto' }}>
+          {m[2].trim()}
+        </div>
+      )
+    } else if (m[3]) {
+      // Inline math
+      out.push(
+        <span key={`im${key++}`} className="font-mono px-1 py-0.5 rounded text-[12px] mx-0.5" style={{ background: '#0a0d0f', border: '1px solid #252e33', color: accent }}>
+          {m[4]}
+        </span>
+      )
+    } else if (m[5]) {
+      // Inline code
+      out.push(
+        <code key={`cd${key++}`} className="font-mono px-1 py-0.5 rounded text-[12px]" style={{ background: '#171d20', color: '#fbbf24' }}>
+          {m[6]}
+        </code>
+      )
+    } else if (m[7]) {
+      // Citation tag
+      const inner = m[7]
+      const m2 = /^([A-Z][A-Z0-9-]+|knowledge)(\s+.*)?$/.exec(inner)
+      const base = m2 ? m2[1] : inner
+      const detail = m2 && m2[2] ? m2[2].trim() : ''
+      const color = citationColor(base)
+      out.push(
+        <span
+          key={`c${key++}`}
+          title={citationLabel(base) + (detail ? ' · ' + detail : '')}
+          className="inline-flex items-baseline gap-0.5 align-baseline px-1.5 py-0.5 mx-0.5 rounded text-[10px] font-mono whitespace-nowrap"
+          style={{ color, background: color + '14', border: `1px solid ${color}40`, lineHeight: 1.2 }}
+        >
+          {base}{detail ? <span className="opacity-70 ml-0.5">{detail}</span> : null}
+        </span>
+      )
+    }
+    lastIndex = combined.lastIndex
+  }
+  const tail = text.slice(lastIndex)
+  if (tail) out.push(<span key={`t${key++}`}>{tail}</span>)
+  return out
+}
+
+// Interactive "what-if" panel — sliders evaluate JS-expression outputs live
+function WhatIfPanel({ spec, accent }) {
+  const initialValues = useMemo(() => {
+    const v = {}
+    for (const s of spec.sliders || []) v[s.name] = Number(s.value) || 0
+    return v
+  }, [spec])
+  const [values, setValues] = useState(initialValues)
+
+  const set = (name, v) => setValues((prev) => ({ ...prev, [name]: Number(v) }))
+
+  const evaluateOutput = (formula) => {
+    try {
+      // Build a sandboxed function: only Math + slider variables in scope
+      const args = Object.keys(values)
+      const fn = new Function(...args, 'Math', `return (${formula})`)
+      const result = fn(...args.map((k) => values[k]), Math)
+      return Number.isFinite(result) ? result : null
+    } catch {
+      return null
+    }
+  }
+
+  return (
+    <div className="border-t" style={{ borderColor: '#1a2226', background: '#0a0d0f', padding: '8px 10px' }}>
+      <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479] mb-2">{spec.title}</div>
+      <div className="bg-[#12171a] border border-[#252e33] rounded p-3 space-y-2">
+        {spec.sliders.map((s) => (
+          <div key={s.name} className="flex items-center gap-2">
+            <label className="font-mono text-[10px] uppercase tracking-wider w-24 shrink-0" style={{ color: '#6b7479' }}>{s.label}</label>
+            <input
+              type="range"
+              min={s.min}
+              max={s.max}
+              step={s.step}
+              value={values[s.name]}
+              onChange={(e) => set(s.name, e.target.value)}
+              className="flex-1 h-1"
+              style={{ accentColor: accent }}
+            />
+            <input
+              type="number"
+              min={s.min}
+              max={s.max}
+              step={s.step}
+              value={values[s.name]}
+              onChange={(e) => set(s.name, e.target.value)}
+              className="w-16 bg-[#0a0d0f] border border-[#252e33] rounded px-1 py-0.5 text-[10px] font-mono text-right"
+              style={{ color: '#fbbf24' }}
+            />
+            {s.unit && <span className="font-mono text-[9px] w-8" style={{ color: '#6b7479' }}>{s.unit}</span>}
+          </div>
+        ))}
+        <div className="border-t pt-2 mt-2 space-y-1" style={{ borderColor: '#252e33' }}>
+          {spec.outputs.map((o, i) => {
+            const val = evaluateOutput(o.formula)
+            const decimals = o.decimals != null ? o.decimals : 3
+            return (
+              <div key={i} className="flex items-baseline justify-between text-[11px] font-mono">
+                <span style={{ color: '#a7b0b6' }}>{o.label}</span>
+                <span style={{ color: val == null ? '#f87171' : accent }}>
+                  {val == null ? 'err' : val.toFixed(decimals)}
+                  {o.unit && <span className="ml-1 opacity-70">{o.unit}</span>}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      {spec.annotation && <div className="font-mono text-[10px] text-[#a7b0b6] mt-1.5">{spec.annotation}</div>}
+    </div>
+  )
 }
 
 // Render the SVG diagram described by a generate_diagram tool spec

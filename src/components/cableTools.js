@@ -556,6 +556,53 @@ export const CABLE_TOOLS = [
     },
   },
   {
+    name: 'whatif_panel',
+    description:
+      'Render an interactive "what-if" panel inline in the chat with up to 4 sliders the engineer can drag to see live re-computation of a target quantity (Z₀, IL, NEXT, skew, cost, etc.). Use when a question is exploratory: "how does Z₀ change if εᵣ varies between 1.5-2.3" or "show me the Cu cost vs AWG sweep". The formula is JS-style with the slider variable names available. Returns immediately — the chat renders the interactive panel.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Title shown above the panel' },
+        // Sliders: each has a variable name available inside formula
+        sliders: {
+          type: 'array',
+          description: 'Up to 4 sliders. Each: { name (var name), label, min, max, step, value (default), unit (optional) }',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              label: { type: 'string' },
+              min: { type: 'number' },
+              max: { type: 'number' },
+              step: { type: 'number' },
+              value: { type: 'number' },
+              unit: { type: 'string' },
+            },
+            required: ['name', 'label', 'min', 'max', 'step', 'value'],
+          },
+        },
+        // Output formula(s) — JS expression using slider names. Use Math.* freely.
+        // Example: 'Z = 138 / Math.sqrt(er) * Math.log10(D/d)'
+        outputs: {
+          type: 'array',
+          description: 'Output rows. Each: { label, formula (JS expr using slider vars), unit, decimals }',
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string' },
+              formula: { type: 'string' },
+              unit: { type: 'string' },
+              decimals: { type: 'number' },
+            },
+            required: ['label', 'formula'],
+          },
+        },
+        annotation: { type: 'string', description: 'One-line note under the panel' },
+      },
+      required: ['title', 'sliders', 'outputs'],
+    },
+  },
+  {
     name: 'log_defect',
     description:
       'Log a manufacturing defect classified from a shop-floor photo into the persistent defect history. Call this AFTER you have classified a defect from an attached image so the engineer can build a pattern-history of recurring shop-floor issues. Defect history persists in localStorage and is visible in the Library tab.',
@@ -1032,6 +1079,21 @@ export function dispatchCableTool(name, input) {
       case 'log_defect': {
         const entry = addDefectEntry(input || {});
         return { ok: true, entry, note: 'Defect logged to persistent history. Visible in Library tab.' };
+      }
+      case 'whatif_panel': {
+        const { title, sliders, outputs, annotation } = input || {};
+        if (!title || !Array.isArray(sliders) || !Array.isArray(outputs)) {
+          throw new Error('title, sliders[], outputs[] required');
+        }
+        if (sliders.length > 4) throw new Error('max 4 sliders');
+        if (outputs.length > 4) throw new Error('max 4 output rows');
+        return {
+          ok: true,
+          title,
+          annotation: annotation || '',
+          spec: { title, sliders, outputs, annotation },
+          _whatif_panel: { title, sliders, outputs, annotation },
+        };
       }
       case 'list_defect_log': {
         const list = getDefectLog();

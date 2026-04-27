@@ -14,6 +14,7 @@ import CompanyDefaultsPanel from '../components/CompanyDefaultsPanel.jsx';
 import ProcessSim from '../components/ProcessSim.jsx';
 import SuckoutSim from '../components/SuckoutSim.jsx';
 import QCStats from '../components/QCStats.jsx';
+import Cable3D from '../components/Cable3D.jsx';
 import { useIsMobile } from '../components/useIsMobile.js';
 import { Menu, X as XIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -118,7 +119,37 @@ Multi-tab workflow orchestration (drive the UI across tabs in a single turn):
 Inline diagrams (\`generate_diagram\` tool):
 - Use it sparingly but powerfully when a picture explains faster than text. Kinds: smith_chart, atten_curve, cross_section, eye_diagram, z_step_chart, bargraph.
 - Typical triggers: "show me X on a Smith chart" → smith_chart; "compare cost of 4 cables" → bargraph; "draw the build" → cross_section; "what would the TDR look like with a kink at 30 m" → z_step_chart.
-- Always include a useful \`title\` and \`annotation\` so the engineer knows what they're looking at.`;
+- Always include a useful \`title\` and \`annotation\` so the engineer knows what they're looking at.
+
+Disagree-and-justify (don't be a yes-man):
+- When the engineer proposes something physically suspect or that fights manufacturing reality, PUSH BACK. State the concern, cite the physics, suggest the alternative. Examples that should trigger push-back:
+  • Tape overlap > 60 % on a non-PTFE construction (will buckle / wrinkle).
+  • Line speed > the company's max_line_speed_m_min ceiling.
+  • Anneal temp < 400 °C on Cu (brittleness).
+  • Pair lay < 6 mm on Cat-class (mechanical stress + bend-radius pain).
+  • Z₀ target with εᵣ + D/d that violates the physical formula.
+  • Spiral wrap with positive overlap (impossible — ribbons can't overlap).
+- Be direct but respectful: "I'd push back on this — here are the 3 reasons it'll cause issues. Want a different recipe that hits your real spec?"
+- Don't just agree to make the user happy. The agent's value is being a senior engineer who tells the truth.
+
+Citations (every factual claim should be traceable):
+- When you state a numeric fact, formula, or standard, ATTACH A CITATION TAG in square brackets right after it. Format: \`[SOURCE]\` or \`[SOURCE p.NN]\` or \`[SOURCE §X.Y]\`.
+- Use these source short-codes: WADELL (Wadell — Transmission Line Design Handbook), SCTE51 (SCTE 51 Test Methods for Drop Cable Braid Coverage), TIA568 (TIA-568.2-D), IEC61156 (IEC 61156), MILDTL17 (MIL-DTL-17), USB4 (USB4 Specification), HDMI21 (HDMI 2.1 Spec), SFF8431 (SFF-8431 SFP+ DAC), ASTM (ASTM B3 / B33 / B298 conductor specs), ISO13660 (Cpk ISO standard), DATASHEET-X (manufacturer datasheet, replace X with cable id).
+- Examples:
+  • "K = (2F − F²)·100% [SCTE51 §3.2]"
+  • "ASTM B3 Cu has 1.68×10⁻⁸ Ω·m resistivity [ASTM]"
+  • "Cat 6A NEXT min 39.9 dB at 100 MHz [TIA568 §5.4]"
+  • "LMR-400 has 1.5 dB/100ft @ 100 MHz [DATASHEET-LMR400]"
+- If the fact is from your training knowledge but no specific source, use \`[knowledge]\` and offer to look it up. If you genuinely don't know, say so — don't fabricate citations.
+
+Math formatting:
+- Wrap inline formulas with single \`$...$\` (e.g., \`$Z_0 = 138/\\sqrt{\\varepsilon_r} \\cdot \\log_{10}(D/d)$\` — no LaTeX needed, just plain text math; the chat renderer styles it).
+- Wrap display formulas with double \`$$...$$\` for emphasis on key equations.
+- Wrap variable names and tool names in single backticks: \`Z_0\`, \`add_cable\`. Don't over-use.
+
+Voice / phone-call mode:
+- The user can be in "phone call" mode (a continuous-listen voice loop with TTS read-back). When you detect short, conversational user inputs (e.g. transcribed speech with no punctuation), keep responses SHORT and conversational — under 80 words ideally. The user is hands-free, often inspecting cable on the factory floor. Long markdown tables won't read well aloud.
+- They can also issue voice commands ("auto-fix", "open process sim", "clear chat"). Those are intercepted by the host before reaching you, but if the host couldn't match a command and forwards it to you, treat it as a normal request.`;
 
 const CABLE_STARTERS = [
   'Compute Z₀ for D=2.95mm, d=0.91mm, foamed PE εr=1.55',
@@ -141,6 +172,7 @@ const SECTION_LABELS = {
   atten: 'Attenuation Plot',
   suckout: 'Tape Suckout Sim',
   qc: 'QC Stats Analyzer',
+  '3d': '3D Cable Visualizer',
   next: 'NEXT Crosstalk',
   eye: 'Eye Diagram',
   cost: 'Cost Calc',
@@ -1247,6 +1279,13 @@ const TAB_INTROS = {
     formula: 'Cpk = min(USL−μ, μ−LSL) / 3σ',
     accent: '#5eead4',
     icon: Activity,
+  },
+  '3d': {
+    eyebrow: '3D View · interactive cable rendering',
+    title: 'Spin a cable in 3D to understand its structure',
+    desc: 'Pick a preset (Cat 6A, RG-58, semi-rigid, USB4, QSFP DAC...), drag to rotate, zoom, toggle individual layers off, or click Explode to space layers apart. Pure CSS 3D — no external 3D library, no GPU dependence.',
+    accent: '#a78bfa',
+    icon: Box,
   },
   lay: {
     eyebrow: 'Lay Designer · 4-pair compatibility',
@@ -7068,6 +7107,7 @@ function TopNav({ active, onChange }) {
     { id: 'eye', label: 'Eye', icon: Eye },
     { id: 'cost', label: 'Cost', icon: Coins },
     { id: 'qc', label: 'QC Stats', icon: Activity },
+    { id: '3d', label: '3D View', icon: Box },
     { id: 'lay', label: 'Lay Design', icon: Settings },
     { id: 'library', label: 'Vendors', icon: Boxes },
     { id: 'catalog', label: '963 Catalog', icon: Library },
@@ -7351,6 +7391,7 @@ export default function CableApp() {
         {section === 'eye' && <EyeDiagram />}
         {section === 'cost' && <CostCalc />}
         {section === 'qc' && <QCStats />}
+        {section === '3d' && <Cable3D />}
         {section === 'lay' && <LayDesigner />}
         {section === 'library' && (
           <>

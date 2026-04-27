@@ -527,6 +527,39 @@ export const RF_TOOLS = [
     },
   },
   {
+    name: 'whatif_panel',
+    description:
+      'Render an interactive "what-if" panel inline in the chat with up to 4 sliders the engineer can drag to see live re-computation of a target quantity (Z₀, IL, link margin, etc.). The formula is JS-style. Use for exploratory questions: "how does FSPL change vs distance and freq", "Z₀ vs εᵣ sweep".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        sliders: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' }, label: { type: 'string' },
+              min: { type: 'number' }, max: { type: 'number' }, step: { type: 'number' },
+              value: { type: 'number' }, unit: { type: 'string' },
+            },
+            required: ['name', 'label', 'min', 'max', 'step', 'value'],
+          },
+        },
+        outputs: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { label: { type: 'string' }, formula: { type: 'string' }, unit: { type: 'string' }, decimals: { type: 'number' } },
+            required: ['label', 'formula'],
+          },
+        },
+        annotation: { type: 'string' },
+      },
+      required: ['title', 'sliders', 'outputs'],
+    },
+  },
+  {
     name: 'generate_diagram',
     description:
       'Render an inline SVG diagram in the chat. Useful for visualising RF concepts the engineer asks about. Supported kinds: smith_chart (with optional impedance points), atten_curve (atten dB vs MHz), cross_section (concentric layers), eye_diagram (synthetic), z_step_chart (TDR Z vs distance), bargraph (categorical comparisons). Returns a tool result with `_inline_svg` so the chat renders the picture inline.',
@@ -972,6 +1005,21 @@ export function dispatchRfTool(name, input) {
       case 'set_company_defaults': {
         const updated = setCompanyDefaults(input || {})
         return { ok: true, defaults: updated, note: 'Saved to browser localStorage. Future sessions will see these values.' }
+      }
+      case 'whatif_panel': {
+        const { title, sliders, outputs, annotation } = input || {}
+        if (!title || !Array.isArray(sliders) || !Array.isArray(outputs)) {
+          throw new Error('title, sliders[], outputs[] required')
+        }
+        if (sliders.length > 4) throw new Error('max 4 sliders')
+        if (outputs.length > 4) throw new Error('max 4 output rows')
+        return {
+          ok: true,
+          title,
+          annotation: annotation || '',
+          spec: { title, sliders, outputs, annotation },
+          _whatif_panel: { title, sliders, outputs, annotation },
+        }
       }
       case 'generate_diagram': {
         const { kind, title } = input || {}
