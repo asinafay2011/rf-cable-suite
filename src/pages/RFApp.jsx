@@ -6,6 +6,7 @@ import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
 import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
 import CompanyDefaultsPanel from "../components/CompanyDefaultsPanel.jsx";
 import SuckoutSim from "../components/SuckoutSim.jsx";
+import DielectricStackDesigner from "../components/DielectricStackDesigner.jsx";
 import { useIsMobile } from "../components/useIsMobile.js";
 
 const RF_SYSTEM_PROMPT = `You are a senior RF cable engineer embedded in the RF Cable Engineering Suite. You have access to calculation tools — use them whenever a numeric answer is requested instead of relying on memorized constants.
@@ -1684,7 +1685,13 @@ export default function RFCableSuite() {
     },
     { id: "link", label: "Link" },
     { id: "tools", label: "Tools" },
-    { id: "suckout", label: "Suckout" },
+    {
+      group: "build", label: "Build",
+      children: [
+        { id: "dielectric", label: "Dielectric Stack" },
+        { id: "suckout", label: "Tape Suckout" },
+      ],
+    },
     {
       group: "ref", label: "Reference",
       children: [
@@ -2048,6 +2055,7 @@ export default function RFCableSuite() {
           {tab === "link" && <LinkView openInLibrary={openInLibrary} onPrint={() => setPrintSetup({ type: "link" })} toolPreset={toolPreset} clearToolPreset={clearToolPreset} />}
           {tab === "tools" && <ToolsView toolPreset={toolPreset} clearToolPreset={clearToolPreset} />}
           {tab === "suckout" && <SuckoutSim accent="#d97706" defaultLayer="ptfe" />}
+          {tab === "dielectric" && <DielectricStackDesigner />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
           {tab === "cheat" && <CheatSheetView />}
           {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}
