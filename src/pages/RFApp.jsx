@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect, createContext, useContext } from "react";
 import { Link } from "react-router-dom";
-import { Menu, X as XIcon } from "lucide-react";
+import { Menu, X as XIcon, ChevronDown } from "lucide-react";
 import FloatingAgent from "../components/FloatingAgent.jsx";
 import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
 import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
@@ -1666,7 +1666,60 @@ export default function RFCableSuite() {
 
   const isMobile = useIsMobile();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const NAV_TABS = [["home", "Home"], ["design", "Design"], ["library", "Library"], ["connectors", "Connectors"], ["link", "Link"], ["tools", "Tools"], ["suckout", "Suckout"], ["wizard", "Wizard"], ["cheat", "Cheat Sheet"], ["compare", `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`]];
+  const [navOpenGroup, setNavOpenGroup] = useState(null); // desktop dropdown
+  const navRef = useRef(null);
+
+  // Top-level nav tree: leaves render as buttons, groups as dropdowns.
+  // The compare count is injected dynamically into its label.
+  const NAV_TREE = useMemo(() => ([
+    { id: "home", label: "Home" },
+    { id: "design", label: "Design" },
+    {
+      group: "lib", label: "Library",
+      children: [
+        { id: "library", label: "Cables" },
+        { id: "connectors", label: "Connectors" },
+        { id: "compare", label: `Compare${comparedCables.length ? ` (${comparedCables.length})` : ""}`, hot: comparedCables.length > 0 },
+      ],
+    },
+    { id: "link", label: "Link" },
+    { id: "tools", label: "Tools" },
+    { id: "suckout", label: "Suckout" },
+    {
+      group: "ref", label: "Reference",
+      children: [
+        { id: "wizard", label: "Wizard" },
+        { id: "cheat", label: "Cheat Sheet" },
+      ],
+    },
+  ]), [comparedCables.length]);
+
+  const findNavLabel = (id) => {
+    for (const n of NAV_TREE) {
+      if (n.id === id) return n.label;
+      if (n.children) {
+        const c = n.children.find((x) => x.id === id);
+        if (c) return c.label;
+      }
+    }
+    return null;
+  };
+  const findNavGroup = (id) => {
+    for (const n of NAV_TREE) if (n.children?.some((c) => c.id === id)) return n.group;
+    return null;
+  };
+  const activeNavGroup = findNavGroup(tab);
+  const [navExpandedMobile, setNavExpandedMobile] = useState(activeNavGroup);
+
+  // Close desktop dropdown on outside click / Esc
+  useEffect(() => {
+    if (!navOpenGroup) return;
+    const onDoc = (e) => { if (navRef.current && !navRef.current.contains(e.target)) setNavOpenGroup(null); };
+    const onKey = (e) => { if (e.key === "Escape") setNavOpenGroup(null); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [navOpenGroup]);
 
   const loadCableIntoDesign = (id) => { setActiveCable(id); setTab("design"); };
   const askAboutCable = (id) => {
@@ -1730,7 +1783,7 @@ export default function RFCableSuite() {
             <div style={{ minWidth: 0, flex: "1 1 auto" }}>
               <div style={{ ...S.eyebrow, fontSize: 9 }}>RF Engineering Suite</div>
               <div style={{ ...S.title, fontSize: 18, lineHeight: 1.1, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {NAV_TABS.find(([k]) => k === tab)?.[1] || "Coaxial Cable Workbench"}
+                {findNavLabel(tab) || "Coaxial Cable Workbench"}
               </div>
             </div>
             <div style={{ display: "flex", gap: 4 }}>
@@ -1753,10 +1806,81 @@ export default function RFCableSuite() {
               <h1 style={S.title}>Coaxial Cable Workbench</h1>
             </div>
             <div style={S.headerRight}>
-              <nav style={S.nav}>
-                {NAV_TABS.map(([k, label]) => (
-                  <button key={k} onClick={() => setTab(k)} style={{ ...S.navBtn, ...(tab === k ? S.navBtnActive : {}), ...(k === "compare" && comparedCables.length > 0 ? { borderColor: "#d97706", color: "#fbbf24" } : {}) }}>{label}</button>
-                ))}
+              <nav ref={navRef} style={{ ...S.nav, position: "relative", overflow: "visible" }}>
+                {NAV_TREE.map((node) => {
+                  if (!node.children) {
+                    const isActive = tab === node.id;
+                    return (
+                      <button
+                        key={node.id}
+                        onClick={() => { setTab(node.id); setNavOpenGroup(null); }}
+                        style={{ ...S.navBtn, ...(isActive ? S.navBtnActive : {}) }}
+                      >
+                        {node.label}
+                      </button>
+                    );
+                  }
+                  // group: dropdown
+                  const isOpen = navOpenGroup === node.group;
+                  const groupActive = activeNavGroup === node.group;
+                  const hasHotChild = node.children.some((c) => c.hot);
+                  return (
+                    <div key={node.group} style={{ position: "relative" }}>
+                      <button
+                        onClick={() => setNavOpenGroup(isOpen ? null : node.group)}
+                        style={{
+                          ...S.navBtn,
+                          ...(groupActive ? S.navBtnActive : {}),
+                          ...(isOpen && !groupActive ? { background: "rgba(217,119,6,0.15)", color: "#fbbf24" } : {}),
+                          ...(hasHotChild && !groupActive ? { color: "#fbbf24" } : {}),
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                        aria-expanded={isOpen}
+                        aria-haspopup="menu"
+                      >
+                        {node.label}
+                        <ChevronDown size={11} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                      </button>
+                      {isOpen && (
+                        <div
+                          role="menu"
+                          style={{
+                            position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 180,
+                            background: "#0a0705", border: "1px solid #3a2e1f", borderRadius: 4,
+                            boxShadow: "0 8px 24px rgba(0,0,0,0.6)", zIndex: 50, padding: 4,
+                            display: "flex", flexDirection: "column", gap: 2,
+                          }}
+                        >
+                          {node.children.map((c) => {
+                            const isActive = tab === c.id;
+                            return (
+                              <button
+                                key={c.id}
+                                role="menuitem"
+                                onClick={() => { setTab(c.id); setNavOpenGroup(null); }}
+                                style={{
+                                  ...S.navBtn,
+                                  textAlign: "left",
+                                  padding: "8px 14px",
+                                  borderRadius: 3,
+                                  ...(isActive
+                                    ? { background: "#2a1d14", color: "#fbbf24" }
+                                    : c.hot
+                                      ? { color: "#fbbf24" }
+                                      : {}),
+                                }}
+                              >
+                                {c.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </nav>
               <button onClick={() => setSettingsOpen(!settingsOpen)} style={{ ...S.settingsBtn, ...(settingsOpen ? S.settingsBtnActive : {}) }} title="Settings">
                 <SettingsIcon />
@@ -1787,22 +1911,72 @@ export default function RFCableSuite() {
                 <Link to="/" onClick={() => setMobileNavOpen(false)} style={{ padding: "10px 12px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#a89d8e", textTransform: "uppercase", letterSpacing: 1, textDecoration: "none", borderRadius: 3 }}>Home</Link>
               </div>
               <div style={{ padding: "8px 8px", display: "flex", flexDirection: "column" }}>
-                {NAV_TABS.map(([k, label]) => (
-                  <button
-                    key={k}
-                    onClick={() => { setTab(k); setMobileNavOpen(false); }}
-                    style={{
-                      textAlign: "left", padding: "12px 14px", border: "none",
-                      background: tab === k ? "#2a1d14" : "transparent",
-                      color: tab === k ? "#fbbf24" : "#a89d8e",
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: 13, textTransform: "uppercase", letterSpacing: 1,
-                      borderRadius: 3, cursor: "pointer", marginBottom: 2,
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
+                {NAV_TREE.map((node) => {
+                  if (!node.children) {
+                    const isActive = tab === node.id;
+                    return (
+                      <button
+                        key={node.id}
+                        onClick={() => { setTab(node.id); setMobileNavOpen(false); }}
+                        style={{
+                          textAlign: "left", padding: "12px 14px", border: "none",
+                          background: isActive ? "#2a1d14" : "transparent",
+                          color: isActive ? "#fbbf24" : "#a89d8e",
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: 13, textTransform: "uppercase", letterSpacing: 1,
+                          borderRadius: 3, cursor: "pointer", marginBottom: 2,
+                        }}
+                      >
+                        {node.label}
+                      </button>
+                    );
+                  }
+                  // group: collapsible
+                  const expanded = navExpandedMobile === node.group;
+                  const groupActive = activeNavGroup === node.group;
+                  return (
+                    <div key={node.group} style={{ display: "flex", flexDirection: "column" }}>
+                      <button
+                        onClick={() => setNavExpandedMobile(expanded ? null : node.group)}
+                        style={{
+                          textAlign: "left", padding: "12px 14px", border: "none",
+                          background: "transparent",
+                          color: groupActive ? "#fbbf24" : "#a89d8e",
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: 13, textTransform: "uppercase", letterSpacing: 1,
+                          borderRadius: 3, cursor: "pointer", marginBottom: 2,
+                          display: "flex", alignItems: "center", gap: 8,
+                        }}
+                      >
+                        <span style={{ flex: 1 }}>{node.label}</span>
+                        <ChevronDown size={14} style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                      </button>
+                      {expanded && (
+                        <div style={{ marginLeft: 10, paddingLeft: 10, borderLeft: "1px solid #2a1f15", display: "flex", flexDirection: "column" }}>
+                          {node.children.map((c) => {
+                            const isActive = tab === c.id;
+                            return (
+                              <button
+                                key={c.id}
+                                onClick={() => { setTab(c.id); setMobileNavOpen(false); }}
+                                style={{
+                                  textAlign: "left", padding: "10px 14px", border: "none",
+                                  background: isActive ? "#2a1d14" : "transparent",
+                                  color: isActive ? "#fbbf24" : c.hot ? "#fbbf24" : "#a89d8e",
+                                  fontFamily: "'JetBrains Mono', monospace",
+                                  fontSize: 12, textTransform: "uppercase", letterSpacing: 1,
+                                  borderRadius: 3, cursor: "pointer", marginBottom: 2,
+                                }}
+                              >
+                                {c.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </aside>
           </div>

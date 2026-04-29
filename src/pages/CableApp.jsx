@@ -1,7 +1,7 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Cable, Calculator, Layers, Shield, Box, FlaskConical, BookOpen,
-  ChevronRight, Activity, Ruler, Zap, Atom, Wrench, Library,
+  ChevronRight, ChevronDown, Activity, Ruler, Zap, Atom, Wrench, Library,
   ArrowRight, Plus, Minus, Info, Eye, Radio, Coins, Boxes, Search, X, Settings,
   GitBranch, Sparkles, Home,
 } from 'lucide-react';
@@ -7087,33 +7087,110 @@ function Hero() {
 /* ============================================================
    Top Nav
    ============================================================ */
+// Top-level nav tree. A node is either a leaf (`{id, label, icon}`) or a
+// group (`{group, label, icon, children: [...leaves]}`). Groups render as
+// dropdown menus on desktop and as collapsible sections on mobile.
+const NAV_TREE = [
+  { id: 'home', label: 'Home', icon: Cable },
+  {
+    group: 'learn', label: 'Learn', icon: GitBranch,
+    children: [
+      { id: 'progression', label: 'Progression', icon: GitBranch },
+      { id: 'm1', label: 'Conductor', icon: Atom },
+      { id: 'm2', label: 'Twisted Pair', icon: Layers },
+      { id: 'm3', label: 'Bundle', icon: Box },
+      { id: 'more', label: 'Modules 4–10', icon: ChevronRight },
+    ],
+  },
+  {
+    group: 'sim', label: 'Simulations', icon: Wrench,
+    children: [
+      { id: 'sim', label: 'Process Sim', icon: Wrench },
+      { id: 'tdr', label: 'TDR Sim', icon: Activity },
+      { id: 'vna', label: 'VNA Lab', icon: FlaskConical },
+      { id: 'suckout', label: 'Tape Suckout', icon: Activity },
+      { id: 'next', label: 'NEXT crosstalk', icon: Radio },
+      { id: 'eye', label: 'Eye Diagram', icon: Eye },
+    ],
+  },
+  {
+    group: 'calc', label: 'Calculators', icon: Calculator,
+    children: [
+      { id: 'calc', label: 'Z₀ Calc', icon: Calculator },
+      { id: 'braid', label: 'Braid Coverage', icon: Shield },
+      { id: 'atten', label: 'Attenuation', icon: Zap },
+      { id: 'lay', label: 'Lay Designer', icon: Settings },
+      { id: 'cost', label: 'Cost Calc', icon: Coins },
+    ],
+  },
+  {
+    group: 'analysis', label: 'Analysis', icon: Activity,
+    children: [
+      { id: 'qc', label: 'QC Stats', icon: Activity },
+      { id: '3d', label: '3D Visualizer', icon: Box },
+    ],
+  },
+  {
+    group: 'lib', label: 'Library', icon: Library,
+    children: [
+      { id: 'library', label: 'Vendors', icon: Boxes },
+      { id: 'catalog', label: '963 Catalog', icon: Library },
+    ],
+  },
+];
+
+// Flatten the tree for label lookup
+function findActiveLabel(active) {
+  for (const node of NAV_TREE) {
+    if (node.id === active) return node.label;
+    if (node.children) {
+      const child = node.children.find((c) => c.id === active);
+      if (child) return child.label;
+    }
+  }
+  return 'CABLE.LAB';
+}
+
+// Find which group contains the given child id (for highlighting parent)
+function findActiveGroup(active) {
+  for (const node of NAV_TREE) {
+    if (node.children?.some((c) => c.id === active)) return node.group;
+  }
+  return null;
+}
+
 function TopNav({ active, onChange }) {
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const items = [
-    { id: 'home', label: 'Home', icon: Cable },
-    { id: 'progression', label: 'Progression', icon: GitBranch },
-    { id: 'm1', label: 'Conductor', icon: Atom },
-    { id: 'm2', label: 'Twisted Pair', icon: Layers },
-    { id: 'm3', label: 'Bundle', icon: Box },
-    { id: 'calc', label: 'Z₀ Calc', icon: Calculator },
-    { id: 'tdr', label: 'TDR Sim', icon: Activity },
-    { id: 'vna', label: 'VNA Lab', icon: FlaskConical },
-    { id: 'sim', label: 'Process Sim', icon: Wrench },
-    { id: 'braid', label: 'Braid', icon: Shield },
-    { id: 'atten', label: 'Atten', icon: Zap },
-    { id: 'suckout', label: 'Suckout', icon: Activity },
-    { id: 'next', label: 'NEXT', icon: Radio },
-    { id: 'eye', label: 'Eye', icon: Eye },
-    { id: 'cost', label: 'Cost', icon: Coins },
-    { id: 'qc', label: 'QC Stats', icon: Activity },
-    { id: '3d', label: '3D View', icon: Box },
-    { id: 'lay', label: 'Lay Design', icon: Settings },
-    { id: 'library', label: 'Vendors', icon: Boxes },
-    { id: 'catalog', label: '963 Catalog', icon: Library },
-    { id: 'more', label: 'Modules 4–10', icon: ChevronRight },
-  ];
-  const activeLabel = items.find((it) => it.id === active)?.label || 'CABLE.LAB';
+  const [openGroup, setOpenGroup] = useState(null);  // desktop dropdown
+  const [expandedGroup, setExpandedGroup] = useState(findActiveGroup(active));  // mobile section
+  const navRef = useRef(null);
+  const activeLabel = findActiveLabel(active);
+  const activeGroup = findActiveGroup(active);
+
+  // Close dropdown on outside click (desktop)
+  useEffect(() => {
+    if (!openGroup) return;
+    const handle = (e) => {
+      if (navRef.current && !navRef.current.contains(e.target)) setOpenGroup(null);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [openGroup]);
+
+  // Close dropdown on Esc
+  useEffect(() => {
+    if (!openGroup) return;
+    const handle = (e) => { if (e.key === 'Escape') setOpenGroup(null); };
+    document.addEventListener('keydown', handle);
+    return () => document.removeEventListener('keydown', handle);
+  }, [openGroup]);
+
+  const pickLeaf = (id) => {
+    onChange(id);
+    setOpenGroup(null);
+    setDrawerOpen(false);
+  };
 
   if (isMobile) {
     return (
@@ -7153,24 +7230,67 @@ function TopNav({ active, onChange }) {
               </div>
               <div className="px-3 py-3 border-b border-[#252e33] flex flex-col gap-1">
                 <Link to="/rf" onClick={() => setDrawerOpen(false)} className="px-3 py-2 text-[12px] font-mono uppercase tracking-wider text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded">RF Workbench</Link>
+                <Link to="/builder" onClick={() => setDrawerOpen(false)} className="px-3 py-2 text-[12px] font-mono uppercase tracking-wider text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded">Cable Builder</Link>
                 <Link to="/about" onClick={() => setDrawerOpen(false)} className="px-3 py-2 text-[12px] font-mono uppercase tracking-wider text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded">Methodology</Link>
                 <Link to="/" onClick={() => setDrawerOpen(false)} className="px-3 py-2 text-[12px] font-mono uppercase tracking-wider text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610] rounded">Home</Link>
               </div>
               <div className="px-2 py-2 flex flex-col">
-                {items.map((it) => (
-                  <button
-                    key={it.id}
-                    onClick={() => { onChange(it.id); setDrawerOpen(false); }}
-                    className={`flex items-center gap-3 px-3 py-3 text-[13px] font-mono uppercase tracking-wider rounded transition-colors text-left ${
-                      active === it.id
-                        ? 'bg-[#2a1d14] text-[#fbbf24]'
-                        : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610]'
-                    }`}
-                  >
-                    <it.icon className="w-4 h-4 shrink-0" />
-                    {it.label}
-                  </button>
-                ))}
+                {NAV_TREE.map((node) => {
+                  if (!node.children) {
+                    // leaf
+                    return (
+                      <button
+                        key={node.id}
+                        onClick={() => pickLeaf(node.id)}
+                        className={`flex items-center gap-3 px-3 py-3 text-[13px] font-mono uppercase tracking-wider rounded transition-colors text-left ${
+                          active === node.id
+                            ? 'bg-[#2a1d14] text-[#fbbf24]'
+                            : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610]'
+                        }`}
+                      >
+                        <node.icon className="w-4 h-4 shrink-0" />
+                        {node.label}
+                      </button>
+                    );
+                  }
+                  // group: collapsible section
+                  const expanded = expandedGroup === node.group;
+                  const groupActive = activeGroup === node.group;
+                  return (
+                    <div key={node.group} className="flex flex-col">
+                      <button
+                        onClick={() => setExpandedGroup(expanded ? null : node.group)}
+                        className={`flex items-center gap-3 px-3 py-3 text-[13px] font-mono uppercase tracking-wider rounded transition-colors text-left ${
+                          groupActive ? 'text-[#fbbf24]' : 'text-[#a7b0b6]'
+                        }`}
+                      >
+                        <node.icon className="w-4 h-4 shrink-0" />
+                        <span className="flex-1">{node.label}</span>
+                        <ChevronDown
+                          className={`w-4 h-4 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                        />
+                      </button>
+                      {expanded && (
+                        <div className="ml-2 pl-3 border-l border-[#252e33] flex flex-col">
+                          {node.children.map((c) => (
+                            <button
+                              key={c.id}
+                              onClick={() => pickLeaf(c.id)}
+                              className={`flex items-center gap-3 px-3 py-2.5 text-[12px] font-mono uppercase tracking-wider rounded transition-colors text-left ${
+                                active === c.id
+                                  ? 'bg-[#2a1d14] text-[#fbbf24]'
+                                  : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610]'
+                              }`}
+                            >
+                              <c.icon className="w-3.5 h-3.5 shrink-0" />
+                              {c.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </aside>
           </div>
@@ -7178,26 +7298,78 @@ function TopNav({ active, onChange }) {
       </>
     );
   }
+
+  // Desktop: horizontal strip with dropdowns for groups
   return (
-    <nav className="sticky top-0 z-40 backdrop-blur-md bg-[#0a0d0f]/85 border-b border-[#252e33]">
+    <nav ref={navRef} className="sticky top-0 z-40 backdrop-blur-md bg-[#0a0d0f]/85 border-b border-[#252e33]">
       <div className="px-4 md:px-8 py-2 pr-[230px] flex items-center gap-y-1 gap-x-0.5 flex-wrap">
         <div className="font-mono text-[11px] text-[#c97b3f] tracking-[0.2em] mr-3 shrink-0">
           ◆ CABLE.LAB
         </div>
-        {items.map((it) => (
-          <button
-            key={it.id}
-            onClick={() => onChange(it.id)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-mono uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer rounded-sm ${
-              active === it.id
-                ? 'text-[#fbbf24] border-b border-[#c97b3f] bg-[#2a1d14]'
-                : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610]'
-            }`}
-          >
-            <it.icon className="w-3.5 h-3.5" />
-            {it.label}
-          </button>
-        ))}
+        {NAV_TREE.map((node) => {
+          if (!node.children) {
+            const isActive = active === node.id;
+            return (
+              <button
+                key={node.id}
+                onClick={() => pickLeaf(node.id)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-mono uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer rounded-sm ${
+                  isActive
+                    ? 'text-[#fbbf24] border-b border-[#c97b3f] bg-[#2a1d14]'
+                    : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610]'
+                }`}
+              >
+                <node.icon className="w-3.5 h-3.5" />
+                {node.label}
+              </button>
+            );
+          }
+          // group: dropdown
+          const isOpen = openGroup === node.group;
+          const groupActive = activeGroup === node.group;
+          return (
+            <div key={node.group} className="relative">
+              <button
+                onClick={() => setOpenGroup(isOpen ? null : node.group)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-mono uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer rounded-sm ${
+                  groupActive
+                    ? 'text-[#fbbf24] border-b border-[#c97b3f] bg-[#2a1d14]'
+                    : isOpen
+                      ? 'text-[#fbbf24] bg-[#1f1610]'
+                      : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610]'
+                }`}
+                aria-expanded={isOpen}
+                aria-haspopup="menu"
+              >
+                <node.icon className="w-3.5 h-3.5" />
+                {node.label}
+                <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {isOpen && (
+                <div
+                  role="menu"
+                  className="absolute left-0 top-full mt-1 min-w-[200px] bg-[#0a0d0f] border border-[#252e33] rounded shadow-xl z-50 py-1"
+                >
+                  {node.children.map((c) => (
+                    <button
+                      key={c.id}
+                      role="menuitem"
+                      onClick={() => pickLeaf(c.id)}
+                      className={`flex items-center gap-2 w-full px-3 py-2 text-[11px] font-mono uppercase tracking-wider text-left transition-colors ${
+                        active === c.id
+                          ? 'bg-[#2a1d14] text-[#fbbf24]'
+                          : 'text-[#a7b0b6] hover:text-[#fbbf24] hover:bg-[#1f1610]'
+                      }`}
+                    >
+                      <c.icon className="w-3.5 h-3.5 shrink-0" />
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </nav>
   );
