@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react'
-import { Plus, Trash2, Info, Layers, Settings, ChevronUp, ChevronDown } from 'lucide-react'
+import React, { useState, useMemo, useEffect } from 'react'
+import { Plus, Trash2, Info, Layers, Settings, ChevronUp, ChevronDown, Zap, AlertTriangle } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────
 // Dielectric Stack Designer
@@ -106,6 +106,35 @@ export default function DielectricStackDesigner() {
   ])
   const [targetZ0, setTargetZ0] = useState(50)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [flashApplied, setFlashApplied] = useState(false)
+
+  // Listen for agent-driven preset apply (section='dielectric')
+  useEffect(() => {
+    const onApply = (e) => {
+      if (e.detail?.section !== 'dielectric') return
+      const params = e.detail.params || {}
+      if (params.conductor_od_mm) setConductorOD_mm(params.conductor_od_mm)
+      if (params.target_z0) setTargetZ0(params.target_z0)
+      if (Array.isArray(params.layers) && params.layers.length > 0) {
+        setLayers(
+          params.layers.map((L, i) => ({
+            id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+            preset: L.preset || 'high_density',
+            density: L.density ?? 1.6,
+            tape_thickness_mm: L.tape_thickness_mm ?? 0.10,
+            tape_width_mm: L.tape_width_mm ?? 6.35,
+            overlap: L.overlap || '1/2',
+            tension_factor: L.tension_factor ?? 0.92,
+            passes: Math.max(1, Math.round(L.passes ?? 1)),
+          }))
+        )
+      }
+      setFlashApplied(true)
+      setTimeout(() => setFlashApplied(false), 2200)
+    }
+    window.addEventListener('cable-suite:apply-preset', onApply)
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply)
+  }, [])
 
   // ── Compute layer-by-layer build-up ──
   const computed = useMemo(() => {
@@ -206,13 +235,19 @@ export default function DielectricStackDesigner() {
           ◆ Dielectric Stack Designer
         </div>
         <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 600, margin: 0, letterSpacing: '-0.02em', color: '#fef3c7' }}>
-          PTFE tape build-up · WTM pitch calculator
+          PTFE tape build-up · WTM pitch · Bragg notches
         </h2>
         <p style={{ fontSize: 12, color: COLORS.textDim, marginTop: 6, lineHeight: 1.5 }}>
           Stack PTFE tape layers to dial in target VP &amp; Z₀. Each pass adds 2·t·n<sub>overlap</sub>·τ to OD,
           where τ is the tension factor (siết càng căng OD càng nhỏ). εᵣ per layer comes from density via
-          Looyenga; cumulative εᵣ_eff uses the layered-coax log mix (Wadell §3).
+          Looyenga; cumulative εᵣ_eff uses the layered-coax log mix (Wadell §3). Tip: ask the chat agent
+          <em style={{ color: COLORS.copperBright, fontStyle: 'normal' }}> "build cable conductor 0.045", target 80% VP, 50 Ω"</em> for a one-click recipe.
         </p>
+        {flashApplied && (
+          <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(94,234,212,0.12)', border: `1px solid ${COLORS.teal}66`, borderRadius: 4, color: COLORS.teal, fontSize: 11, fontFamily: 'JetBrains Mono, monospace', letterSpacing: 0.5, animation: 'fadeIn 0.3s ease-out' }}>
+            ✓ Agent recipe applied — check the layer stack &amp; cumulative readout below
+          </div>
+        )}
       </div>
 
       {/* Top row: conductor input + final readout */}
@@ -303,6 +338,9 @@ export default function DielectricStackDesigner() {
 
       {/* WTM pitch calculator */}
       <PitchCalculator defaultWidth={layers[0]?.tape_width_mm || 6.35} cableOD={computed.finalOD_mm || conductorOD_mm} />
+
+      {/* Bragg notch detector */}
+      <NotchDetector layers={layers} VP={computed.VP || 0.7} hasStack={computed.stack.length > 0} />
 
       {/* Physics callouts */}
       <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: 14 }}>
@@ -759,6 +797,233 @@ function PitchCalculator({ defaultWidth, cableOD }) {
         for a {OVERLAP_PRESETS[overlap]?.hint || `${customOverlap}% overlap`} on a {width.toFixed(2)} mm tape.
         Operator-side units: ≈ {turnsPerInch.toFixed(1)} turns per inch of cable advance.
       </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────
+// Bragg notch detector — predicts suckouts from periodic tape wraps
+// f_n = n · c · VP / (2 · P_axial),  P_axial = W · (1 − overlap)
+// ─────────────────────────────────────────────────────────
+function NotchDetector({ layers, VP, hasStack }) {
+  const [maxFreqGHz, setMaxFreqGHz] = useState(40)
+  const [nHarmonics, setNHarmonics] = useState(3)
+
+  const analysis = useMemo(() => {
+    if (!hasStack || !VP || VP <= 0 || layers.length === 0) return null
+    const c = 299792458
+    const perLayer = layers.map((L, i) => {
+      const W = L.tape_width_mm || 6.35
+      const ovr = OVERLAP_PRESETS[L.overlap] || OVERLAP_PRESETS['1/2']
+      const f_overlap = ovr.fraction
+      const pitch_mm = W * (1 - f_overlap)
+      const harmonics = []
+      for (let n = 1; n <= nHarmonics; n++) {
+        if (pitch_mm <= 0) break
+        const f_hz = (n * c * VP) / (2 * pitch_mm * 1e-3)
+        const f_ghz = f_hz / 1e9
+        if (f_ghz <= maxFreqGHz) harmonics.push({ n, f_ghz })
+      }
+      return {
+        index: i,
+        tape_width_mm: W,
+        overlap: L.overlap,
+        pitch_mm,
+        passes: L.passes,
+        harmonics,
+        color: PRESETS[L.preset]?.color || '#fbbf24',
+      }
+    })
+
+    // Aggregate notches by frequency (rounded to 0.1 GHz to merge near-coincident)
+    const bins = {}
+    for (const lay of perLayer) {
+      for (const h of lay.harmonics) {
+        const key = h.f_ghz.toFixed(1)
+        if (!bins[key]) bins[key] = { f_ghz: parseFloat(key), layers: [], pitches: new Set(), totalPasses: 0 }
+        bins[key].layers.push(lay.index)
+        bins[key].pitches.add(parseFloat(lay.pitch_mm.toFixed(3)))
+        bins[key].totalPasses += lay.passes
+      }
+    }
+    const aggregated = Object.values(bins)
+      .map((b) => ({
+        f_ghz: b.f_ghz,
+        contributing_layers: b.layers,
+        coherent: b.pitches.size === 1 && b.layers.length >= 2,
+        total_passes: b.totalPasses,
+        depth_qual: b.pitches.size === 1 && b.layers.length >= 2
+          ? 'STRONG'
+          : b.layers.length >= 2 ? 'MEDIUM'
+          : 'WEAK',
+      }))
+      .sort((a, b) => a.f_ghz - b.f_ghz)
+
+    return { perLayer, aggregated }
+  }, [layers, VP, maxFreqGHz, nHarmonics, hasStack])
+
+  return (
+    <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <Zap size={14} style={{ color: COLORS.copperBright }} />
+        <div style={{ fontSize: 10, letterSpacing: '0.2em', color: COLORS.copper, textTransform: 'uppercase' }}>
+          ◆ Bragg Notch Detector · tape suckout forecast
+        </div>
+      </div>
+
+      {!analysis ? (
+        <div style={{ color: COLORS.textMuted, fontSize: 12, padding: 12, textAlign: 'center', fontStyle: 'italic' }}>
+          Add a layer to forecast Bragg notch frequencies.
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 12 }}>
+            <NumField
+              label="Max scan frequency"
+              value={maxFreqGHz}
+              onChange={(v) => setMaxFreqGHz(Math.max(1, v))}
+              step={1}
+              min={1}
+              max={200}
+              unit="GHz"
+            />
+            <NumField
+              label="Harmonics per layer"
+              value={nHarmonics}
+              onChange={(v) => setNHarmonics(Math.max(1, Math.min(8, Math.round(v))))}
+              step={1}
+              min={1}
+              max={8}
+              unit="n"
+            />
+            <div>
+              <Label>Cable VP (in use)</Label>
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 14, color: COLORS.copperBright, marginTop: 6 }}>
+                {(VP * 100).toFixed(1)}% c
+              </div>
+              <div style={{ fontSize: 9, color: COLORS.textMuted, marginTop: 2 }}>
+                from current dielectric stack
+              </div>
+            </div>
+          </div>
+
+          {/* Per-layer pitch + harmonics */}
+          <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: 10, marginBottom: 10 }}>
+            <Label>Per-layer pitch &amp; harmonics</Label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+              {analysis.perLayer.map((lay) => (
+                <div key={lay.index} style={{ display: 'grid', gridTemplateColumns: '40px 1fr 80px 1fr', gap: 8, alignItems: 'center', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ width: 8, height: 8, background: lay.color, borderRadius: 2 }} />
+                    <span style={{ color: COLORS.text }}>L{lay.index + 1}</span>
+                  </div>
+                  <div style={{ color: COLORS.textDim }}>
+                    W={lay.tape_width_mm.toFixed(2)} · {lay.overlap} → P={lay.pitch_mm.toFixed(3)} mm/rev
+                  </div>
+                  <div style={{ color: COLORS.textMuted, textAlign: 'right' }}>×{lay.passes}</div>
+                  <div style={{ color: COLORS.copperBright, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {lay.harmonics.length === 0 ? (
+                      <span style={{ color: COLORS.textMuted }}>(no harmonic ≤ {maxFreqGHz} GHz)</span>
+                    ) : lay.harmonics.map((h) => (
+                      <span key={h.n}>n{h.n}={h.f_ghz.toFixed(2)} GHz</span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Aggregated notches */}
+          <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: 10 }}>
+            <Label>Predicted notches (aggregated)</Label>
+
+            {/* Spectrum bar */}
+            <NotchSpectrum aggregated={analysis.aggregated} maxFreqGHz={maxFreqGHz} />
+
+            {analysis.aggregated.length === 0 ? (
+              <div style={{ color: COLORS.textMuted, fontSize: 11, marginTop: 8, fontStyle: 'italic' }}>
+                No Bragg notches predicted in this band.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
+                {analysis.aggregated.slice(0, 12).map((n) => (
+                  <div key={n.f_ghz} style={{ display: 'grid', gridTemplateColumns: '90px 100px 1fr', gap: 8, alignItems: 'center', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
+                    <div style={{ color: COLORS.copperBright, fontWeight: 600 }}>{n.f_ghz.toFixed(2)} GHz</div>
+                    <div style={{
+                      color: n.depth_qual === 'STRONG' ? COLORS.red : n.depth_qual === 'MEDIUM' ? COLORS.copperBright : COLORS.teal,
+                      fontWeight: 600,
+                    }}>
+                      {n.depth_qual === 'STRONG' && <AlertTriangle size={11} style={{ display: 'inline', marginRight: 4, marginBottom: 2 }} />}
+                      {n.depth_qual}
+                    </div>
+                    <div style={{ color: COLORS.textDim }}>
+                      from L{n.contributing_layers.map((i) => i + 1).join(' + L')}
+                      {n.coherent && <span style={{ color: COLORS.red, marginLeft: 8 }}>· COHERENT (same pitch — notch deepens)</span>}
+                    </div>
+                  </div>
+                ))}
+                {analysis.aggregated.length > 12 && (
+                  <div style={{ fontSize: 10, color: COLORS.textMuted, fontStyle: 'italic' }}>
+                    + {analysis.aggregated.length - 12} more harmonics above this band
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Mitigation tip */}
+          {analysis.aggregated.some((n) => n.coherent) && (
+            <div style={{ marginTop: 12, padding: 10, background: 'rgba(248,113,113,0.08)', border: `1px solid ${COLORS.red}55`, borderRadius: 3, fontSize: 11, color: COLORS.red, lineHeight: 1.5 }}>
+              <strong style={{ display: 'block', marginBottom: 4 }}>⚠ Coherent notch warning</strong>
+              <span style={{ color: COLORS.textDim }}>
+                Two or more tape layers share the same pitch — their periodic perturbations add coherently into a deeper notch.
+                Mitigate by varying tape width or overlap between layers, or by adding a small lateral offset between passes
+                so the periodicity decorrelates.
+              </span>
+            </div>
+          )}
+
+          <div style={{ marginTop: 10, fontSize: 11, color: COLORS.textMuted, lineHeight: 1.5 }}>
+            f<sub>n</sub> = n · c · VP / (2 · P<sub>axial</sub>) [Bragg condition]. Pitch P = W · (1 − overlap).
+            Notches are typically 0.5–3 dB deep per coherent layer pair on a metre-scale cable run.
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// Mini spectrum bar showing where notches sit on a 0..maxFreq axis
+function NotchSpectrum({ aggregated, maxFreqGHz }) {
+  if (aggregated.length === 0) return null
+  return (
+    <div style={{ marginTop: 8, position: 'relative', height: 50, background: '#080503', border: `1px solid ${COLORS.border}`, borderRadius: 3, padding: '0 6px' }}>
+      {/* Grid lines every 5 GHz */}
+      {Array.from({ length: Math.floor(maxFreqGHz / 5) + 1 }, (_, i) => i * 5).map((f) => (
+        <div key={f} style={{ position: 'absolute', left: `${(f / maxFreqGHz) * 100}%`, top: 0, bottom: 0, width: 1, background: COLORS.border, opacity: 0.4 }} />
+      ))}
+      {/* X-axis labels */}
+      {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+        <div key={f} style={{ position: 'absolute', left: `${f * 100}%`, bottom: -1, transform: 'translateX(-50%)', fontFamily: 'JetBrains Mono, monospace', fontSize: 8, color: COLORS.textMuted }}>
+          {(f * maxFreqGHz).toFixed(0)}
+        </div>
+      ))}
+      {/* Notch stems */}
+      {aggregated.map((n) => {
+        const x = (n.f_ghz / maxFreqGHz) * 100
+        const color = n.depth_qual === 'STRONG' ? COLORS.red : n.depth_qual === 'MEDIUM' ? COLORS.copperBright : COLORS.teal
+        const height = n.depth_qual === 'STRONG' ? 32 : n.depth_qual === 'MEDIUM' ? 24 : 16
+        return (
+          <div
+            key={n.f_ghz}
+            style={{
+              position: 'absolute', left: `${x}%`, bottom: 14, transform: 'translateX(-50%)',
+              width: 2, height, background: color, opacity: 0.85,
+            }}
+            title={`${n.f_ghz.toFixed(2)} GHz · ${n.depth_qual}`}
+          />
+        )
+      })}
     </div>
   )
 }

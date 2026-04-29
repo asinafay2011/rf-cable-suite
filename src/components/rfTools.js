@@ -609,6 +609,41 @@ export const RF_TOOLS = [
       },
     },
   },
+  {
+    name: 'design_dielectric_stack',
+    description:
+      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Returns a complete layer recipe + the predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the Dielectric Stack Designer tab. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        conductor_od_mm:   { type: 'number', description: 'Inner conductor OD in millimetres. Provide either this or conductor_od_inch.' },
+        conductor_od_inch: { type: 'number', description: 'Inner conductor OD in inches. Will be converted to mm. Common RF inner-conductor sizes: 0.020 / 0.032 / 0.045 / 0.057 inch.' },
+        target_vp:         { type: 'number', description: 'Target velocity factor as a fraction (0.65 .. 0.92). e.g. 0.80 for 80% VP. Optional if target_z0_ohm is given.' },
+        target_z0_ohm:     { type: 'number', description: 'Target characteristic impedance in ohms (typically 50, 75, 100). Optional if only sizing for VP.' },
+        tape_thickness_mm: { type: 'number', description: 'Nominal tape thickness in mm. Default 0.10 mm (typical PTFE skived tape).' },
+        tape_width_mm:     { type: 'number', description: 'Tape width in mm. Default 6.35 mm (1/4 inch).' },
+        overlap:           { type: 'string', description: 'Overlap mode: "butt" / "1/2" / "2/3" / "3/4". Default "1/2".' },
+        tension_factor:    { type: 'number', description: 'WTM tension factor τ (0.7..1.0). Lower = tighter wrap, more compression. Default 0.92.' },
+        prefer:            { type: 'string', description: '"hd" (all 1.6 g/cm³), "ld" (all 0.7 g/cm³), or "mix" (HD inside + LD outside). Default "mix".' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'compute_tape_notches',
+    description:
+      'Predict Bragg suckout (notch) frequencies caused by a tape-wrapped dielectric. Uses f_n = n · c · VP / (2 · P) where P is the WTM pitch (axial period of the tape wrap). When multiple layers are stacked at the same pitch, the notch deepens; different pitches produce separate notches. Pass the existing layer stack to forecast which frequencies to watch on the VNA.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vp:         { type: 'number', description: 'Effective velocity factor of the cable (0..1). Use the VP predicted from the dielectric stack.' },
+        layers:     { type: 'array',  description: 'Array of {tape_width_mm, overlap} (overlap = "butt"/"1/2"/"2/3"/"3/4" or numeric fraction 0..0.95).' },
+        max_freq_ghz: { type: 'number', description: 'Highest frequency to scan (default 40 GHz).' },
+        n_harmonics:  { type: 'number', description: 'Number of Bragg harmonics per pitch to report (default 3).' },
+      },
+      required: ['vp', 'layers'],
+    },
+  },
 ]
 
 // ── dispatcher ─────────────────────────────────────────
@@ -1035,10 +1070,303 @@ export function dispatchRfTool(name, input) {
           _inline_svg: input,
         }
       }
+      case 'design_dielectric_stack': {
+        const result = designDielectricStack(input)
+        return result
+      }
+      case 'compute_tape_notches': {
+        const result = computeTapeNotches(input)
+        return result
+      }
       default:
         return { error: `Unknown tool: ${name}` }
     }
   } catch (err) {
     return { error: err.message || 'Tool execution failed' }
   }
+}
+
+// ─────────────────────────────────────────────────────────
+// Dielectric stack solver
+// ─────────────────────────────────────────────────────────
+
+const _PTFE_SOLID_DENSITY = 2.15
+const _PTFE_SOLID_EPS = 2.10
+
+function _densityToEps(density) {
+  if (!density || density <= 0) return 1
+  const vf = Math.min(1, Math.max(0, density / _PTFE_SOLID_DENSITY))
+  const eps_third = vf * Math.cbrt(_PTFE_SOLID_EPS) + (1 - vf)
+  return Math.pow(eps_third, 3)
+}
+
+const _OVERLAP_MAP = { butt: 0, '1/2': 0.5, '2/3': 0.667, '3/4': 0.75 }
+function _overlapFraction(o) {
+  if (typeof o === 'number') return Math.min(0.95, Math.max(0, o))
+  return _OVERLAP_MAP[o] ?? 0.5
+}
+function _overlapLayers(o) {
+  const f = _overlapFraction(o)
+  if (f <= 0.0001) return 1
+  return Math.max(1, Math.round(1 / (1 - f)))
+}
+
+function designDielectricStack(input) {
+  let { conductor_od_mm, conductor_od_inch, target_vp, target_z0_ohm,
+        tape_thickness_mm = 0.10, tape_width_mm = 6.35,
+        overlap = '1/2', tension_factor = 0.92, prefer = 'mix' } = input || {}
+
+  if (conductor_od_mm == null && conductor_od_inch == null) {
+    throw new Error('Need conductor_od_mm or conductor_od_inch.')
+  }
+  const d = conductor_od_mm != null ? conductor_od_mm : conductor_od_inch * 25.4
+  if (!(d > 0.05 && d < 30)) throw new Error('Conductor OD looks wrong (expected 0.05–30 mm).')
+
+  const eps_HD = _densityToEps(1.6)
+  const eps_LD = _densityToEps(0.7)
+  const eps_solid = _PTFE_SOLID_EPS
+
+  // Solve for εᵣ_eff and final OD
+  let eps_target = null
+  if (target_vp && target_vp > 0 && target_vp < 1) {
+    eps_target = 1 / (target_vp * target_vp)
+  }
+
+  let logRatio = null  // ln(D/d)
+  if (target_z0_ohm && eps_target) {
+    // Z₀ = (60/√εᵣ) · ln(D/d)
+    logRatio = (target_z0_ohm * Math.sqrt(eps_target)) / 60
+  } else if (target_z0_ohm && !eps_target) {
+    // Pick a sensible εᵣ (mid-mix) and report
+    eps_target = (eps_HD + eps_LD) / 2
+    logRatio = (target_z0_ohm * Math.sqrt(eps_target)) / 60
+  } else if (eps_target && !target_z0_ohm) {
+    // Default to 50 Ω
+    target_z0_ohm = 50
+    logRatio = (target_z0_ohm * Math.sqrt(eps_target)) / 60
+  } else {
+    // No targets — default to 50 Ω, εᵣ_target = εᵣ_HD
+    eps_target = eps_HD
+    target_z0_ohm = 50
+    logRatio = (target_z0_ohm * Math.sqrt(eps_target)) / 60
+  }
+  if (!(logRatio > 0 && logRatio < 5)) throw new Error('Solved ln(D/d) is unrealistic — check targets.')
+
+  const D_target = d * Math.exp(logRatio)
+  const dielectricThk_target = (D_target - d) / 2  // radial thickness needed
+
+  // Compute fraction of HD vs LD (by ln-radius weight) needed for εᵣ_target
+  // 1/εᵣ_eff = f_HD/εᵣ_HD + (1-f_HD)/εᵣ_LD
+  let mode = prefer
+  let f_HD = 0.5
+  if (mode === 'mix') {
+    if (eps_target >= eps_HD) mode = 'hd'
+    else if (eps_target <= eps_LD) mode = 'ld'
+    else {
+      f_HD = (1/eps_target - 1/eps_LD) / (1/eps_HD - 1/eps_LD)
+      f_HD = Math.min(1, Math.max(0, f_HD))
+    }
+  }
+  if (mode === 'hd') f_HD = 1
+  if (mode === 'ld') f_HD = 0
+
+  // Per-pass radial build
+  const ovr = overlap
+  const n_overlap = _overlapLayers(ovr)
+  const t_per_pass = tape_thickness_mm * n_overlap * tension_factor
+  if (t_per_pass <= 0) throw new Error('Per-pass thickness is zero.')
+
+  // Split target dielectric thickness between HD and LD layers
+  const HD_thk_target = dielectricThk_target * f_HD
+  const LD_thk_target = dielectricThk_target * (1 - f_HD)
+  const HD_passes = Math.max(0, Math.round(HD_thk_target / t_per_pass))
+  const LD_passes = Math.max(0, Math.round(LD_thk_target / t_per_pass))
+
+  // Build the layer recipe (HD goes inside since high-εᵣ closer to conductor lowers loss
+  // contribution from peripheral E-field; LD outside lifts VP)
+  const layers = []
+  if (HD_passes > 0) {
+    layers.push({
+      preset: 'high_density',
+      density: 1.6,
+      tape_thickness_mm,
+      tape_width_mm,
+      overlap: ovr,
+      tension_factor,
+      passes: HD_passes,
+    })
+  }
+  if (LD_passes > 0) {
+    layers.push({
+      preset: 'low_density',
+      density: 0.7,
+      tape_thickness_mm,
+      tape_width_mm,
+      overlap: ovr,
+      tension_factor,
+      passes: LD_passes,
+    })
+  }
+  // If everything rounded to zero (very thin dielectric), force at least one pass
+  if (layers.length === 0) {
+    layers.push({
+      preset: 'high_density', density: 1.6,
+      tape_thickness_mm, tape_width_mm, overlap: ovr, tension_factor,
+      passes: 1,
+    })
+  }
+
+  // Predict actual achieved geometry from the chosen integer passes
+  let r = d / 2
+  const stackOut = []
+  for (const L of layers) {
+    const t_total = L.tape_thickness_mm * _overlapLayers(L.overlap) * L.tension_factor * L.passes
+    const eps_r = _densityToEps(L.density)
+    stackOut.push({
+      preset: L.preset, density: L.density, passes: L.passes,
+      thickness_mm: round(t_total, 4), eps_r: round(eps_r, 4),
+      OD_after_mm: round(2 * (r + t_total), 4),
+    })
+    r += t_total
+  }
+  const finalOD = 2 * r
+  let logTot = 0, weighted = 0
+  let r2 = d / 2
+  for (const L of layers) {
+    const t = L.tape_thickness_mm * _overlapLayers(L.overlap) * L.tension_factor * L.passes
+    const r3 = r2 + t
+    const dl = Math.log(r3 / r2)
+    logTot += dl
+    weighted += dl / _densityToEps(L.density)
+    r2 = r3
+  }
+  const eps_eff_actual = weighted > 0 ? logTot / weighted : 1
+  const VP_actual = 1 / Math.sqrt(eps_eff_actual)
+  const Z0_actual = (60 / Math.sqrt(eps_eff_actual)) * Math.log(finalOD / d)
+
+  // Predict tape Bragg notches
+  const notch1 = (() => {
+    const P_axial = tape_width_mm * (1 - _overlapFraction(ovr))  // mm/rev
+    if (P_axial <= 0) return null
+    const f_GHz = (1e3 * 299792458 * VP_actual) / (2 * P_axial * 1e-3 * 1e9)
+    return round(f_GHz, 2)
+  })()
+
+  return {
+    targets: {
+      conductor_od_mm: round(d, 4),
+      target_vp: target_vp != null ? round(target_vp, 3) : null,
+      target_z0_ohm: target_z0_ohm != null ? round(target_z0_ohm, 2) : null,
+      eps_target: round(eps_target, 3),
+    },
+    composition: {
+      mode,
+      f_HD_by_log_radius: round(f_HD, 3),
+      eps_HD: round(eps_HD, 3),
+      eps_LD: round(eps_LD, 3),
+    },
+    layers: stackOut,
+    predicted: {
+      final_od_mm: round(finalOD, 4),
+      eps_eff: round(eps_eff_actual, 4),
+      vp: round(VP_actual, 4),
+      z0_ohm: round(Z0_actual, 3),
+      delta_z0: round(Z0_actual - (target_z0_ohm || 0), 2),
+      delta_vp: target_vp != null ? round(VP_actual - target_vp, 4) : null,
+      bragg_notch_1_ghz: notch1,
+    },
+    label: `${target_z0_ohm ? `${target_z0_ohm} Ω` : ''}${target_vp ? ` · ${(target_vp*100).toFixed(0)}% VP` : ''} · d=${d.toFixed(3)} mm`.trim(),
+    _section: 'dielectric',
+    _apply_preset: {
+      conductor_od_mm: round(d, 4),
+      target_z0: target_z0_ohm,
+      layers: layers.map((L) => ({
+        preset: L.preset,
+        density: L.density,
+        tape_thickness_mm: L.tape_thickness_mm,
+        tape_width_mm: L.tape_width_mm,
+        overlap: L.overlap,
+        tension_factor: L.tension_factor,
+        passes: L.passes,
+      })),
+    },
+    notes: [
+      mode === 'mix' && f_HD > 0 && f_HD < 1
+        ? `HD inside (${(f_HD*100).toFixed(0)}% of log-radius), LD outside lowers VP-weighted losses while lifting VP.`
+        : mode === 'hd' ? 'All HD — εᵣ_target ≥ εᵣ_HD, can\'t go higher with PTFE.'
+        : mode === 'ld' ? 'All LD — εᵣ_target ≤ εᵣ_LD, can\'t go lower without ePTFE.'
+        : null,
+      Math.abs(Z0_actual - (target_z0_ohm || 0)) > 1
+        ? `Achieved Z₀ ${Z0_actual.toFixed(1)} Ω is off target by ${(Z0_actual - (target_z0_ohm || 0)).toFixed(1)} Ω due to integer-pass rounding. Tune tension or tape thickness in the UI to dial it in.`
+        : null,
+      notch1 && notch1 < 40
+        ? `First Bragg notch from ${ovr} wrap with ${tape_width_mm} mm tape predicted at ~${notch1} GHz. Use compute_tape_notches for full harmonic table.`
+        : null,
+    ].filter(Boolean),
+  }
+}
+
+function computeTapeNotches(input) {
+  const { vp = 0.7, layers = [], max_freq_ghz = 40, n_harmonics = 3 } = input || {}
+  if (!(vp > 0 && vp < 1)) throw new Error('vp must be 0..1.')
+  if (!Array.isArray(layers) || layers.length === 0) throw new Error('layers must be a non-empty array.')
+
+  const c = 299792458
+  // For each layer: pitch P = W × (1 − overlap). Then f_n = n × c × VP / (2 × P)
+  const perLayer = layers.map((L, i) => {
+    const W = L.tape_width_mm || L.W || 6.35
+    const o = L.overlap ?? '1/2'
+    const f = _overlapFraction(o)
+    const pitch_mm = W * (1 - f)
+    const P_m = pitch_mm * 1e-3
+    const harmonics = []
+    for (let n = 1; n <= n_harmonics; n++) {
+      const f_hz = (n * c * vp) / (2 * P_m)
+      const f_ghz = f_hz / 1e9
+      if (f_ghz <= max_freq_ghz) harmonics.push({ n, f_ghz: round(f_ghz, 2), pitch_mm: round(pitch_mm, 3) })
+    }
+    return { layer_index: i, tape_width_mm: round(W, 3), overlap: o, pitch_mm: round(pitch_mm, 3), harmonics }
+  })
+
+  // Aggregate: bin harmonic frequencies; layers with the same pitch deepen
+  // the same notch, so count them.
+  const bins = {}
+  for (const L of perLayer) {
+    for (const h of L.harmonics) {
+      const key = h.f_ghz.toFixed(1)
+      bins[key] = bins[key] || { f_ghz: h.f_ghz, contributing_layers: [], pitches: new Set() }
+      bins[key].contributing_layers.push(L.layer_index)
+      bins[key].pitches.add(L.pitch_mm)
+    }
+  }
+  const aggregated = Object.values(bins)
+    .map((b) => ({
+      f_ghz: b.f_ghz,
+      contributing_layers: b.contributing_layers,
+      depth_qual: b.contributing_layers.length >= 2 && b.pitches.size === 1
+        ? 'STRONG (stacked layers same pitch — coherent)'
+        : b.contributing_layers.length >= 2
+          ? 'MEDIUM (stacked layers different pitches — partial coherence)'
+          : 'WEAK (single tape layer)',
+    }))
+    .sort((a, b) => a.f_ghz - b.f_ghz)
+
+  return {
+    formula: 'f_n = n · c · VP / (2 · P_axial),  P_axial = W · (1 − overlap)',
+    inputs: { vp: round(vp, 3), n_harmonics, max_freq_ghz },
+    per_layer: perLayer,
+    aggregated_notches: aggregated,
+    notes: [
+      `Predicted ${aggregated.length} potential notch frequenc${aggregated.length === 1 ? 'y' : 'ies'} below ${max_freq_ghz} GHz.`,
+      aggregated.some((a) => a.depth_qual.startsWith('STRONG'))
+        ? 'STRONG notches: 2+ tape layers share the same pitch — perturbations add coherently. Stagger pitches or vary tape widths to break the periodicity.'
+        : null,
+    ].filter(Boolean),
+  }
+}
+
+function round(x, n) {
+  if (x == null || !isFinite(x)) return x
+  const p = Math.pow(10, n || 2)
+  return Math.round(x * p) / p
 }

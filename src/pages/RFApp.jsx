@@ -46,6 +46,13 @@ Multi-tool orchestration (chain calls in one turn whenever the engineer's questi
 - When the user states a stable factory fact ("Cu is $11/kg here", "we always use SPC"), call \`set_company_defaults\` immediately to persist it.
 - Prefer parallel tool calls (multiple tool_use blocks in one turn) when calls are independent. Chain sequentially only when one feeds the next.
 
+Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP and Y Ω"):
+- The user describes a target — e.g. "conductor 0.045 inch, hit 80% VP at 50 Ω". Call \`design_dielectric_stack\` with the parsed targets. The tool returns a complete layer recipe AND a one-click apply preset that the chat surfaces as an "Apply" button. The user clicks → the Dielectric Stack Designer tab is auto-filled.
+- Auto-detect units: if the conductor OD is between 0.005 and 0.5 it is almost certainly inches (RF inner conductors are 0.020 / 0.032 / 0.045 / 0.057"); pass it as \`conductor_od_inch\`. If between 0.5 and 30 and the user said "mm", pass as \`conductor_od_mm\`.
+- Default to a HD-inside / LD-outside MIX unless the user specifies otherwise — it gives the lowest dielectric loss while still hitting target VP.
+- After designing, ALSO call \`compute_tape_notches\` in the same turn (parallel) to flag Bragg suckouts the build will produce. Warn explicitly when 2+ tape layers share the same pitch (coherent → strong notch).
+- In the chat reply, summarise: targets → composition (HD% + LD%) → predicted final OD/VP/Z₀ → notch frequencies → "click Apply to build it on the Dielectric Stack Designer tab".
+
 Inline diagrams (\`generate_diagram\` tool):
 - Use it when a picture beats text. Kinds: smith_chart, atten_curve, cross_section, eye_diagram, z_step_chart, bargraph.
 - "Plot this impedance on a Smith chart" → smith_chart with the impedances array.
@@ -78,6 +85,7 @@ const RF_SECTION_LABELS = {
   link: 'Link Budget',
   tools: 'Tools (NF / IP3 / Path / Smith)',
   suckout: 'Tape Suckout Sim',
+  dielectric: 'Dielectric Stack Designer',
   wizard: 'Wizard',
   cheat: 'Cheat Sheet',
   compare: 'Compare',
@@ -119,6 +127,13 @@ const RF_SECTION_STARTERS = {
     'Why pick 75 Ω over 50 Ω for video?',
     'Trade-off between dielectric loss and dielectric strength',
   ],
+  dielectric: [
+    'Build a cable: conductor 0.045", target 80% VP, 50 Ω',
+    'Build a 75 Ω cable, conductor 0.032", VP 70%, all HD PTFE',
+    'I have 6.35 mm tape — what pitch for 2/3 wrap?',
+    'Stack 2 layers of HD PTFE at the same pitch — what notch frequencies?',
+    'Why does foamed PTFE have lower εᵣ?',
+  ],
 };
 
 function rfContextStarters(ctx) {
@@ -126,14 +141,16 @@ function rfContextStarters(ctx) {
 }
 
 const RF_TOOL_TO_SECTION = {
-  link_budget:           { id: 'link',       label: 'Link Budget' },
-  free_space_path_loss:  { id: 'tools',      label: 'Tools' },
-  noise_figure_cascade:  { id: 'tools',      label: 'Tools' },
-  vswr_to_rl:            { id: 'tools',      label: 'Tools' },
-  mismatch_loss:         { id: 'tools',      label: 'Tools' },
-  compute_attenuation:   { id: 'tools',      label: 'Tools' },
-  lookup_rf_cable:       { id: 'library',    label: 'Library' },
-  lookup_connector:      { id: 'connectors', label: 'Connectors' },
+  link_budget:              { id: 'link',       label: 'Link Budget' },
+  free_space_path_loss:     { id: 'tools',      label: 'Tools' },
+  noise_figure_cascade:     { id: 'tools',      label: 'Tools' },
+  vswr_to_rl:               { id: 'tools',      label: 'Tools' },
+  mismatch_loss:            { id: 'tools',      label: 'Tools' },
+  compute_attenuation:      { id: 'tools',      label: 'Tools' },
+  lookup_rf_cable:          { id: 'library',    label: 'Library' },
+  lookup_connector:         { id: 'connectors', label: 'Connectors' },
+  design_dielectric_stack:  { id: 'dielectric', label: 'Dielectric Stack' },
+  compute_tape_notches:     { id: 'dielectric', label: 'Dielectric Stack' },
 };
 
 // ═══════════════════════════════════════════════════════════════
