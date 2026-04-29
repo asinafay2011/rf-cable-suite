@@ -70,6 +70,56 @@ const OVERLAP_PRESETS = {
   '3/4': { fraction: 0.75, label: '3/4',   hint: '75% overlap',  layers: 4 },
 }
 
+// ─── Tape thickness preset pills (mils) ───
+// 1 mil = 0.001 inch = 0.0254 mm
+const MIL_TO_MM = 0.0254
+const TAPE_THICKNESS_PRESETS = [
+  { mil: 0.5, mm: 0.5 * MIL_TO_MM, label: '½ mil' },
+  { mil: 1,   mm: 1.0 * MIL_TO_MM, label: '1 mil' },
+  { mil: 2,   mm: 2.0 * MIL_TO_MM, label: '2 mil' },
+  { mil: 3,   mm: 3.0 * MIL_TO_MM, label: '3 mil' },
+  { mil: 5,   mm: 5.0 * MIL_TO_MM, label: '5 mil' },
+]
+
+// ─── Manufacturing rule: small-conductor cables can't take thick tape ───
+// Inner conductor OD ≤ 0.091" (≈ 2.311 mm) → tape must be ≤ 10 mil (0.010")
+// or it wrinkles / can't conform to the tight radius. (Common skived PTFE
+// tape sits at 1–5 mil, so this is a soft upper bound — only flags
+// genuinely thick tape on small conductors.)
+const SMALL_CABLE_MAX_OD_INCH = 0.091
+const SMALL_CABLE_MAX_OD_MM = SMALL_CABLE_MAX_OD_INCH * 25.4   // ≈ 2.3114
+const SMALL_CABLE_MAX_TAPE_MIL = 10
+const SMALL_CABLE_MAX_TAPE_MM = SMALL_CABLE_MAX_TAPE_MIL * MIL_TO_MM  // 0.254
+const SMALL_CABLE_TAPE_TOLERANCE_MM = 0.0005                   // small float-tolerance
+
+function violatesSmallCableRule(conductorOD_mm, tape_thickness_mm) {
+  return (
+    conductorOD_mm <= SMALL_CABLE_MAX_OD_MM + 0.001 &&
+    tape_thickness_mm > SMALL_CABLE_MAX_TAPE_MM + SMALL_CABLE_TAPE_TOLERANCE_MM
+  )
+}
+
+// ─── Unit conversion helpers ───
+const UNIT_KEY = 'cablelab.dsd.unit'
+const UnitContext = React.createContext({ unit: 'inch', setUnit: () => {} })
+function useUnit() { return React.useContext(UnitContext) }
+
+function toDisplay(mm, unit, decMm = 3, decInch = 4) {
+  if (mm == null || isNaN(mm)) return ''
+  if (unit === 'inch') return (mm / 25.4).toFixed(decInch)
+  return mm.toFixed(decMm)
+}
+function fromDisplay(text, unit) {
+  const v = parseFloat(text)
+  if (isNaN(v)) return null
+  return unit === 'inch' ? v * 25.4 : v
+}
+function fmtLen(mm, unit, decMm = 3, decInch = 4) {
+  if (mm == null || isNaN(mm)) return '—'
+  if (unit === 'inch') return `${(mm / 25.4).toFixed(decInch)} in`
+  return `${mm.toFixed(decMm)} mm`
+}
+
 function newLayer(idx) {
   return {
     id: `${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
@@ -99,14 +149,35 @@ const COLORS = {
 }
 
 export default function DielectricStackDesigner() {
+  const [unit, setUnit] = useState(() => {
+    try {
+      const saved = localStorage.getItem(UNIT_KEY)
+      return saved === 'mm' || saved === 'inch' ? saved : 'inch'
+    } catch { return 'inch' }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(UNIT_KEY, unit) } catch {}
+  }, [unit])
+
   const [conductorOD_mm, setConductorOD_mm] = useState(0.96) // 18 AWG ≈ 1.024 mm; 19 AWG ≈ 0.912; 18.5 AWG ≈ 0.96
   const [layers, setLayers] = useState(() => [
-    { ...newLayer(0), preset: 'low_density',  density: 0.7, tape_thickness_mm: 0.10, overlap: '1/2', passes: 2 },
-    { ...newLayer(1), preset: 'high_density', density: 1.6, tape_thickness_mm: 0.10, overlap: '1/2', passes: 1 },
+    { ...newLayer(0), preset: 'low_density',  density: 0.7, tape_thickness_mm: 2 * MIL_TO_MM, overlap: '1/2', passes: 2 },  // 2 mil LD
+    { ...newLayer(1), preset: 'high_density', density: 1.6, tape_thickness_mm: 2 * MIL_TO_MM, overlap: '1/2', passes: 1 },  // 2 mil HD
   ])
   const [targetZ0, setTargetZ0] = useState(50)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [flashApplied, setFlashApplied] = useState(false)
+
+  // Manufacturing-rule violations
+  const ruleViolations = useMemo(() => {
+    const flagged = []
+    for (let i = 0; i < layers.length; i++) {
+      if (violatesSmallCableRule(conductorOD_mm, layers[i].tape_thickness_mm)) {
+        flagged.push(i)
+      }
+    }
+    return flagged
+  }, [conductorOD_mm, layers])
 
   // Listen for agent-driven preset apply (section='dielectric')
   useEffect(() => {
@@ -198,6 +269,7 @@ export default function DielectricStackDesigner() {
                               { color: COLORS.red,          label: 'Off' }
 
   return (
+    <UnitContext.Provider value={{ unit, setUnit }}>
     <div style={{ display: 'grid', gap: 14 }}>
       <style>{`
         .dsd-input {
@@ -206,6 +278,10 @@ export default function DielectricStackDesigner() {
           border-radius: 3px; outline: none; width: 100%;
         }
         .dsd-input:focus { border-color: ${COLORS.copper}; }
+        .dsd-input-error {
+          border-color: ${COLORS.red} !important;
+          color: ${COLORS.red};
+        }
         .dsd-btn {
           background: transparent; border: 1px solid ${COLORS.border}; color: ${COLORS.textDim};
           padding: 6px 12px; font-family: 'JetBrains Mono', monospace; font-size: 10px;
@@ -230,25 +306,75 @@ export default function DielectricStackDesigner() {
       `}</style>
 
       {/* Header */}
-      <div>
-        <div style={{ fontSize: 9, letterSpacing: '0.25em', color: COLORS.copper, textTransform: 'uppercase', marginBottom: 4 }}>
-          ◆ Dielectric Stack Designer
-        </div>
-        <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 600, margin: 0, letterSpacing: '-0.02em', color: '#fef3c7' }}>
-          PTFE tape build-up · WTM pitch · Bragg notches
-        </h2>
-        <p style={{ fontSize: 12, color: COLORS.textDim, marginTop: 6, lineHeight: 1.5 }}>
-          Stack PTFE tape layers to dial in target VP &amp; Z₀. Each pass adds 2·t·n<sub>overlap</sub>·τ to OD,
-          where τ is the tension factor (siết càng căng OD càng nhỏ). εᵣ per layer comes from density via
-          Looyenga; cumulative εᵣ_eff uses the layered-coax log mix (Wadell §3). Tip: ask the chat agent
-          <em style={{ color: COLORS.copperBright, fontStyle: 'normal' }}> "build cable conductor 0.045", target 80% VP, 50 Ω"</em> for a one-click recipe.
-        </p>
-        {flashApplied && (
-          <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(94,234,212,0.12)', border: `1px solid ${COLORS.teal}66`, borderRadius: 4, color: COLORS.teal, fontSize: 11, fontFamily: 'JetBrains Mono, monospace', letterSpacing: 0.5, animation: 'fadeIn 0.3s ease-out' }}>
-            ✓ Agent recipe applied — check the layer stack &amp; cumulative readout below
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 380px', minWidth: 0 }}>
+          <div style={{ fontSize: 9, letterSpacing: '0.25em', color: COLORS.copper, textTransform: 'uppercase', marginBottom: 4 }}>
+            ◆ Dielectric Stack Designer
           </div>
-        )}
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 600, margin: 0, letterSpacing: '-0.02em', color: '#fef3c7' }}>
+            PTFE tape build-up · WTM pitch · Bragg notches
+          </h2>
+          <p style={{ fontSize: 12, color: COLORS.textDim, marginTop: 6, lineHeight: 1.5 }}>
+            Stack PTFE tape layers to dial in target VP &amp; Z₀. Each pass adds 2·t·n<sub>overlap</sub>·τ to OD,
+            where τ is the tension factor. εᵣ per layer comes from density via Looyenga;
+            cumulative εᵣ_eff uses the layered-coax log mix (Wadell §3). Tip: ask the chat agent
+            <em style={{ color: COLORS.copperBright, fontStyle: 'normal' }}> "build cable conductor 0.045&quot;, target 80% VP, 50 Ω"</em> for a one-click recipe.
+          </p>
+        </div>
+        {/* Unit toggle */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          <Label>Display units</Label>
+          <div style={{ display: 'flex', background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: 2, gap: 0 }}>
+            {[
+              { id: 'inch', label: 'inch / mil' },
+              { id: 'mm',   label: 'mm' },
+            ].map((u) => (
+              <button
+                key={u.id}
+                onClick={() => setUnit(u.id)}
+                style={{
+                  padding: '5px 12px',
+                  border: 'none',
+                  borderRadius: 3,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: 10,
+                  letterSpacing: 1.5,
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                  background: unit === u.id ? COLORS.copper : 'transparent',
+                  color: unit === u.id ? COLORS.bg : COLORS.textDim,
+                  fontWeight: unit === u.id ? 700 : 500,
+                  transition: 'all 0.15s',
+                }}
+              >
+                {u.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
+
+      {flashApplied && (
+        <div style={{ padding: '8px 12px', background: 'rgba(94,234,212,0.12)', border: `1px solid ${COLORS.teal}66`, borderRadius: 4, color: COLORS.teal, fontSize: 11, fontFamily: 'JetBrains Mono, monospace', letterSpacing: 0.5, animation: 'fadeIn 0.3s ease-out' }}>
+          ✓ Agent recipe applied — check the layer stack &amp; cumulative readout below
+        </div>
+      )}
+
+      {ruleViolations.length > 0 && (
+        <div style={{ padding: '10px 14px', background: 'rgba(248,113,113,0.10)', border: `1px solid ${COLORS.red}66`, borderRadius: 4, fontSize: 11, lineHeight: 1.5 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: COLORS.red, fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', letterSpacing: 1, fontSize: 10, marginBottom: 4 }}>
+            <AlertTriangle size={12} />
+            Small-conductor rule violation
+          </div>
+          <div style={{ color: COLORS.textDim }}>
+            Inner conductor OD = <strong style={{ color: COLORS.text }}>{fmtLen(conductorOD_mm, unit)}</strong>{' '}
+            ≤ 0.091&quot; ({SMALL_CABLE_MAX_OD_MM.toFixed(2)} mm). On these small cables, tape thicker than{' '}
+            <strong style={{ color: COLORS.text }}>{SMALL_CABLE_MAX_TAPE_MIL} mil ({SMALL_CABLE_MAX_TAPE_MM.toFixed(3)} mm / {(SMALL_CABLE_MAX_TAPE_MM / 25.4).toFixed(3)}&quot;)</strong>{' '}
+            wrinkles, can&apos;t conform to the tight radius, and produces inconsistent OD build.
+            Layers flagged: {ruleViolations.map((i) => `L${i + 1}`).join(', ')}. Drop those layers to ≤ {SMALL_CABLE_MAX_TAPE_MIL} mil tape (add more passes if you need more thickness).
+          </div>
+        </div>
+      )}
 
       {/* Top row: conductor input + final readout */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 14 }}>
@@ -257,19 +383,31 @@ export default function DielectricStackDesigner() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
             <input
               type="number"
-              step="0.001"
-              min="0.05"
-              max="20"
-              value={conductorOD_mm}
-              onChange={(e) => setConductorOD_mm(parseFloat(e.target.value) || 0)}
+              step={unit === 'inch' ? 0.001 : 0.001}
+              min={unit === 'inch' ? 0.002 : 0.05}
+              max={unit === 'inch' ? 1.0 : 25}
+              value={toDisplay(conductorOD_mm, unit, 3, 3)}
+              onChange={(e) => {
+                const mm = fromDisplay(e.target.value, unit)
+                if (mm != null) setConductorOD_mm(mm)
+              }}
               className="dsd-input"
               style={{ flex: 1 }}
             />
-            <span style={{ fontSize: 10, color: COLORS.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>mm</span>
+            <span style={{ fontSize: 10, color: COLORS.textMuted, fontFamily: 'JetBrains Mono, monospace', minWidth: 24 }}>
+              {unit === 'inch' ? 'in' : 'mm'}
+            </span>
           </div>
           <div style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 6, lineHeight: 1.4 }}>
-            18 AWG ≈ 1.024 · 19 AWG ≈ 0.912 · 20 AWG ≈ 0.812 · 22 AWG ≈ 0.643
+            {unit === 'inch'
+              ? '18 AWG ≈ 0.040 · 19 AWG ≈ 0.036 · 20 AWG ≈ 0.032 · 22 AWG ≈ 0.025'
+              : '18 AWG ≈ 1.024 · 19 AWG ≈ 0.912 · 20 AWG ≈ 0.812 · 22 AWG ≈ 0.643'}
           </div>
+          {conductorOD_mm <= SMALL_CABLE_MAX_OD_MM + 0.001 && (
+            <div style={{ marginTop: 6, fontSize: 10, color: COLORS.copperBright, fontFamily: 'JetBrains Mono, monospace' }}>
+              ◆ Small-conductor regime · use ≤ {SMALL_CABLE_MAX_TAPE_MIL} mil tape
+            </div>
+          )}
 
           <div style={{ borderTop: `1px solid ${COLORS.border}`, marginTop: 10, paddingTop: 10 }}>
             <Label>Target Z₀</Label>
@@ -320,6 +458,7 @@ export default function DielectricStackDesigner() {
               index={i}
               layer={L}
               compute={computed.stack[i]}
+              ruleViolation={ruleViolations.includes(i)}
               onChange={(patch) => updateLayer(i, patch)}
               onRemove={() => removeLayer(i)}
               onUp={() => moveLayer(i, -1)}
@@ -354,10 +493,12 @@ export default function DielectricStackDesigner() {
             <p><strong style={{ color: COLORS.text }}>OD per pass:</strong> ΔOD = 2 · n_overlap · t_tape · τ. n_overlap = round(1/(1−overlap)) = 1 (butt) / 2 (½) / 3 (⅔) / 4 (¾). τ ∈ [0.7, 1.0] is the tension factor — high τ = light tension (full thickness retained); low τ = WTM puts the tape under tension and squeezes it thinner.</p>
             <p><strong style={{ color: COLORS.text }}>Pitch (WTM lead screw):</strong> P = W · (1 − overlap). For a 6.35 mm tape: ½ wrap → 3.175 mm/rev; ⅔ wrap → 2.117 mm/rev; ¾ wrap → 1.588 mm/rev. The compensated pitch accounts for helix angle on large-OD cables (≪5% correction for typical RF coax).</p>
             <p style={{ color: COLORS.textMuted }}>Note: Looyenga is one of several mixing rules. For 0.5–1.0 g/cm³ foamed PTFE, manufacturer εᵣ data typically lies within ±0.05 of the Looyenga prediction. Calibrate against your in-house measurement if needed.</p>
+            <p><strong style={{ color: COLORS.text }}>Small-conductor rule:</strong> for inner conductor OD ≤ 0.091&quot; ({SMALL_CABLE_MAX_OD_MM.toFixed(3)} mm), tape thickness must be ≤ {SMALL_CABLE_MAX_TAPE_MIL} mil ({SMALL_CABLE_MAX_TAPE_MM.toFixed(3)} mm). Thicker tape can&apos;t conform to the tight radius — it wrinkles, opens air gaps under the wrap, and produces inconsistent OD build. Use more passes of thinner tape instead.</p>
           </div>
         )}
       </div>
     </div>
+    </UnitContext.Provider>
   )
 }
 
@@ -369,9 +510,14 @@ function Label({ children }) {
 // ─────────────────────────────────────────────────────────
 // Layer card
 // ─────────────────────────────────────────────────────────
-function LayerCard({ index, layer, compute, onChange, onRemove, onUp, onDown, canUp, canDown }) {
+function LayerCard({ index, layer, compute, ruleViolation, onChange, onRemove, onUp, onDown, canUp, canDown }) {
   const preset = PRESETS[layer.preset] || PRESETS.high_density
   const ovr = OVERLAP_PRESETS[layer.overlap] || OVERLAP_PRESETS['1/2']
+  const { unit } = useUnit()
+
+  // Match the tape thickness to the closest mil preset for highlight
+  const currentMil = layer.tape_thickness_mm / MIL_TO_MM
+  const matchedPreset = TAPE_THICKNESS_PRESETS.find((p) => Math.abs(p.mil - currentMil) < 0.05)
 
   return (
     <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: 12 }}>
@@ -437,26 +583,51 @@ function LayerCard({ index, layer, compute, onChange, onRemove, onUp, onDown, ca
         </div>
 
         {/* Tape thickness */}
-        <NumField
-          label="Tape thickness"
-          value={layer.tape_thickness_mm}
-          onChange={(v) => onChange({ tape_thickness_mm: v })}
-          step={0.005}
-          min={0.005}
-          max={0.5}
-          unit="mm"
-          hint="Nominal — gets multiplied by τ"
-        />
+        <div>
+          <LengthField
+            label="Tape thickness"
+            valueMm={layer.tape_thickness_mm}
+            onChangeMm={(v) => onChange({ tape_thickness_mm: v })}
+            stepMm={0.005}
+            stepInch={0.0005}
+            minMm={0.005}
+            maxMm={0.5}
+            decMm={3}
+            decInch={4}
+            error={ruleViolation}
+            hint={
+              ruleViolation
+                ? `Too thick for d ≤ 0.091" — drop to ≤ ${SMALL_CABLE_MAX_TAPE_MIL} mil`
+                : `Nominal · ${(layer.tape_thickness_mm / MIL_TO_MM).toFixed(2)} mil`
+            }
+          />
+          {/* Mil preset pills */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 5 }}>
+            {TAPE_THICKNESS_PRESETS.map((p) => (
+              <button
+                key={p.mil}
+                onClick={() => onChange({ tape_thickness_mm: p.mm })}
+                className={`dsd-pill ${matchedPreset?.mil === p.mil ? 'dsd-pill-active' : ''}`}
+                style={{ padding: '3px 7px', fontSize: 9 }}
+                title={`${p.mil} mil = ${p.mm.toFixed(4)} mm`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* Tape width */}
-        <NumField
+        <LengthField
           label="Tape width"
-          value={layer.tape_width_mm}
-          onChange={(v) => onChange({ tape_width_mm: v })}
-          step={0.1}
-          min={1}
-          max={50}
-          unit="mm"
+          valueMm={layer.tape_width_mm}
+          onChangeMm={(v) => onChange({ tape_width_mm: v })}
+          stepMm={0.1}
+          stepInch={0.005}
+          minMm={1}
+          maxMm={50}
+          decMm={2}
+          decInch={3}
           hint="For pitch calc"
         />
 
@@ -518,9 +689,9 @@ function LayerCard({ index, layer, compute, onChange, onRemove, onUp, onDown, ca
       {/* Per-layer summary */}
       {compute && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${COLORS.border}`, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
-          <Stat label="OD before" value={`${compute.OD_before_mm.toFixed(3)} mm`} />
-          <Stat label="OD after"  value={`${compute.OD_after_mm.toFixed(3)} mm`} highlight />
-          <Stat label="Δ thickness" value={`${compute.thickness_mm.toFixed(3)} mm`} />
+          <Stat label="OD before" value={fmtLen(compute.OD_before_mm, unit)} />
+          <Stat label="OD after"  value={fmtLen(compute.OD_after_mm, unit)} highlight />
+          <Stat label="Δ thickness" value={fmtLen(compute.thickness_mm, unit)} />
           <Stat label="εᵣ this layer" value={compute.eps_r.toFixed(3)} />
         </div>
       )}
@@ -550,6 +721,40 @@ function NumField({ label, value, onChange, step, min, max, unit, hint }) {
   )
 }
 
+// Unit-aware length input. State stays in mm; UI display follows current
+// UnitContext. Pass `error` to highlight in red.
+function LengthField({ label, valueMm, onChangeMm, stepMm = 0.005, stepInch = 0.0005, minMm, maxMm, decMm = 3, decInch = 4, hint, error }) {
+  const { unit } = useUnit()
+  const display = toDisplay(valueMm, unit, decMm, decInch)
+  const step = unit === 'inch' ? stepInch : stepMm
+  const min = minMm != null ? toDisplay(minMm, unit, decMm, decInch) : undefined
+  const max = maxMm != null ? toDisplay(maxMm, unit, decMm, decInch) : undefined
+  return (
+    <div>
+      <Label>{label}</Label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+        <input
+          type="number"
+          step={step}
+          min={min}
+          max={max}
+          value={display}
+          onChange={(e) => {
+            const mm = fromDisplay(e.target.value, unit)
+            if (mm != null) onChangeMm(mm)
+          }}
+          className={`dsd-input${error ? ' dsd-input-error' : ''}`}
+          style={{ flex: 1 }}
+        />
+        <span style={{ fontSize: 10, color: COLORS.textMuted, fontFamily: 'JetBrains Mono, monospace', minWidth: 24 }}>
+          {unit === 'inch' ? 'in' : 'mm'}
+        </span>
+      </div>
+      {hint && <div style={{ fontSize: 9, color: error ? COLORS.red : COLORS.textMuted, marginTop: 3 }}>{hint}</div>}
+    </div>
+  )
+}
+
 function Stat({ label, value, highlight, color }) {
   return (
     <div>
@@ -565,6 +770,7 @@ function Stat({ label, value, highlight, color }) {
 // Final readout panel
 // ─────────────────────────────────────────────────────────
 function ReadoutPanel({ computed, z0Verdict, z0Off }) {
+  const { unit } = useUnit()
   const { finalOD_mm, eps_eff, VP, Z0, propDelay_ns_per_m, totalDielectricThickness_mm, stack } = computed
   return (
     <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: 12 }}>
@@ -577,8 +783,8 @@ function ReadoutPanel({ computed, z0Verdict, z0Off }) {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 10 }}>
-          <Stat label="Final OD (D)" value={`${finalOD_mm.toFixed(3)} mm`} highlight />
-          <Stat label="Dielectric Δ" value={`${totalDielectricThickness_mm.toFixed(3)} mm`} />
+          <Stat label="Final OD (D)" value={fmtLen(finalOD_mm, unit)} highlight />
+          <Stat label="Dielectric Δ" value={fmtLen(totalDielectricThickness_mm, unit)} />
           <Stat label="εᵣ_eff" value={eps_eff.toFixed(3)} />
           <Stat label="VP" value={`${(VP * 100).toFixed(1)}% c`} highlight />
           <Stat label="Z₀" value={`${Z0.toFixed(2)} Ω`} highlight color={z0Verdict.color} />
@@ -595,11 +801,16 @@ function ReadoutPanel({ computed, z0Verdict, z0Off }) {
 // Cross-section visualization
 // ─────────────────────────────────────────────────────────
 function CrossSection({ conductorOD, stack, finalOD }) {
+  const { unit } = useUnit()
   const VW = 240, VH = 240
   const padding = 10
   const maxR = (Math.min(VW, VH) / 2) - padding
   const totalRealR = (finalOD || conductorOD) / 2
   const scale = totalRealR > 0 ? maxR / totalRealR : 1
+
+  // Choose a sensible ruler tick: 1 mm in mm-mode, 0.05 inch (50 mil) in inch-mode
+  const rulerLength_mm = unit === 'inch' ? 0.05 * 25.4 : 1
+  const rulerLabel = unit === 'inch' ? '50 mil (0.05")' : '1 mm'
 
   return (
     <svg viewBox={`${-VW / 2} ${-VH / 2} ${VW} ${VH}`} style={{ width: '100%', height: 240, display: 'block', marginTop: 8 }}>
@@ -642,10 +853,10 @@ function CrossSection({ conductorOD, stack, finalOD }) {
 
       {/* Scale ruler */}
       <g transform={`translate(${-VW / 2 + 12}, ${VH / 2 - 16})`}>
-        <line x1={0} y1={0} x2={1 * scale} y2={0} stroke="#d97706" strokeWidth="1.5" />
+        <line x1={0} y1={0} x2={rulerLength_mm * scale} y2={0} stroke="#d97706" strokeWidth="1.5" />
         <line x1={0} y1={-3} x2={0} y2={3} stroke="#d97706" strokeWidth="1" />
-        <line x1={1 * scale} y1={-3} x2={1 * scale} y2={3} stroke="#d97706" strokeWidth="1" />
-        <text x={1 * scale + 4} y={3} fontFamily="JetBrains Mono, monospace" fontSize="9" fill="#d97706">1 mm</text>
+        <line x1={rulerLength_mm * scale} y1={-3} x2={rulerLength_mm * scale} y2={3} stroke="#d97706" strokeWidth="1" />
+        <text x={rulerLength_mm * scale + 4} y={3} fontFamily="JetBrains Mono, monospace" fontSize="9" fill="#d97706">{rulerLabel}</text>
       </g>
 
       {/* Center dot */}
@@ -655,6 +866,7 @@ function CrossSection({ conductorOD, stack, finalOD }) {
 }
 
 function Legend({ stack }) {
+  const { unit } = useUnit()
   if (stack.length === 0) return null
   return (
     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -662,7 +874,7 @@ function Legend({ stack }) {
         <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 }}>
           <span style={{ width: 10, height: 10, background: s.color, borderRadius: 2 }} />
           <span style={{ color: COLORS.text }}>L{i + 1}</span>
-          <span style={{ color: COLORS.textMuted, marginLeft: 'auto' }}>{s.OD_after_mm.toFixed(3)} mm</span>
+          <span style={{ color: COLORS.textMuted, marginLeft: 'auto' }}>{fmtLen(s.OD_after_mm, unit)}</span>
         </div>
       ))}
     </div>
@@ -673,6 +885,7 @@ function Legend({ stack }) {
 // WTM pitch calculator
 // ─────────────────────────────────────────────────────────
 function PitchCalculator({ defaultWidth, cableOD }) {
+  const { unit } = useUnit()
   const [width, setWidth] = useState(defaultWidth || 6.35)
   const [overlap, setOverlap] = useState('1/2')
   const [customOverlap, setCustomOverlap] = useState(50)
@@ -713,14 +926,16 @@ function PitchCalculator({ defaultWidth, cableOD }) {
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-        <NumField
+        <LengthField
           label="Tape width (W)"
-          value={width}
-          onChange={setWidth}
-          step={0.1}
-          min={1}
-          max={50}
-          unit="mm"
+          valueMm={width}
+          onChangeMm={setWidth}
+          stepMm={0.1}
+          stepInch={0.005}
+          minMm={1}
+          maxMm={50}
+          decMm={2}
+          decInch={3}
         />
         <div>
           <Label>Target overlap</Label>
@@ -769,7 +984,7 @@ function PitchCalculator({ defaultWidth, cableOD }) {
               {compensate ? 'On' : 'Off'}
             </button>
             <span style={{ fontSize: 10, color: COLORS.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>
-              cable OD {cableOD?.toFixed(2) || '—'} mm
+              cable OD {fmtLen(cableOD || 0, unit)}
             </span>
           </div>
           <div style={{ fontSize: 9, color: COLORS.textMuted, marginTop: 4, lineHeight: 1.4 }}>
@@ -779,22 +994,33 @@ function PitchCalculator({ defaultWidth, cableOD }) {
       </div>
 
       <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${COLORS.border}`, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
-        <Stat label="WTM pitch (P)" value={`${pitch.toFixed(3)} mm/rev`} highlight />
+        <Stat
+          label={`WTM pitch (P) · ${unit === 'inch' ? 'in' : 'mm'}/rev`}
+          value={unit === 'inch' ? `${(pitch / 25.4).toFixed(4)} in/rev` : `${pitch.toFixed(3)} mm/rev`}
+          highlight
+        />
+        <Stat label="WTM pitch · mil/rev" value={`${(pitch / MIL_TO_MM).toFixed(1)} mil/rev`} />
         <Stat label="Turns / cm" value={turnsPerCm.toFixed(2)} />
         <Stat label="Turns / inch" value={turnsPerInch.toFixed(2)} />
         <Stat label="Helix angle (from axis)" value={`${(90 - helixAngleDeg).toFixed(1)}°`} />
         {compensate && Math.abs(pitchCompensated - pitchSimple) > 0.001 && (
           <Stat
             label="Δ vs simple"
-            value={`${pitchCompensated > pitchSimple ? '+' : ''}${(pitchCompensated - pitchSimple).toFixed(3)} mm`}
+            value={unit === 'inch'
+              ? `${pitchCompensated > pitchSimple ? '+' : ''}${((pitchCompensated - pitchSimple) / 25.4).toFixed(4)} in`
+              : `${pitchCompensated > pitchSimple ? '+' : ''}${(pitchCompensated - pitchSimple).toFixed(3)} mm`}
             color={COLORS.teal}
           />
         )}
       </div>
 
       <div style={{ marginTop: 10, fontSize: 11, color: COLORS.textDim, lineHeight: 1.6 }}>
-        Set the WTM lead screw to <strong style={{ color: COLORS.copperBright }}>{pitch.toFixed(3)} mm/rev</strong>{' '}
-        for a {OVERLAP_PRESETS[overlap]?.hint || `${customOverlap}% overlap`} on a {width.toFixed(2)} mm tape.
+        Set the WTM lead screw to{' '}
+        <strong style={{ color: COLORS.copperBright }}>
+          {unit === 'inch' ? `${(pitch / 25.4).toFixed(4)} in/rev (${(pitch / MIL_TO_MM).toFixed(1)} mil/rev)` : `${pitch.toFixed(3)} mm/rev`}
+        </strong>
+        {' '}for a {OVERLAP_PRESETS[overlap]?.hint || `${customOverlap}% overlap`} on a{' '}
+        {unit === 'inch' ? `${(width / 25.4).toFixed(3)}" (${(width / MIL_TO_MM).toFixed(0)} mil)` : `${width.toFixed(2)} mm`} tape.
         Operator-side units: ≈ {turnsPerInch.toFixed(1)} turns per inch of cable advance.
       </div>
     </div>
@@ -806,6 +1032,7 @@ function PitchCalculator({ defaultWidth, cableOD }) {
 // f_n = n · c · VP / (2 · P_axial),  P_axial = W · (1 − overlap)
 // ─────────────────────────────────────────────────────────
 function NotchDetector({ layers, VP, hasStack }) {
+  const { unit } = useUnit()
   const [maxFreqGHz, setMaxFreqGHz] = useState(40)
   const [nHarmonics, setNHarmonics] = useState(3)
 
@@ -918,7 +1145,11 @@ function NotchDetector({ layers, VP, hasStack }) {
                     <span style={{ color: COLORS.text }}>L{lay.index + 1}</span>
                   </div>
                   <div style={{ color: COLORS.textDim }}>
-                    W={lay.tape_width_mm.toFixed(2)} · {lay.overlap} → P={lay.pitch_mm.toFixed(3)} mm/rev
+                    W={unit === 'inch' ? `${(lay.tape_width_mm / 25.4).toFixed(3)}"` : `${lay.tape_width_mm.toFixed(2)} mm`}{' '}
+                    · {lay.overlap} → P=
+                    {unit === 'inch'
+                      ? `${(lay.pitch_mm / 25.4).toFixed(4)} in/rev (${(lay.pitch_mm / MIL_TO_MM).toFixed(1)} mil)`
+                      : `${lay.pitch_mm.toFixed(3)} mm/rev`}
                   </div>
                   <div style={{ color: COLORS.textMuted, textAlign: 'right' }}>×{lay.passes}</div>
                   <div style={{ color: COLORS.copperBright, display: 'flex', gap: 8, flexWrap: 'wrap' }}>

@@ -612,7 +612,7 @@ export const RF_TOOLS = [
   {
     name: 'design_dielectric_stack',
     description:
-      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Returns a complete layer recipe + the predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the Dielectric Stack Designer tab. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀".',
+      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Returns a complete layer recipe + the predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the Dielectric Stack Designer tab. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1122,6 +1122,21 @@ function designDielectricStack(input) {
   const d = conductor_od_mm != null ? conductor_od_mm : conductor_od_inch * 25.4
   if (!(d > 0.05 && d < 30)) throw new Error('Conductor OD looks wrong (expected 0.05–30 mm).')
 
+  // Manufacturing rule: small conductors (≤ 0.091" = 2.311 mm) can't take
+  // tape thicker than 10 mil — it wrinkles and won't conform to the tight
+  // radius. Auto-clamp + record a note.
+  const MIL = 0.0254
+  const SMALL_OD_MM = 0.091 * 25.4   // 2.3114
+  const SMALL_MAX_TAPE_MM = 10 * MIL // 0.254
+  let smallCableClamp = null
+  if (d <= SMALL_OD_MM + 0.001 && tape_thickness_mm > SMALL_MAX_TAPE_MM + 0.0005) {
+    smallCableClamp = {
+      original_mil: tape_thickness_mm / MIL,
+      clamped_mil: SMALL_MAX_TAPE_MM / MIL,
+    }
+    tape_thickness_mm = SMALL_MAX_TAPE_MM
+  }
+
   const eps_HD = _densityToEps(1.6)
   const eps_LD = _densityToEps(0.7)
   const eps_solid = _PTFE_SOLID_EPS
@@ -1291,6 +1306,9 @@ function designDielectricStack(input) {
       })),
     },
     notes: [
+      smallCableClamp
+        ? `⚠ Small-conductor rule: d=${(d/25.4).toFixed(3)}" ≤ 0.091". Auto-clamped tape from ${smallCableClamp.original_mil.toFixed(1)} mil → ${smallCableClamp.clamped_mil.toFixed(1)} mil (thicker tape wrinkles on tight radii).`
+        : null,
       mode === 'mix' && f_HD > 0 && f_HD < 1
         ? `HD inside (${(f_HD*100).toFixed(0)}% of log-radius), LD outside lowers VP-weighted losses while lifting VP.`
         : mode === 'hd' ? 'All HD — εᵣ_target ≥ εᵣ_HD, can\'t go higher with PTFE.'
@@ -1300,7 +1318,7 @@ function designDielectricStack(input) {
         ? `Achieved Z₀ ${Z0_actual.toFixed(1)} Ω is off target by ${(Z0_actual - (target_z0_ohm || 0)).toFixed(1)} Ω due to integer-pass rounding. Tune tension or tape thickness in the UI to dial it in.`
         : null,
       notch1 && notch1 < 40
-        ? `First Bragg notch from ${ovr} wrap with ${tape_width_mm} mm tape predicted at ~${notch1} GHz. Use compute_tape_notches for full harmonic table.`
+        ? `First Bragg notch from ${ovr} wrap with ${tape_width_mm.toFixed(2)} mm (${(tape_width_mm / MIL).toFixed(0)} mil) tape predicted at ~${notch1} GHz. Use compute_tape_notches for full harmonic table.`
         : null,
     ].filter(Boolean),
   }
