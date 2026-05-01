@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect, createContext, useContext } from "react";
 import { Link } from "react-router-dom";
-import { Menu, X as XIcon, ChevronDown } from "lucide-react";
+import { Activity, Flame, Gauge, Menu, Radio, Ruler, ShieldCheck, Weight, X as XIcon, Zap, ChevronDown } from "lucide-react";
 import FloatingAgent from "../components/FloatingAgent.jsx";
 import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
 import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
@@ -455,6 +455,8 @@ const CABLES = {
     z: 50, vp: 91, cap: 70, mass: 400, fMax: 5.9, vMax: 4500,
     d: 9.40, D: 23.5, shield: 25.4, OD: 28.0, flex: "low", outdoor: true, power: "high", complexity: "high",
     render: "/cable-renders/ava5-50-cutaway.png",
+    description: "AVA5-50 is a 7/8 inch low-PIM air-dielectric coaxial feeder for LTE/5G, macro-cell, and high-power broadcast-style RF runs. The annular corrugated copper tube gives continuous shielding and stable impedance, while the low-loss PE spacer keeps velocity factor high without giving up rugged outdoor construction.",
+    benefits: ["Low-PIM construction for shared TX/RX cellular sites", "91% velocity factor from air + low-loss PE spacer", "Annular corrugated copper tube with continuous shield coverage", "Dry-gas pressurization path for moisture control", "High-power 7/8 inch feeder class", "Low-halogen black PE jacket for outdoor infrastructure"],
     atten: [[100, 0.79], [450, 1.73], [900, 2.55], [2000, 3.97], [2400, 4.40], [5000, 6.80]],
     cons: { conductor: "Solid Cu + low-loss PE spacer", dielectric: "Air + low-loss PE spacer", shield: "Annular corrugated Cu tube", jacket: "Low-halogen PE, black" },
     proc: ["Low-PIM assembly process", "Annular Cu tube + centered spacer", "Dry-gas N2 pressurized", "Low-halogen PE jacket", "PIM tested < -160 dBc at 2 x 43 dBm"],
@@ -3685,17 +3687,12 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared
             {onPrint && <button onClick={(e) => { e.stopPropagation(); onPrint(id); }} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>🖨 Print / PDF</button>}
           </div>
           <div style={{ padding: "14px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 }}>
+            {c.render && <CableDatasheetHero id={id} c={c} units={units} shieldLayers={shieldLayers} />}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
               <div style={{ fontSize: 10, letterSpacing: 2, color: "#a8a29e", textTransform: "uppercase" }}>Cross-Section · Click layer to inspect</div>
               <button onClick={replay} style={{ background: "rgba(217,119,6,0.15)", color: "#fbbf24", border: "1px solid #d97706", padding: "3px 10px", fontSize: 9, letterSpacing: 1, cursor: "pointer", borderRadius: 3, textTransform: "uppercase", fontWeight: 600 }}>↻ Replay build</button>
             </div>
             <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap", justifyContent: "center" }}>
-              {c.render && (
-                <div style={S.generatedRender}>
-                  <div style={S.generatedRenderLabel}>Generated cutaway</div>
-                  <img src={c.render} alt={`${c.name} cutaway render`} style={S.generatedRenderImg} />
-                </div>
-              )}
               <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} cons={c.cons} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} onLayerClick={setSelectedLayer} onLayerHover={setHoveredLayer} />
               {selectedLayer && <LayerDetailPanel layer={selectedLayer} c={c} onClose={() => setSelectedLayer(null)} units={units} />}
             </div>
@@ -5790,6 +5787,106 @@ function LayerDetailPanel({ layer, c, onClose, units }) {
   );
 }
 
+function CableDatasheetHero({ id, c, units, shieldLayers }) {
+  const cat = CATEGORIES[c.cat] || { label: c.cat, color: "#d97706" };
+  const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity] || "#fbbf24";
+  const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity] || c.complexity;
+  const attenRows = c.atten.slice(0, 6);
+  const shieldLayer = shieldLayers?.[0];
+  const bendMm = c.OD * 10;
+  const sheetTitle = id === "ava5" ? "Low-PIM feeder profile" : "RF cable profile";
+  const layerCallouts = [
+    { n: 1, title: "Outer jacket", desc: c.cons.jacket, style: { left: "6%", top: "10%" } },
+    { n: 2, title: shieldLayer?.name || "Shield", desc: c.cons.shield, style: { left: "35%", top: "8%" } },
+    { n: 3, title: "Dielectric", desc: c.cons.dielectric, style: { right: "18%", top: "18%" } },
+    { n: 4, title: "Center conductor", desc: c.cons.conductor, style: { left: "8%", bottom: "9%" } },
+  ];
+  const specs = [
+    { icon: Gauge, label: "Impedance", value: `${c.z} Ω`, sub: "nominal coax" },
+    { icon: Activity, label: "Velocity", value: `${c.vp}%`, sub: "air/PE spacer" },
+    { icon: Ruler, label: "Outer diameter", value: fmtLen(c.OD, units, 1), sub: "7/8 in class" },
+    { icon: Radio, label: "Max frequency", value: `${c.fMax} GHz`, sub: "catalog limit" },
+    { icon: Weight, label: "Mass", value: fmtMass(c.mass, units, 0), sub: "installed run load" },
+    { icon: Ruler, label: "Bend guide", value: fmtLen(bendMm, units, 0), sub: "typ. 10x OD" },
+    { icon: ShieldCheck, label: "Shield", value: "100%", sub: shieldLayer?.name || "continuous shield" },
+    { icon: Zap, label: "Voltage", value: `${c.vMax} V`, sub: "RMS rating" },
+    { icon: Flame, label: "Jacket", value: "Low-halogen PE", sub: c.outdoor ? "outdoor feeder" : "indoor run" },
+  ];
+  return (
+    <div style={S.sheetPanel}>
+      <div style={S.sheetHeader}>
+        <MiniCrossSection c={c} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={S.sheetKicker}>{sheetTitle}</div>
+          <div style={S.sheetTitleRow}>
+            <div style={S.sheetTitle}>{c.name}</div>
+            <span style={{ ...S.sheetBadge, color: cat.color, borderColor: cat.color }}>{cat.label}</span>
+            <span style={{ ...S.sheetBadge, color: cxColor, borderColor: cxColor }}>{cxLabel}</span>
+          </div>
+          <div style={S.sheetAlias}>{wrapTerms(c.alias)}</div>
+          <div style={S.sheetApps}>{wrapTerms(c.apps)}</div>
+        </div>
+      </div>
+
+      <div style={S.sheetBody}>
+        <div style={S.sheetCopy}>
+          <div style={S.sheetSectionLabel}>Description</div>
+          <div style={S.sheetDescription}>{wrapTerms(c.description || c.apps)}</div>
+          <div style={S.sheetSectionLabel}>Key benefits</div>
+          <div style={S.sheetBenefits}>
+            {(c.benefits || []).map((benefit) => (
+              <div key={benefit} style={S.sheetBenefit}><span style={S.sheetBullet} />{wrapTerms(benefit)}</div>
+            ))}
+          </div>
+        </div>
+
+        <div style={S.sheetVisual}>
+          <img src={c.render} alt={`${c.name} generated cutaway`} style={S.sheetImage} />
+          {layerCallouts.map((callout) => <CableLayerCallout key={callout.n} {...callout} />)}
+        </div>
+      </div>
+
+      <div style={S.sheetSpecGrid}>
+        {specs.map((spec) => <CableSpecTile key={spec.label} {...spec} />)}
+      </div>
+
+      <div style={S.sheetAtten}>
+        <div style={S.sheetAttenLabel}>Typical attenuation</div>
+        <div style={S.sheetAttenRow}>
+          {attenRows.map(([freq, loss]) => (
+            <div key={freq} style={S.sheetAttenCell}>
+              <div style={S.sheetAttenFreq}>{freq < 1000 ? `${freq} MHz` : `${fmt(freq / 1000, 1)} GHz`}</div>
+              <div style={S.sheetAttenLoss}>{fmt(loss, 2)} dB/100m</div>
+              <div style={S.sheetAttenSub}>{fmt(loss * 0.3048, 2)} dB/100ft</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CableLayerCallout({ n, title, desc, style }) {
+  return (
+    <div style={{ ...S.sheetCallout, ...style }}>
+      <div style={S.sheetCalloutStem} />
+      <div style={S.sheetCalloutTitle}><span style={S.sheetCalloutNum}>{n}</span>{title}</div>
+      <div style={S.sheetCalloutDesc}>{wrapTerms(desc)}</div>
+    </div>
+  );
+}
+
+function CableSpecTile({ icon: Icon, label, value, sub }) {
+  return (
+    <div style={S.sheetSpecTile}>
+      <Icon size={21} strokeWidth={1.6} style={S.sheetSpecIcon} />
+      <div style={S.sheetSpecLabel}>{label}</div>
+      <div style={S.sheetSpecValue}>{value}</div>
+      <div style={S.sheetSpecSub}>{sub}</div>
+    </div>
+  );
+}
+
 const STEP_PATTERNS = [
   [/\b(pim|passive[- ]intermod)\b|low[- ]pim|dbc/i, { title: "Low-PIM (Passive Intermodulation)", body: "PIM = spurious RF signals generated when two strong carriers mix in any non-linear junction (dirty connector, corroded braid, loose foil seam). Critical in cellular base stations where TX and RX bands overlap. Low-PIM construction: annular (not spiral) corrugations, bonded foil, tight shield seams, precision connectors. Spec like -160 dBc @ 2×43 dBm means the PIM product is 160 dB below the carrier — essentially invisible to the receiver." }],
   [/phase[- ]?(stable|match|coherent|track)|low\s*tempco|eye[- ]?opener|miniature\s+phase/i, { title: "Phase-stable construction", body: "Cable engineered so the electrical length (phase delay) stays constant vs temperature, flex, and vibration. Critical for VNA test setups, phased-array antennas, and interferometry where a degree of phase drift ruins the measurement. Achieved via stable PTFE dielectric, low-tempco conductors (Invar-Cu, PTFE tape wrap), and controlled braid geometry." }],
@@ -6430,6 +6527,41 @@ const S = {
   generatedRender: { width: 340, maxWidth: "100%", padding: 10, background: "rgba(15,10,5,0.55)", border: "1px solid rgba(217,119,6,0.22)", borderRadius: 4, boxSizing: "border-box" },
   generatedRenderLabel: { fontSize: 9, letterSpacing: "0.18em", color: "#d97706", textTransform: "uppercase", marginBottom: 8 },
   generatedRenderImg: { width: "100%", aspectRatio: "1 / 1", objectFit: "contain", display: "block", background: "#050302", border: "1px solid #2a1f15", borderRadius: 3 },
+  sheetPanel: { margin: "0 0 22px", padding: 22, background: "linear-gradient(135deg, rgba(10,10,10,0.96), rgba(19,16,13,0.94) 45%, rgba(7,7,7,0.98))", border: "1px solid rgba(168,162,158,0.26)", borderRadius: 4, boxShadow: "0 22px 70px rgba(0,0,0,0.42)", overflow: "hidden" },
+  sheetHeader: { display: "flex", gap: 20, alignItems: "center", paddingBottom: 18, borderBottom: "1px solid rgba(168,162,158,0.35)", marginBottom: 20 },
+  sheetKicker: { fontSize: 9, letterSpacing: "0.24em", color: "#d97706", textTransform: "uppercase", marginBottom: 4 },
+  sheetTitleRow: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" },
+  sheetTitle: { fontFamily: "'Fraunces', serif", fontSize: 38, lineHeight: 1, color: "#fef3c7", fontWeight: 700 },
+  sheetBadge: { padding: "7px 14px", border: "1px solid", borderRadius: 999, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700, background: "rgba(0,0,0,0.35)" },
+  sheetAlias: { marginTop: 8, fontSize: 15, color: "#a8a29e", fontStyle: "italic" },
+  sheetApps: { marginTop: 8, fontSize: 17, color: "#e7e5e4", lineHeight: 1.45 },
+  sheetBody: { display: "grid", gridTemplateColumns: "minmax(250px, 0.78fr) minmax(360px, 1.45fr)", gap: 22, alignItems: "stretch" },
+  sheetCopy: { minWidth: 0, paddingRight: 4 },
+  sheetSectionLabel: { color: "#f59e0b", fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 800, marginBottom: 10, marginTop: 4 },
+  sheetDescription: { color: "#f5f5f4", fontSize: 14.5, lineHeight: 1.68, marginBottom: 22, maxWidth: 440 },
+  sheetBenefits: { display: "grid", gap: 9 },
+  sheetBenefit: { display: "flex", gap: 10, alignItems: "flex-start", color: "#d6d3d1", fontSize: 13.5, lineHeight: 1.45 },
+  sheetBullet: { width: 7, height: 7, borderRadius: 999, background: "#fb923c", marginTop: 6, flexShrink: 0, boxShadow: "0 0 12px rgba(251,146,60,0.55)" },
+  sheetVisual: { position: "relative", minHeight: 430, borderLeft: "1px solid rgba(168,162,158,0.18)", overflow: "hidden" },
+  sheetImage: { position: "absolute", right: "-2%", bottom: "-8%", width: "82%", height: "78%", objectFit: "contain", filter: "drop-shadow(0 26px 34px rgba(0,0,0,0.65))", opacity: 0.98 },
+  sheetCallout: { position: "absolute", maxWidth: 205, paddingLeft: 13, borderLeft: "1px solid rgba(231,229,228,0.7)", color: "#e7e5e4", textShadow: "0 2px 8px rgba(0,0,0,0.9)", zIndex: 2 },
+  sheetCalloutStem: { position: "absolute", left: -4, top: 112, width: 8, height: 8, borderRadius: 999, background: "#f59e0b", boxShadow: "0 0 16px rgba(245,158,11,0.65)" },
+  sheetCalloutTitle: { color: "#f59e0b", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800, lineHeight: 1.3 },
+  sheetCalloutNum: { fontSize: 16, color: "#fbbf24", marginRight: 8 },
+  sheetCalloutDesc: { marginTop: 5, color: "#f5f5f4", fontSize: 12, lineHeight: 1.35 },
+  sheetSpecGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(128px, 1fr))", gap: 0, marginTop: 22, paddingTop: 18, borderTop: "1px solid rgba(168,162,158,0.32)" },
+  sheetSpecTile: { minHeight: 106, padding: "0 14px", borderRight: "1px solid rgba(168,162,158,0.24)", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" },
+  sheetSpecIcon: { color: "#a8a29e", marginBottom: 8 },
+  sheetSpecLabel: { color: "#d6d3d1", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", lineHeight: 1.25 },
+  sheetSpecValue: { color: "#f5f5f4", fontSize: 15, lineHeight: 1.35, marginTop: 7 },
+  sheetSpecSub: { color: "#a8a29e", fontSize: 10.5, lineHeight: 1.3, marginTop: 3 },
+  sheetAtten: { marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(168,162,158,0.32)" },
+  sheetAttenLabel: { color: "#f59e0b", fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 800, marginBottom: 10 },
+  sheetAttenRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(112px, 1fr))", gap: 0, border: "1px solid rgba(168,162,158,0.16)", borderLeft: "none" },
+  sheetAttenCell: { padding: "10px 12px", borderLeft: "1px solid rgba(168,162,158,0.22)", textAlign: "center", background: "rgba(255,255,255,0.015)" },
+  sheetAttenFreq: { color: "#d6d3d1", fontSize: 12.5, marginBottom: 6 },
+  sheetAttenLoss: { color: "#f5f5f4", fontSize: 13.5 },
+  sheetAttenSub: { color: "#a8a29e", fontSize: 10.5, marginTop: 3 },
   detailsGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 },
   dsTitle: { fontSize: 9, letterSpacing: "0.2em", color: "#d97706", textTransform: "uppercase", marginBottom: 8, paddingBottom: 4, borderBottom: "1px solid #2a1f15" },
   dr: { display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px dashed #2a1f15", fontSize: 10, gap: 10 },
