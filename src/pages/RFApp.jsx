@@ -3592,29 +3592,147 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
     return list;
   }, [search, filterZ, filterCat, filterFreq, sortBy]);
 
+  const total = Object.keys(CABLES).length;
+  const categoryCount = Object.values(CABLES).filter(c => filterCat === "all" || c.cat === filterCat).length;
+  const highFreqCount = Object.values(CABLES).filter(c => c.fMax >= 6).length;
+  const lowPimCount = Object.values(CABLES).filter(c => /PIM|cellular|LTE|5G/i.test(`${c.name} ${c.alias} ${c.apps}`)).length;
+  const activeFilterText = [
+    filterZ !== "all" ? `${filterZ} ohm` : null,
+    filterCat !== "all" ? CATEGORIES[filterCat]?.label : null,
+    filterFreq > 0 ? `${filterFreq} GHz+` : null,
+  ].filter(Boolean).join(" / ") || "All families";
+
+  const hasActiveFilter = search || filterZ !== "all" || filterCat !== "all" || filterFreq > 0;
+  const clearFilters = () => { setSearch(""); setFilterZ("all"); setFilterCat("all"); setFilterFreq(0); };
+
   return (
     <div style={S.viewInner}>
-      <div style={S.viewIntro}>
-        <strong style={S.viewIntroStrong}>Library mode.</strong> {Object.keys(CABLES).length} reference cables with construction, manufacturing, and trade-off details.
-      </div>
-
-      <div style={S.filterGrid}>
-        <div style={{ gridColumn: "span 2" }}>
-          <label style={S.filterLabel}>Search</label>
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, alias, application..." style={S.searchInput} />
+      {/* Compact header */}
+      <div style={S.libHeader}>
+        <div style={S.libHeaderMain}>
+          <div style={S.libEyebrow}>◆ RF Reference Database</div>
+          <div style={S.libTitleRow}>
+            <h2 style={S.libTitle}>Cable Library</h2>
+            <div style={S.libCounter}>
+              <span style={S.libCounterValue}>{filtered.length}</span>
+              <span style={S.libCounterDivider}>/</span>
+              <span style={S.libCounterTotal}>{total}</span>
+              <span style={S.libCounterLabel}>shown</span>
+            </div>
+          </div>
+          <p style={S.libSubcopy}>
+            Compare coax families · inspect construction · send a candidate to designer or link-budget.
+          </p>
         </div>
-        <div><label style={S.filterLabel}>Impedance</label><select value={filterZ} onChange={(e) => setFilterZ(e.target.value)} style={S.select}><option value="all">All</option><option value="50">50 Ω</option><option value="75">75 Ω</option></select></div>
-        <div><label style={S.filterLabel}>Min freq: {filterFreq} GHz</label><input type="range" min={0} max={50} step={0.5} value={filterFreq} onChange={(e) => setFilterFreq(Number(e.target.value))} style={{ width: "100%" }} /></div>
-        <div><label style={S.filterLabel}>Sort</label><select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={S.select}><option value="name">Name</option><option value="z">Impedance</option><option value="od">Diameter</option><option value="freq">Max freq</option><option value="loss">Loss @ 900 MHz</option></select></div>
+        <div style={S.libHeaderStats}>
+          <div style={S.libQuickStat}>
+            <span style={S.libQuickStatValue}>{highFreqCount}</span>
+            <span style={S.libQuickStatLabel}>≥ 6 GHz</span>
+          </div>
+          <div style={S.libQuickStat}>
+            <span style={S.libQuickStatValue}>{lowPimCount}</span>
+            <span style={S.libQuickStatLabel}>Low-PIM</span>
+          </div>
+        </div>
       </div>
 
-      <div style={S.catChips}>
-        <button onClick={() => setFilterCat("all")} className="hover-pill" style={{ ...S.catChip, ...(filterCat === "all" ? S.catChipActive : {}) }}>All</button>
-        {Object.entries(CATEGORIES).map(([k, v]) => (
-          <button key={k} onClick={() => setFilterCat(k)} className="hover-pill" style={{ ...S.catChip, ...(filterCat === k ? { ...S.catChipActive, borderColor: v.color, color: v.color } : {}), borderLeftColor: v.color, borderLeftWidth: 3 }}>{v.label}</button>
-        ))}
+      {/* Toolbar: single row with search + filters */}
+      <div style={S.libToolbar}>
+        <div style={S.libToolbarSearchWrap}>
+          <span style={S.libToolbarSearchIcon}>⌕</span>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, alias, application…"
+            style={S.libToolbarSearch}
+          />
+          {search && (
+            <button onClick={() => setSearch("")} style={S.libToolbarClearBtn} title="Clear search">×</button>
+          )}
+        </div>
+        <div style={S.libToolbarFilter}>
+          <span style={S.libToolbarFilterLabel}>Z₀</span>
+          <div style={S.libToolbarPillRow}>
+            {[["all", "All"], ["50", "50 Ω"], ["75", "75 Ω"]].map(([v, l]) => (
+              <button
+                key={v}
+                onClick={() => setFilterZ(v)}
+                style={{ ...S.libToolbarPill, ...(filterZ === v ? S.libToolbarPillActive : {}) }}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={S.libToolbarFilter}>
+          <span style={S.libToolbarFilterLabel}>Sort</span>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            style={S.libToolbarSelect}
+          >
+            <option value="name">Name</option>
+            <option value="z">Impedance</option>
+            <option value="od">Diameter</option>
+            <option value="freq">Max freq</option>
+            <option value="loss">Loss @ 900 MHz</option>
+          </select>
+        </div>
+        <div style={S.libToolbarFilter}>
+          <span style={S.libToolbarFilterLabel}>Min&nbsp;f</span>
+          <div style={S.libToolbarRangeWrap}>
+            <input
+              type="range"
+              min={0}
+              max={50}
+              step={0.5}
+              value={filterFreq}
+              onChange={(e) => setFilterFreq(Number(e.target.value))}
+              style={S.libToolbarRange}
+            />
+            <span style={S.libToolbarRangeValue}>{filterFreq}&nbsp;GHz</span>
+          </div>
+        </div>
+        {hasActiveFilter && (
+          <button onClick={clearFilters} style={S.libToolbarReset} title="Clear all filters">
+            Reset
+          </button>
+        )}
       </div>
 
+      {/* Category strip */}
+      <div style={S.libCatStrip}>
+        <span style={S.libCatStripLabel}>Family</span>
+        <div style={S.libCatStripPills}>
+          <button
+            onClick={() => setFilterCat("all")}
+            className="hover-pill"
+            style={{ ...S.libCatPill, ...(filterCat === "all" ? S.libCatPillActive : {}) }}
+          >
+            All
+          </button>
+          {Object.entries(CATEGORIES).map(([k, v]) => {
+            const active = filterCat === k;
+            return (
+              <button
+                key={k}
+                onClick={() => setFilterCat(k)}
+                className="hover-pill"
+                style={{
+                  ...S.libCatPill,
+                  borderLeft: `3px solid ${v.color}`,
+                  ...(active ? { ...S.libCatPillActive, borderColor: v.color, color: v.color, borderLeftColor: v.color } : {}),
+                }}
+              >
+                {v.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Cable list */}
       <div style={S.cableList}>
         {filtered.map(([id, c]) => (
           <CableCard key={id} id={id} cable={c} expanded={expanded === id}
@@ -3623,8 +3741,22 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
             compared={comparedCables?.includes(id)} toggleCompare={toggleCompare}
             onPrint={onPrint} />
         ))}
-        {filtered.length === 0 && <div style={S.emptyState}>No cables match filters. Try relaxing criteria.</div>}
+        {filtered.length === 0 && (
+          <div style={S.emptyState}>
+            No cables match filters.{' '}
+            {hasActiveFilter && <button onClick={clearFilters} style={S.emptyStateBtn}>Clear filters</button>}
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+function LibraryStat({ value, label }) {
+  return (
+    <div style={S.libraryStat}>
+      <div style={S.libraryStatValue}>{value}</div>
+      <div style={S.libraryStatLabel}>{label}</div>
     </div>
   );
 }
@@ -3653,29 +3785,42 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared
 
   const replay = (e) => { e.stopPropagation(); setBuildStep(0); setSelectedLayer(null); };
   const shieldLayers = getShieldLayers(c.cons);
+  const hasVisualProfile = Boolean(c.render);
+  const loss900 = c.atten.find(([f]) => f >= 900)?.[1];
+  const lossLabel = Number.isFinite(loss900) ? `${fmt(loss900, 2)} dB/100m` : "n/a";
 
   return (
     <div className="hover-card" style={{ ...S.cableCard, ...(expanded ? S.cableCardExpanded : {}) }}>
       <div onClick={onToggle} style={S.cableHead}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, flex: 1, minWidth: 0 }}>
+        <div style={S.cableIdentity}>
           <MiniCrossSection c={c} />
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
+            <div style={S.cableNameRow}>
               <span style={S.cableName}>{c.name}</span>
               <span style={{ ...S.catBadge, color: cat.color, borderColor: cat.color }}>{cat.label}</span>
               <span style={{ ...S.cxBadge, background: `${cxColor}22`, color: cxColor, borderColor: cxColor }}>{cxLabel}</span>
             </div>
-            {c.alias && <div style={S.cableAlias}>{wrapTerms(c.alias)}</div>}
-            <div style={S.cableApps}>{wrapTerms(c.apps)}</div>
+            {(c.alias || c.apps) && (
+              <div style={S.cableMeta}>
+                {c.alias && <span style={S.cableAliasInline}>{wrapTerms(c.alias)}</span>}
+                {c.alias && c.apps && <span style={S.cableMetaSep}>·</span>}
+                {c.apps && <span style={S.cableAppsInline}>{wrapTerms(c.apps)}</span>}
+              </div>
+            )}
+            <div style={S.cableInlineStats}>
+              <span style={S.cableInlineStat}><span style={S.cableInlineStatLbl}>Z</span> {c.z}&nbsp;Ω</span>
+              <span style={S.cableInlineStatSep}>·</span>
+              <span style={S.cableInlineStat}><span style={S.cableInlineStatLbl}>OD</span> {fmtLenCompact(c.OD, units, 2)}</span>
+              <span style={S.cableInlineStatSep}>·</span>
+              <span style={S.cableInlineStat}><span style={S.cableInlineStatLbl}>VP</span> {c.vp}%</span>
+              <span style={S.cableInlineStatSep}>·</span>
+              <span style={S.cableInlineStat}><span style={S.cableInlineStatLbl}>fmax</span> {c.fMax}&nbsp;GHz</span>
+              <span style={S.cableInlineStatSep}>·</span>
+              <span style={S.cableInlineStat}><span style={S.cableInlineStatLbl}>@900M</span> {lossLabel}</span>
+            </div>
           </div>
         </div>
-        <div style={S.quickStats}>
-          <QS label="Z" v={`${c.z}Ω`} />
-          <QS label="OD" v={fmtLenCompact(c.OD, units, 2)} />
-          <QS label="VP" v={`${c.vp}%`} />
-          <QS label="f" v={`${c.fMax}G`} />
-          <span style={S.expandIcon}>{expanded ? "−" : "+"}</span>
-        </div>
+        <span style={S.expandIcon}>{expanded ? "−" : "+"}</span>
       </div>
 
       {expanded && (
@@ -3686,98 +3831,148 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared
             {toggleCompare && <button onClick={(e) => { e.stopPropagation(); toggleCompare(id); }} style={{ ...S.actionBtn, ...(compared ? { background: "rgba(52,211,153,0.15)", color: "#34d399", borderColor: "#10b981" } : S.actionBtnSecondary) }}>{compared ? "✓ In compare" : "+ Add to compare"}</button>}
             {onPrint && <button onClick={(e) => { e.stopPropagation(); onPrint(id); }} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>🖨 Print / PDF</button>}
           </div>
-          <div style={{ padding: "14px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 }}>
-            {c.render && <CableDatasheetHero id={id} c={c} units={units} shieldLayers={shieldLayers} />}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
-              <div style={{ fontSize: 10, letterSpacing: 2, color: "#a8a29e", textTransform: "uppercase" }}>Cross-Section · Click layer to inspect</div>
-              <button onClick={replay} style={{ background: "rgba(217,119,6,0.15)", color: "#fbbf24", border: "1px solid #d97706", padding: "3px 10px", fontSize: 9, letterSpacing: 1, cursor: "pointer", borderRadius: 3, textTransform: "uppercase", fontWeight: 600 }}>↻ Replay build</button>
-            </div>
-            <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap", justifyContent: "center" }}>
-              <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} cons={c.cons} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} onLayerClick={setSelectedLayer} onLayerHover={setHoveredLayer} />
-              {selectedLayer && <LayerDetailPanel layer={selectedLayer} c={c} onClose={() => setSelectedLayer(null)} units={units} />}
-            </div>
-          </div>
-          <div style={{ padding: "4px 0 16px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 }}>
-            <div style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#a8a29e", marginBottom: 10, textTransform: "uppercase" }}>Signal Flow · Live link-budget simulator</div>
-            <SignalFlow cable={c} />
-          </div>
-          <div style={S.detailsGrid}>
-            <div>
-              <DS title="Electrical">
-                <DR label="Impedance" v={`${c.z} Ω`} />
-                <DR label="VP" v={`${c.vp}%`} />
-                <DR label="Capacitance" v={fmtCap(c.cap, units, 1)} />
-                <DR label="Max freq" v={`${c.fMax} GHz`} />
-                <DR label="Max voltage" v={`${c.vMax} V RMS`} />
-              </DS>
-              <DS title="Mechanical">
-                <DR label="Inner d" v={fmtLen(c.d, units)} />
-                <DR label="Dielectric D" v={fmtLen(c.D, units)} />
-                <DR label="Shield OD" v={fmtLen(c.shield, units)} />
-                <DR label="Jacket OD" v={fmtLen(c.OD, units)} />
-                <DR label="Mass" v={fmtMass(c.mass, units, 1)} />
-              </DS>
-              <DS title="Attenuation">
-                <table style={S.attenTable}>
-                  <thead>
-                    <tr>
-                      <th style={S.attenTh}>Freq</th>
-                      {units !== "imperial" && <th style={S.attenTh}>dB/100m</th>}
-                      {units !== "metric" && <th style={S.attenTh}>dB/100ft</th>}
-                      {units !== "metric" && <th style={S.attenTh}>dB/25ft</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {c.atten.map(([f, a], i) => (
-                      <tr key={i}>
-                        <td style={S.attenTd}>{f < 1000 ? `${f} MHz` : `${(f / 1000).toFixed(1)} GHz`}</td>
-                        {units !== "imperial" && <td style={{ ...S.attenTd, color: "#fbbf24" }}>{a.toFixed(2)}</td>}
-                        {units !== "metric" && <td style={{ ...S.attenTd, color: "#fbbf24" }}>{(a * 0.3048).toFixed(2)}</td>}
-                        {units !== "metric" && <td style={{ ...S.attenTd, color: "#fbbf24" }}>{(a * 0.0762).toFixed(3)}</td>}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div style={{ fontSize: 9, color: "#78716c", marginTop: 6, lineHeight: 1.5 }}>25 ft ≈ 7.62 m — typical RG jumper / patch length. For arbitrary lengths: loss = (dB/100m) × (length in m / 100).</div>
-              </DS>
-            </div>
-            <div>
-              <DS title="Materials & Layers">
-                <Layer n="1" name="Inner Conductor" color="#fbbf24" desc={c.cons.conductor} />
-                <Layer n="2" name="Dielectric" color="#fde68a" desc={c.cons.dielectric} />
-                {shieldLayers.map((layer, i) => (
-                  <Layer key={layer.key} n={`3.${i + 1}`} name={layer.name} color={layer.color} desc={layer.desc} />
-                ))}
-                <Layer n="4" name="Jacket" color="#57534e" desc={c.cons.jacket} />
-              </DS>
-              <DS title="Manufacturing Process">
-                {c.proc.map((s, i) => {
-                  const info = explainStep(s);
-                  const hasInfo = !!info;
-                  const isOpen = expandedStep === i;
-                  return (
-                    <React.Fragment key={i}>
-                      <div style={{ ...S.procStep, cursor: hasInfo ? "pointer" : "default", ...(isOpen ? { background: "rgba(217,119,6,0.05)" } : {}) }} onClick={() => hasInfo && setExpandedStep(isOpen ? null : i)}>
-                        <div style={S.procNum}>{i + 1}</div>
-                        <StepIcon text={s} />
-                        <div style={{ ...S.procText, flex: 1 }}>{wrapTerms(s)}</div>
-                        {hasInfo && <span style={{ color: "#d97706", fontSize: 11, fontFamily: "monospace", transition: "transform 0.2s", transform: isOpen ? "rotate(90deg)" : "none", userSelect: "none" }}>▸</span>}
-                      </div>
-                      {isOpen && info && (
-                        <div style={{ background: "rgba(217,119,6,0.06)", padding: "10px 14px 12px", margin: "0 0 6px 26px", borderLeft: "2px solid #d97706", fontSize: 10, lineHeight: 1.6, color: "#d6cfc4" }}>
-                          <div style={{ fontWeight: 700, color: "#fbbf24", marginBottom: 5, letterSpacing: 0.3, fontSize: 10.5 }}>{info.title}</div>
-                          {info.body}
-                        </div>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </DS>
-              <DS title="Suppliers"><DR label="Typical makers" v={wrapTerms(c.makers)} /></DS>
-            </div>
-          </div>
+          {hasVisualProfile ? (
+            <>
+              <CableDatasheetPoster id={id} c={c} units={units} shieldLayers={shieldLayers} />
+              <LibraryDisclosure eyebrow="Construction" title="Layer inspector">
+                <CableConstructionInspector c={c} units={units} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} setSelectedLayer={setSelectedLayer} setHoveredLayer={setHoveredLayer} replay={replay} />
+              </LibraryDisclosure>
+              <LibraryDisclosure eyebrow="Simulator" title="Signal flow and loss">
+                <CableSignalSection cable={c} />
+              </LibraryDisclosure>
+              <LibraryDisclosure eyebrow="Engineering" title="Full cable data">
+                <CableEngineeringDetails c={c} units={units} shieldLayers={shieldLayers} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
+              </LibraryDisclosure>
+            </>
+          ) : (
+            <>
+              <CableConstructionInspector c={c} units={units} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} setSelectedLayer={setSelectedLayer} setHoveredLayer={setHoveredLayer} replay={replay} framed />
+              <CableSignalSection cable={c} framed />
+              <CableEngineeringDetails c={c} units={units} shieldLayers={shieldLayers} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
+            </>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+function LibraryDisclosure({ eyebrow, title, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section style={S.libraryDisclosure}>
+      <button type="button" onClick={() => setOpen(v => !v)} style={S.libraryDisclosureHead}>
+        <span>
+          <span style={S.libraryDisclosureEyebrow}>{eyebrow}</span>
+          <span style={S.libraryDisclosureTitle}>{title}</span>
+        </span>
+        <ChevronDown size={15} style={{ color: "#d97706", transition: "transform 0.18s", transform: open ? "rotate(180deg)" : "none" }} />
+      </button>
+      {open && <div style={S.libraryDisclosureBody}>{children}</div>}
+    </section>
+  );
+}
+
+function CableConstructionInspector({ c, units, shieldLayers, buildStep, selectedLayer, hoveredLayer, setSelectedLayer, setHoveredLayer, replay, framed = false }) {
+  return (
+    <div style={framed ? S.sectionFrame : undefined}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
+        <div style={{ fontSize: 10, letterSpacing: 2, color: "#a8a29e", textTransform: "uppercase" }}>Cross-section · layer inspector</div>
+        <button onClick={replay} style={{ background: "rgba(217,119,6,0.15)", color: "#fbbf24", border: "1px solid #d97706", padding: "3px 10px", fontSize: 9, letterSpacing: 1, cursor: "pointer", borderRadius: 3, textTransform: "uppercase", fontWeight: 600 }}>↻ Replay build</button>
+      </div>
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap", justifyContent: "center" }}>
+        <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} cons={c.cons} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} onLayerClick={setSelectedLayer} onLayerHover={setHoveredLayer} />
+        {selectedLayer && <LayerDetailPanel layer={selectedLayer} c={c} onClose={() => setSelectedLayer(null)} units={units} />}
+      </div>
+    </div>
+  );
+}
+
+function CableSignalSection({ cable, framed = false }) {
+  return (
+    <div style={framed ? S.sectionFrame : undefined}>
+      <div style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#a8a29e", marginBottom: 10, textTransform: "uppercase" }}>Signal flow · live link-budget simulator</div>
+      <SignalFlow cable={cable} />
+    </div>
+  );
+}
+
+function CableEngineeringDetails({ c, units, shieldLayers, expandedStep, setExpandedStep }) {
+  return (
+    <div style={S.detailsGrid}>
+      <div>
+        <DS title="Electrical">
+          <DR label="Impedance" v={`${c.z} Ω`} />
+          <DR label="VP" v={`${c.vp}%`} />
+          <DR label="Capacitance" v={fmtCap(c.cap, units, 1)} />
+          <DR label="Max freq" v={`${c.fMax} GHz`} />
+          <DR label="Max voltage" v={`${c.vMax} V RMS`} />
+        </DS>
+        <DS title="Mechanical">
+          <DR label="Inner d" v={fmtLen(c.d, units)} />
+          <DR label="Dielectric D" v={fmtLen(c.D, units)} />
+          <DR label="Shield OD" v={fmtLen(c.shield, units)} />
+          <DR label="Jacket OD" v={fmtLen(c.OD, units)} />
+          <DR label="Mass" v={fmtMass(c.mass, units, 1)} />
+        </DS>
+        <DS title="Attenuation">
+          <table style={S.attenTable}>
+            <thead>
+              <tr>
+                <th style={S.attenTh}>Freq</th>
+                {units !== "imperial" && <th style={S.attenTh}>dB/100m</th>}
+                {units !== "metric" && <th style={S.attenTh}>dB/100ft</th>}
+                {units !== "metric" && <th style={S.attenTh}>dB/25ft</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {c.atten.map(([f, a], i) => (
+                <tr key={i}>
+                  <td style={S.attenTd}>{f < 1000 ? `${f} MHz` : `${(f / 1000).toFixed(1)} GHz`}</td>
+                  {units !== "imperial" && <td style={{ ...S.attenTd, color: "#fbbf24" }}>{a.toFixed(2)}</td>}
+                  {units !== "metric" && <td style={{ ...S.attenTd, color: "#fbbf24" }}>{(a * 0.3048).toFixed(2)}</td>}
+                  {units !== "metric" && <td style={{ ...S.attenTd, color: "#fbbf24" }}>{(a * 0.0762).toFixed(3)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 9, color: "#78716c", marginTop: 6, lineHeight: 1.5 }}>25 ft ≈ 7.62 m — typical RG jumper / patch length. For arbitrary lengths: loss = (dB/100m) × (length in m / 100).</div>
+        </DS>
+      </div>
+      <div>
+        <DS title="Materials & Layers">
+          <Layer n="1" name="Inner Conductor" color="#fbbf24" desc={c.cons.conductor} />
+          <Layer n="2" name="Dielectric" color="#fde68a" desc={c.cons.dielectric} />
+          {shieldLayers.map((layer, i) => (
+            <Layer key={layer.key} n={`3.${i + 1}`} name={layer.name} color={layer.color} desc={layer.desc} />
+          ))}
+          <Layer n="4" name="Jacket" color="#57534e" desc={c.cons.jacket} />
+        </DS>
+        <DS title="Manufacturing Process">
+          {c.proc.map((s, i) => {
+            const info = explainStep(s);
+            const hasInfo = !!info;
+            const isOpen = expandedStep === i;
+            return (
+              <React.Fragment key={i}>
+                <div style={{ ...S.procStep, cursor: hasInfo ? "pointer" : "default", ...(isOpen ? { background: "rgba(217,119,6,0.05)" } : {}) }} onClick={() => hasInfo && setExpandedStep(isOpen ? null : i)}>
+                  <div style={S.procNum}>{i + 1}</div>
+                  <StepIcon text={s} />
+                  <div style={{ ...S.procText, flex: 1 }}>{wrapTerms(s)}</div>
+                  {hasInfo && <span style={{ color: "#d97706", fontSize: 11, fontFamily: "monospace", transition: "transform 0.2s", transform: isOpen ? "rotate(90deg)" : "none", userSelect: "none" }}>▸</span>}
+                </div>
+                {isOpen && info && (
+                  <div style={{ background: "rgba(217,119,6,0.06)", padding: "10px 14px 12px", margin: "0 0 6px 26px", borderLeft: "2px solid #d97706", fontSize: 10, lineHeight: 1.6, color: "#d6cfc4" }}>
+                    <div style={{ fontWeight: 700, color: "#fbbf24", marginBottom: 5, letterSpacing: 0.3, fontSize: 10.5 }}>{info.title}</div>
+                    {info.body}
+                  </div>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </DS>
+        <DS title="Suppliers"><DR label="Typical makers" v={wrapTerms(c.makers)} /></DS>
+      </div>
     </div>
   );
 }
@@ -5787,6 +5982,149 @@ function LayerDetailPanel({ layer, c, onClose, units }) {
   );
 }
 
+function SvgLines({ lines, x, y, size = 18, fill = "#f5f5f4", weight = 500, line = 1.45, anchor = "start", italic = false, family = "JetBrains Mono, monospace", opacity = 1 }) {
+  return (
+    <text x={x} y={y} fill={fill} fontSize={size} fontWeight={weight} fontFamily={family} textAnchor={anchor} fontStyle={italic ? "italic" : "normal"} opacity={opacity}>
+      {lines.map((text, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : size * line}>{text}</tspan>)}
+    </text>
+  );
+}
+
+function PosterCallout({ n, title, desc, x, y, tx, ty, side = "left" }) {
+  const elbowY = y + 46;
+  const elbowX = side === "right" ? x - 28 : x + 28;
+  const path = `M ${elbowX} ${elbowY} L ${elbowX} ${ty} L ${tx} ${ty}`;
+  return (
+    <g>
+      <path d={path} stroke="#d6d3d1" strokeWidth="1.2" fill="none" opacity="0.78" />
+      <circle cx={tx} cy={ty} r="5" fill="#f59e0b" filter="url(#posterGlow)" />
+      <text x={x} y={y} fill="#f59e0b" fontFamily="JetBrains Mono, monospace" fontSize="18" fontWeight="800" letterSpacing="0.8" textAnchor={side === "right" ? "end" : "start"}>
+        <tspan fontSize="24">{n}</tspan>  {title.toUpperCase()}
+      </text>
+      <SvgLines lines={desc} x={x} y={y + 30} size={17} fill="#f5f5f4" anchor={side === "right" ? "end" : "start"} line={1.28} />
+    </g>
+  );
+}
+
+function PosterSpec({ label, value, sub, x, y, w }) {
+  const valueLines = Array.isArray(value) ? value : [value];
+  const subLines = Array.isArray(sub) ? sub : [sub];
+  const center = x + w / 2;
+  const valueSize = valueLines.length > 1 ? 17 : 19;
+  return (
+    <g>
+      <line x1={x} y1={y - 44} x2={x} y2={y + 110} stroke="#78716c" strokeWidth="1" opacity="0.7" />
+      <circle cx={center} cy={y - 17} r="18" fill="none" stroke="#a8a29e" strokeWidth="1.4" />
+      <text x={center} y={y + 20} textAnchor="middle" fill="#d6d3d1" fontFamily="JetBrains Mono, monospace" fontSize="13" letterSpacing="0.7">{label}</text>
+      <text x={center} y={y + 53} textAnchor="middle" fill="#f5f5f4" fontFamily="JetBrains Mono, monospace" fontSize={valueSize} fontWeight="700">
+        {valueLines.map((text, i) => <tspan key={text} x={center} dy={i === 0 ? 0 : 22}>{text}</tspan>)}
+      </text>
+      <text x={center} y={y + 86 + (valueLines.length - 1) * 20} textAnchor="middle" fill="#a8a29e" fontFamily="JetBrains Mono, monospace" fontSize="12">
+        {subLines.map((text, i) => <tspan key={text} x={center} dy={i === 0 ? 0 : 16}>{text}</tspan>)}
+      </text>
+    </g>
+  );
+}
+
+function CableDatasheetPoster({ id, c, units, shieldLayers }) {
+  const cat = CATEGORIES[c.cat] || { label: c.cat, color: "#d97706" };
+  const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity] || "#fbbf24";
+  const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity] || c.complexity;
+  const shieldLayer = shieldLayers?.[0];
+  const bendMm = c.OD * 10;
+  const attenRows = c.atten.slice(0, 6);
+  const odPrimary = units === "imperial" ? `${fmt(c.OD / MM_PER_IN, 2)} in` : `${fmt(c.OD, 1)} mm`;
+  const odSub = units === "metric" ? "7/8 in feeder class" : `${fmt(c.OD / MM_PER_IN, 2)} in / 7/8 class`;
+  const massPrimary = units === "imperial" ? `${fmt(c.mass * 0.672, 0)} lb/1000ft` : `${fmt(c.mass, 0)} g/m`;
+  const massSub = units === "metric" ? "installed run load" : `${fmt(c.mass * 0.672, 0)} lb/1000ft installed`;
+  const metrics = [
+    { icon: Gauge, label: "Impedance", value: `${c.z} Ω`, sub: "nominal coax" },
+    { icon: Activity, label: "Velocity", value: `${c.vp}%`, sub: "air + low-loss spacer" },
+    { icon: Ruler, label: "Outer diameter", value: odPrimary, sub: odSub },
+    { icon: Radio, label: "Max frequency", value: `${c.fMax} GHz`, sub: "catalog limit" },
+    { icon: Weight, label: "Mass", value: massPrimary, sub: massSub },
+    { icon: ShieldCheck, label: "Shield", value: "100%", sub: shieldLayer?.name || "continuous shield" },
+  ];
+  const layers = [
+    { n: "01", name: "Outer jacket", desc: c.cons.jacket, color: "#57534e" },
+    { n: "02", name: shieldLayer?.name || "Shield", desc: c.cons.shield, color: shieldLayer?.color || "#f97316" },
+    { n: "03", name: "Dielectric", desc: c.cons.dielectric, color: "#fde68a" },
+    { n: "04", name: "Center conductor", desc: c.cons.conductor, color: "#fbbf24" },
+  ];
+  return (
+    <div style={S.profilePanel}>
+      <div style={S.profileHero}>
+        <div style={S.profileCopy}>
+          <div style={S.profileKicker}>RF library profile</div>
+          <div style={S.profileTitleRow}>
+            <h2 style={S.profileTitle}>{c.name}</h2>
+            <span style={{ ...S.profileBadge, color: cat.color, borderColor: cat.color }}>{cat.label}</span>
+            <span style={{ ...S.profileBadge, color: cxColor, borderColor: cxColor }}>{cxLabel}</span>
+          </div>
+          <div style={S.profileAlias}>{wrapTerms(c.alias)}</div>
+          <p style={S.profileDescription}>{wrapTerms(c.description || c.apps)}</p>
+          <div style={S.profileMetricGrid}>
+            {metrics.map(metric => <ProfileMetric key={metric.label} {...metric} />)}
+          </div>
+        </div>
+        <div style={S.profileVisual}>
+          <img src={c.render} alt={`${c.name} cutaway render`} style={S.profileImage} />
+          <div style={S.profileVisualMeta}>
+            <span>Layer render</span>
+            <span>{fmtLen(bendMm, units, 0)} bend guide</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={S.profileSplit}>
+        <div>
+          <div style={S.profileSectionTitle}>Layer stack</div>
+          <div style={S.profileLayerGrid}>
+            {layers.map(layer => <ProfileLayer key={layer.n} {...layer} />)}
+          </div>
+        </div>
+        <div>
+          <div style={S.profileSectionTitle}>Typical attenuation</div>
+          <div style={S.profileAttenGrid}>
+            {attenRows.map(([freq, loss]) => (
+              <div key={freq} style={S.profileAttenCell}>
+                <div style={S.profileAttenFreq}>{freq < 1000 ? `${freq} MHz` : `${fmt(freq / 1000, 1)} GHz`}</div>
+                <div style={S.profileAttenLoss}>{fmt(loss, 2)} dB/100m</div>
+                <div style={S.profileAttenSub}>{fmt(loss * 0.3048, 2)} dB/100ft</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileMetric({ icon: Icon, label, value, sub }) {
+  return (
+    <div style={S.profileMetric}>
+      <Icon size={15} style={{ color: "#a8a29e" }} />
+      <div>
+        <div style={S.profileMetricLabel}>{label}</div>
+        <div style={S.profileMetricValue}>{value}</div>
+        <div style={S.profileMetricSub}>{sub}</div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileLayer({ n, name, desc, color }) {
+  return (
+    <div style={S.profileLayer}>
+      <div style={{ ...S.profileLayerNum, borderColor: color, color }}>{n}</div>
+      <div>
+        <div style={S.profileLayerName}>{name}</div>
+        <div style={S.profileLayerDesc}>{wrapTerms(desc)}</div>
+      </div>
+    </div>
+  );
+}
+
 function CableDatasheetHero({ id, c, units, shieldLayers }) {
   const cat = CATEGORIES[c.cat] || { label: c.cat, color: "#d97706" };
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity] || "#fbbf24";
@@ -5796,10 +6134,10 @@ function CableDatasheetHero({ id, c, units, shieldLayers }) {
   const bendMm = c.OD * 10;
   const sheetTitle = id === "ava5" ? "Low-PIM feeder profile" : "RF cable profile";
   const layerCallouts = [
-    { n: 1, title: "Outer jacket", desc: c.cons.jacket, style: { left: "6%", top: "10%" } },
-    { n: 2, title: shieldLayer?.name || "Shield", desc: c.cons.shield, style: { left: "35%", top: "8%" } },
-    { n: 3, title: "Dielectric", desc: c.cons.dielectric, style: { right: "18%", top: "18%" } },
-    { n: 4, title: "Center conductor", desc: c.cons.conductor, style: { left: "8%", bottom: "9%" } },
+    { n: 1, title: "Outer jacket", desc: c.cons.jacket, style: { right: "5%", top: "7%" }, leader: { from: [78, 25], to: [81, 45] } },
+    { n: 2, title: shieldLayer?.name || "Shield", desc: c.cons.shield, style: { left: "35%", top: "6%" }, leader: { from: [48, 25], to: [49, 58] } },
+    { n: 3, title: "Dielectric", desc: c.cons.dielectric, style: { left: "4%", top: "23%" }, leader: { from: [18, 39], to: [37, 67] } },
+    { n: 4, title: "Center conductor", desc: c.cons.conductor, style: { left: "5%", bottom: "12%" }, leader: { from: [20, 73], to: [31, 67] } },
   ];
   const specs = [
     { icon: Gauge, label: "Impedance", value: `${c.z} Ω`, sub: "nominal coax" },
@@ -5866,13 +6204,20 @@ function CableDatasheetHero({ id, c, units, shieldLayers }) {
   );
 }
 
-function CableLayerCallout({ n, title, desc, style }) {
+function CableLayerCallout({ n, title, desc, style, leader }) {
   return (
-    <div style={{ ...S.sheetCallout, ...style }}>
-      <div style={S.sheetCalloutStem} />
-      <div style={S.sheetCalloutTitle}><span style={S.sheetCalloutNum}>{n}</span>{title}</div>
-      <div style={S.sheetCalloutDesc}>{wrapTerms(desc)}</div>
-    </div>
+    <>
+      {leader && (
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={S.sheetCalloutLeader} aria-hidden="true">
+          <path d={`M ${leader.from[0]} ${leader.from[1]} L ${leader.to[0]} ${leader.to[1]}`} stroke="#f59e0b" strokeWidth="0.18" fill="none" opacity="0.72" />
+          <circle cx={leader.to[0]} cy={leader.to[1]} r="0.55" fill="#f59e0b" />
+        </svg>
+      )}
+      <div style={{ ...S.sheetCallout, ...style }}>
+        <div style={S.sheetCalloutTitle}><span style={S.sheetCalloutNum}>{n}</span>{title}</div>
+        <div style={S.sheetCalloutDesc}>{wrapTerms(desc)}</div>
+      </div>
+    </>
   );
 }
 
@@ -6418,7 +6763,7 @@ const Field = ({ label, children }) => (<div><div style={S.fieldLabel}>{label}</
 const NumInput = (p) => (<input type="number" className="num-input" value={p.value} step={p.step ?? 0.01} min={p.min} max={p.max} onChange={(e) => p.onChange(Number(e.target.value))} style={S.input} />);
 const R = ({ label, value, big }) => (<div style={{ ...S.result, ...(big ? S.resultBig : {}) }}><div style={S.resultLabel}>{label}</div><div style={{ ...S.resultValue, ...(big ? { color: "#fbbf24", fontSize: 13 } : {}) }}>{value}</div></div>);
 const Headline = ({ label, value, match }) => (<div style={S.headline}><div style={S.headlineLabel}>{label}</div><div style={{ ...S.headlineValue, ...(match ? { color: "#34d399" } : {}) }}>{value}</div></div>);
-const QS = ({ label, v }) => (<div style={{ textAlign: "right", minWidth: 40 }}><div style={{ fontSize: 8, color: "#78716c", textTransform: "uppercase", letterSpacing: "0.1em" }}>{label}</div><div style={{ fontSize: 11, color: "#fbbf24" }}>{v}</div></div>);
+const QS = ({ label, v, wide }) => (<div style={{ ...S.qs, ...(wide ? S.qsWide : {}) }}><div style={S.qsLabel}>{label}</div><div style={S.qsValue}>{v}</div></div>);
 const DS = ({ title, children }) => (<div style={{ marginBottom: 18 }}><div style={S.dsTitle}>{title}</div>{children}</div>);
 const DR = ({ label, v }) => (<div style={S.dr}><span style={{ color: "#a89d8e" }}>{label}</span><span style={{ color: "#fbbf24", textAlign: "right" }}>{v}</span></div>);
 const Layer = ({ n, name, color, desc }) => (<div style={S.layer}><div style={{ ...S.layerDot, background: color }}>{n}</div><div style={{ flex: 1 }}><div style={S.layerName}>{name}</div><div style={S.layerDesc}>{wrapTerms(desc)}</div></div></div>);
@@ -6501,29 +6846,352 @@ const S = {
   resultLabel: { fontSize: 10, color: "#d6cfc4", flexShrink: 0 },
   resultValue: { fontSize: 11, color: "#fbbf24", fontWeight: 500, textAlign: "right" },
 
-  filterGrid: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 14, padding: 14, background: "rgba(10,7,5,0.4)", border: "1px solid #2a1f15", borderRadius: 3 },
+  // ── Compact library header (replacement for libraryHero) ──
+  libHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 24,
+    flexWrap: "wrap",
+    padding: "16px 0 14px",
+    marginBottom: 14,
+    borderBottom: "1px solid rgba(168,162,158,0.14)",
+  },
+  libHeaderMain: { minWidth: 0, flex: "1 1 320px" },
+  libEyebrow: {
+    color: "#d97706",
+    fontSize: 9,
+    letterSpacing: "0.24em",
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+    marginBottom: 6,
+  },
+  libTitleRow: { display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap", marginBottom: 6 },
+  libTitle: {
+    margin: 0,
+    color: "#fef3c7",
+    fontFamily: "'Fraunces', serif",
+    fontSize: 28,
+    lineHeight: 1.05,
+    fontWeight: 700,
+    letterSpacing: "-0.01em",
+  },
+  libCounter: {
+    display: "inline-flex",
+    alignItems: "baseline",
+    gap: 4,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  libCounterValue: { color: "#fbbf24", fontSize: 16, fontWeight: 700 },
+  libCounterDivider: { color: "#5a4525", fontSize: 14 },
+  libCounterTotal: { color: "#a89d8e", fontSize: 13 },
+  libCounterLabel: {
+    color: "#78716c",
+    fontSize: 9,
+    letterSpacing: "0.16em",
+    textTransform: "uppercase",
+    marginLeft: 4,
+  },
+  libSubcopy: { margin: 0, color: "#a8a29e", fontSize: 12, lineHeight: 1.55, maxWidth: 540 },
+  libHeaderStats: { display: "flex", gap: 8, alignItems: "stretch", flexShrink: 0 },
+  libQuickStat: {
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    alignItems: "flex-end",
+    minWidth: 70,
+    padding: "8px 12px",
+    background: "rgba(8,8,8,0.5)",
+    border: "1px solid rgba(168,162,158,0.12)",
+    borderRadius: 4,
+  },
+  libQuickStatValue: {
+    color: "#fef3c7",
+    fontFamily: "'Fraunces', serif",
+    fontSize: 19,
+    fontWeight: 700,
+    lineHeight: 1,
+  },
+  libQuickStatLabel: {
+    color: "#78716c",
+    fontSize: 8.5,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    marginTop: 4,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+
+  // ── Single-row toolbar (search + filters + sort) ──
+  libToolbar: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+    padding: "10px 12px",
+    marginBottom: 10,
+    background: "rgba(8,8,8,0.5)",
+    border: "1px solid rgba(168,162,158,0.12)",
+    borderRadius: 4,
+  },
+  libToolbarSearchWrap: {
+    position: "relative",
+    flex: "1 1 240px",
+    minWidth: 200,
+    display: "flex",
+    alignItems: "center",
+  },
+  libToolbarSearchIcon: {
+    position: "absolute",
+    left: 10,
+    color: "#78716c",
+    fontSize: 14,
+    pointerEvents: "none",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  libToolbarSearch: {
+    width: "100%",
+    padding: "7px 30px 7px 28px",
+    background: "#0a0705",
+    border: "1px solid #2a1f15",
+    borderRadius: 3,
+    color: "#fbbf24",
+    fontFamily: "inherit",
+    fontSize: 12,
+    boxSizing: "border-box",
+    outline: "none",
+  },
+  libToolbarClearBtn: {
+    position: "absolute",
+    right: 8,
+    background: "transparent",
+    border: "none",
+    color: "#78716c",
+    cursor: "pointer",
+    fontSize: 16,
+    padding: "0 4px",
+    fontFamily: "inherit",
+    lineHeight: 1,
+  },
+  libToolbarFilter: { display: "flex", alignItems: "center", gap: 6 },
+  libToolbarFilterLabel: {
+    color: "#78716c",
+    fontSize: 9,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+    whiteSpace: "nowrap",
+  },
+  libToolbarPillRow: { display: "flex", gap: 0, border: "1px solid #2a1f15", borderRadius: 3, overflow: "hidden" },
+  libToolbarPill: {
+    padding: "5px 10px",
+    background: "#0a0705",
+    border: "none",
+    borderRight: "1px solid #2a1f15",
+    color: "#a89d8e",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+    transition: "all 0.12s",
+  },
+  libToolbarPillActive: {
+    background: "rgba(217,119,6,0.18)",
+    color: "#fbbf24",
+  },
+  libToolbarSelect: {
+    padding: "5px 9px",
+    background: "#0a0705",
+    border: "1px solid #2a1f15",
+    borderRadius: 3,
+    color: "#fbbf24",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+    cursor: "pointer",
+    outline: "none",
+  },
+  libToolbarRangeWrap: { display: "flex", alignItems: "center", gap: 6, minWidth: 160 },
+  libToolbarRange: { flex: 1, accentColor: "#d97706" },
+  libToolbarRangeValue: {
+    color: "#fbbf24",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    minWidth: 44,
+    textAlign: "right",
+  },
+  libToolbarReset: {
+    padding: "5px 12px",
+    background: "transparent",
+    border: "1px solid rgba(217,119,6,0.45)",
+    borderRadius: 3,
+    color: "#fbbf24",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+    marginLeft: "auto",
+  },
+
+  // ── Category strip ──
+  libCatStrip: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    marginBottom: 12,
+    padding: "2px 0",
+  },
+  libCatStripLabel: {
+    color: "#78716c",
+    fontSize: 9,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+    flexShrink: 0,
+  },
+  libCatStripPills: { display: "flex", gap: 5, flexWrap: "wrap" },
+  libCatPill: {
+    padding: "5px 10px",
+    background: "rgba(5,5,5,0.4)",
+    border: "1px solid rgba(168,162,158,0.16)",
+    borderRadius: 3,
+    color: "#a89d8e",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+    transition: "all 0.12s",
+  },
+  libCatPillActive: {
+    background: "rgba(217,119,6,0.12)",
+  },
+
+  emptyStateBtn: {
+    background: "transparent",
+    border: "1px solid #d97706",
+    color: "#fbbf24",
+    padding: "5px 12px",
+    fontSize: 10,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+    borderRadius: 2,
+    fontFamily: "inherit",
+    marginLeft: 8,
+  },
+
+  libraryHero: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 18, alignItems: "stretch", marginBottom: 16, padding: 20, background: "linear-gradient(135deg, rgba(7,9,10,0.96), rgba(19,15,11,0.9))", border: "1px solid rgba(168,162,158,0.18)", borderRadius: 6, boxShadow: "0 18px 48px rgba(0,0,0,0.28)" },
+  libraryHeroCopy: { minWidth: 0 },
+  libraryEyebrow: { color: "#d97706", fontSize: 9, letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: 8 },
+  libraryTitleRow: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 },
+  libraryTitle: { margin: 0, color: "#fef3c7", fontFamily: "'Fraunces', serif", fontSize: 40, lineHeight: 1, fontWeight: 700 },
+  libraryCountPill: { color: "#fbbf24", border: "1px solid rgba(251,191,36,0.42)", borderRadius: 999, padding: "5px 10px", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", background: "rgba(217,119,6,0.08)" },
+  librarySubcopy: { margin: 0, color: "#a8a29e", fontSize: 13, lineHeight: 1.65, maxWidth: 680 },
+  libraryStatGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1, border: "1px solid rgba(168,162,158,0.14)", background: "rgba(168,162,158,0.1)" },
+  libraryStat: { minHeight: 80, padding: "13px 14px", background: "rgba(5,5,5,0.58)", display: "flex", flexDirection: "column", justifyContent: "space-between" },
+  libraryStatValue: { color: "#f5f5f4", fontFamily: "'Fraunces', serif", fontSize: 27, lineHeight: 1, fontWeight: 600 },
+  libraryStatLabel: { color: "#a8a29e", fontSize: 9.5, lineHeight: 1.35, letterSpacing: "0.09em", textTransform: "uppercase" },
+  filterGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 12, padding: 14, background: "rgba(8,8,8,0.56)", border: "1px solid rgba(168,162,158,0.16)", borderRadius: 5 },
+  librarySearchCell: { minWidth: 0 },
   filterLabel: { fontSize: 9, letterSpacing: "0.15em", color: "#78716c", textTransform: "uppercase", marginBottom: 4, display: "block" },
   searchInput: { width: "100%", padding: "8px 11px", background: "#0a0705", border: "1px solid #3a2e1f", borderRadius: 2, color: "#fbbf24", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", outline: "none" },
-  catChips: { display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 14 },
-  catChip: { padding: "6px 12px", background: "transparent", border: "1px solid #3a2e1f", borderRadius: 2, color: "#a89d8e", fontFamily: "inherit", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer" },
-  catChipActive: { borderColor: "#d97706", color: "#fbbf24", background: "rgba(217,119,6,0.08)" },
+  catChips: { display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 10 },
+  catChip: { padding: "7px 12px", background: "rgba(5,5,5,0.38)", border: "1px solid rgba(168,162,158,0.18)", borderRadius: 999, color: "#a89d8e", fontFamily: "inherit", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer" },
+  catChipActive: { borderColor: "#d97706", color: "#fbbf24", background: "rgba(217,119,6,0.1)" },
+  libraryResultBar: { display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 10, padding: "8px 2px", color: "#78716c", fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase" },
 
-  cableList: { display: "flex", flexDirection: "column", gap: 6 },
-  cableCard: { background: "rgba(10,7,5,0.4)", border: "1px solid #2a1f15", borderRadius: 3, transition: "all 0.15s", overflow: "hidden" },
-  cableCardExpanded: { borderColor: "#d97706", background: "rgba(20,14,9,0.8)" },
-  cableHead: { padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer" },
-  cableName: { fontFamily: "'Fraunces', serif", fontSize: 15, color: "#fef3c7", fontWeight: 600 },
-  catBadge: { fontSize: 8, padding: "2px 7px", border: "1px solid", borderRadius: 8, letterSpacing: "0.1em", textTransform: "uppercase" },
-  cxBadge: { fontSize: 8, padding: "2px 7px", border: "1px solid", borderRadius: 8, letterSpacing: "0.05em" },
-  cableAlias: { fontSize: 9, color: "#78716c", fontStyle: "italic", marginBottom: 2 },
-  cableApps: { fontSize: 10, color: "#a89d8e", lineHeight: 1.4 },
-  quickStats: { display: "flex", gap: 12, alignItems: "center", flexShrink: 0 },
-  expandIcon: { color: "#d97706", fontSize: 18, marginLeft: 6 },
+  cableList: { display: "flex", flexDirection: "column", gap: 8 },
+  cableCard: { background: "linear-gradient(135deg, rgba(8,8,8,0.74), rgba(15,11,8,0.58))", border: "1px solid rgba(168,162,158,0.13)", borderRadius: 5, transition: "all 0.15s", overflow: "hidden", boxShadow: "0 8px 26px rgba(0,0,0,0.18)" },
+  cableCardExpanded: { borderColor: "rgba(217,119,6,0.72)", background: "linear-gradient(135deg, rgba(20,14,9,0.92), rgba(9,8,7,0.94))", boxShadow: "0 18px 52px rgba(0,0,0,0.34)" },
+  cableHead: { padding: "13px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, cursor: "pointer", flexWrap: "wrap" },
+  cableIdentity: { display: "flex", alignItems: "center", gap: 14, flex: "1 1 460px", minWidth: 0 },
+  cableNameRow: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 },
+  cableName: { fontFamily: "'Fraunces', serif", fontSize: 17, color: "#fef3c7", fontWeight: 650, lineHeight: 1.05 },
+  catBadge: { fontSize: 8, padding: "3px 8px", border: "1px solid", borderRadius: 999, letterSpacing: "0.12em", textTransform: "uppercase", background: "rgba(0,0,0,0.25)" },
+  cxBadge: { fontSize: 8, padding: "3px 8px", border: "1px solid", borderRadius: 999, letterSpacing: "0.05em" },
+  cableAlias: { fontSize: 9.5, color: "#78716c", fontStyle: "italic", marginBottom: 3 },
+  cableApps: { fontSize: 10.5, color: "#b8afa3", lineHeight: 1.4 },
+  cableMeta: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 10.5,
+    color: "#a89d8e",
+    lineHeight: 1.4,
+    marginBottom: 6,
+  },
+  cableAliasInline: { color: "#78716c", fontStyle: "italic" },
+  cableAppsInline: { color: "#b8afa3" },
+  cableMetaSep: { color: "#3a2e1f" },
+  cableInlineStats: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10.5,
+    color: "#fbbf24",
+    lineHeight: 1.4,
+    paddingTop: 4,
+    borderTop: "1px solid rgba(168,162,158,0.08)",
+  },
+  cableInlineStat: { display: "inline-flex", alignItems: "baseline", gap: 4, whiteSpace: "nowrap" },
+  cableInlineStatLbl: {
+    color: "#78716c",
+    fontSize: 9,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+  },
+  cableInlineStatSep: { color: "#3a2e1f", fontSize: 11 },
+  quickStats: { display: "flex", gap: 1, alignItems: "stretch", flex: "0 1 auto", minWidth: 0, background: "rgba(168,162,158,0.1)", border: "1px solid rgba(168,162,158,0.12)" },
+  qs: { minWidth: 54, padding: "8px 10px", textAlign: "left", background: "rgba(5,5,5,0.52)" },
+  qsWide: { minWidth: 104 },
+  qsLabel: { fontSize: 8, color: "#78716c", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 3 },
+  qsValue: { fontSize: 11, color: "#fbbf24", lineHeight: 1.2, whiteSpace: "nowrap" },
+  expandIcon: { color: "#d97706", fontSize: 20, marginLeft: 8, alignSelf: "center" },
 
   cableDetails: { borderTop: "1px solid #2a1f15", background: "rgba(0,0,0,0.3)", padding: 18 },
   actionRow: { display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" },
   actionBtn: { padding: "8px 14px", background: "#d97706", color: "#0a0705", border: "none", borderRadius: 2, fontFamily: "inherit", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600 },
   actionBtnSecondary: { background: "transparent", border: "1px solid #d97706", color: "#fbbf24" },
+  sectionFrame: { padding: "14px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 },
+  libraryDisclosure: { borderTop: "1px solid rgba(168,162,158,0.14)" },
+  libraryDisclosureHead: { width: "100%", border: "none", background: "transparent", color: "#f5f5f4", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "14px 2px", cursor: "pointer", fontFamily: "inherit", textAlign: "left" },
+  libraryDisclosureEyebrow: { display: "block", color: "#d97706", fontSize: 8.5, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 2 },
+  libraryDisclosureTitle: { display: "block", color: "#e7e5e4", fontSize: 13, letterSpacing: "0.04em", textTransform: "uppercase" },
+  libraryDisclosureBody: { padding: "0 0 18px" },
+  profilePanel: { margin: "0 0 10px", padding: 22, background: "linear-gradient(135deg, rgba(11,10,8,0.98), rgba(18,15,11,0.94) 55%, rgba(7,7,7,0.98))", border: "1px solid rgba(168,162,158,0.22)", borderRadius: 4, boxShadow: "0 18px 54px rgba(0,0,0,0.36)", overflow: "hidden" },
+  profileHero: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 26, alignItems: "center" },
+  profileCopy: { minWidth: 0 },
+  profileKicker: { color: "#d97706", fontSize: 9, letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: 7 },
+  profileTitleRow: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 },
+  profileTitle: { margin: 0, color: "#fef3c7", fontFamily: "'Fraunces', serif", fontSize: 42, lineHeight: 1, fontWeight: 700 },
+  profileBadge: { padding: "6px 11px", border: "1px solid", borderRadius: 999, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700, background: "rgba(0,0,0,0.28)" },
+  profileAlias: { color: "#a8a29e", fontSize: 13, fontStyle: "italic", marginBottom: 12 },
+  profileDescription: { color: "#e7e5e4", fontSize: 14, lineHeight: 1.65, margin: "0 0 18px", maxWidth: 610 },
+  profileMetricGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 1, border: "1px solid rgba(168,162,158,0.16)", background: "rgba(168,162,158,0.08)" },
+  profileMetric: { display: "grid", gridTemplateColumns: "20px 1fr", gap: 10, alignItems: "start", minHeight: 72, padding: "12px 13px", background: "rgba(5,5,5,0.6)" },
+  profileMetricLabel: { color: "#a8a29e", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 4 },
+  profileMetricValue: { color: "#f5f5f4", fontSize: 15, lineHeight: 1.25, fontWeight: 700 },
+  profileMetricSub: { color: "#78716c", fontSize: 10, lineHeight: 1.35, marginTop: 2 },
+  profileVisual: { position: "relative", minHeight: 360, display: "flex", alignItems: "center", justifyContent: "center", background: "radial-gradient(circle at 52% 50%, rgba(217,119,6,0.16), transparent 55%)" },
+  profileImage: { width: "100%", maxHeight: 430, objectFit: "contain", display: "block", filter: "drop-shadow(0 30px 38px rgba(0,0,0,0.7))" },
+  profileVisualMeta: { position: "absolute", left: 18, right: 18, bottom: 10, display: "flex", justifyContent: "space-between", gap: 12, color: "#a8a29e", fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase" },
+  profileSplit: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 22, marginTop: 22, paddingTop: 18, borderTop: "1px solid rgba(168,162,158,0.18)" },
+  profileSectionTitle: { color: "#f59e0b", fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 10, fontWeight: 800 },
+  profileLayerGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 10 },
+  profileLayer: { display: "grid", gridTemplateColumns: "38px 1fr", gap: 10, alignItems: "start", padding: "10px 0", borderTop: "1px solid rgba(168,162,158,0.12)" },
+  profileLayerNum: { width: 28, height: 28, borderRadius: 999, border: "1px solid", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800 },
+  profileLayerName: { color: "#f5f5f4", fontSize: 12.5, fontWeight: 700, marginBottom: 3 },
+  profileLayerDesc: { color: "#a8a29e", fontSize: 11, lineHeight: 1.45 },
+  profileAttenGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(128px, 1fr))", gap: 1, background: "rgba(168,162,158,0.12)", border: "1px solid rgba(168,162,158,0.16)" },
+  profileAttenCell: { padding: "11px 12px", background: "rgba(5,5,5,0.62)", minHeight: 74 },
+  profileAttenFreq: { color: "#d6d3d1", fontSize: 12, marginBottom: 6 },
+  profileAttenLoss: { color: "#f5f5f4", fontSize: 14, fontWeight: 700 },
+  profileAttenSub: { color: "#78716c", fontSize: 10.5, marginTop: 4 },
   generatedRender: { width: 340, maxWidth: "100%", padding: 10, background: "rgba(15,10,5,0.55)", border: "1px solid rgba(217,119,6,0.22)", borderRadius: 4, boxSizing: "border-box" },
   generatedRenderLabel: { fontSize: 9, letterSpacing: "0.18em", color: "#d97706", textTransform: "uppercase", marginBottom: 8 },
   generatedRenderImg: { width: "100%", aspectRatio: "1 / 1", objectFit: "contain", display: "block", background: "#050302", border: "1px solid #2a1f15", borderRadius: 3 },
@@ -6535,17 +7203,17 @@ const S = {
   sheetBadge: { padding: "7px 14px", border: "1px solid", borderRadius: 999, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700, background: "rgba(0,0,0,0.35)" },
   sheetAlias: { marginTop: 8, fontSize: 15, color: "#a8a29e", fontStyle: "italic" },
   sheetApps: { marginTop: 8, fontSize: 17, color: "#e7e5e4", lineHeight: 1.45 },
-  sheetBody: { display: "grid", gridTemplateColumns: "minmax(250px, 0.78fr) minmax(360px, 1.45fr)", gap: 22, alignItems: "stretch" },
+  sheetBody: { display: "grid", gridTemplateColumns: "minmax(260px, 0.66fr) minmax(560px, 1.34fr)", gap: 22, alignItems: "stretch" },
   sheetCopy: { minWidth: 0, paddingRight: 4 },
   sheetSectionLabel: { color: "#f59e0b", fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 800, marginBottom: 10, marginTop: 4 },
   sheetDescription: { color: "#f5f5f4", fontSize: 14.5, lineHeight: 1.68, marginBottom: 22, maxWidth: 440 },
   sheetBenefits: { display: "grid", gap: 9 },
   sheetBenefit: { display: "flex", gap: 10, alignItems: "flex-start", color: "#d6d3d1", fontSize: 13.5, lineHeight: 1.45 },
   sheetBullet: { width: 7, height: 7, borderRadius: 999, background: "#fb923c", marginTop: 6, flexShrink: 0, boxShadow: "0 0 12px rgba(251,146,60,0.55)" },
-  sheetVisual: { position: "relative", minHeight: 430, borderLeft: "1px solid rgba(168,162,158,0.18)", overflow: "hidden" },
-  sheetImage: { position: "absolute", right: "-2%", bottom: "-8%", width: "82%", height: "78%", objectFit: "contain", filter: "drop-shadow(0 26px 34px rgba(0,0,0,0.65))", opacity: 0.98 },
-  sheetCallout: { position: "absolute", maxWidth: 205, paddingLeft: 13, borderLeft: "1px solid rgba(231,229,228,0.7)", color: "#e7e5e4", textShadow: "0 2px 8px rgba(0,0,0,0.9)", zIndex: 2 },
-  sheetCalloutStem: { position: "absolute", left: -4, top: 112, width: 8, height: 8, borderRadius: 999, background: "#f59e0b", boxShadow: "0 0 16px rgba(245,158,11,0.65)" },
+  sheetVisual: { position: "relative", minHeight: 390, borderLeft: "1px solid rgba(168,162,158,0.18)", overflow: "hidden", background: "radial-gradient(circle at 66% 58%, rgba(217,119,6,0.10), transparent 42%)" },
+  sheetImage: { position: "absolute", left: "24%", bottom: "2%", width: "73%", height: "72%", objectFit: "contain", filter: "drop-shadow(0 26px 34px rgba(0,0,0,0.65))", opacity: 0.98, zIndex: 1 },
+  sheetCalloutLeader: { position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 2, overflow: "visible" },
+  sheetCallout: { position: "absolute", maxWidth: 210, padding: "9px 11px", background: "rgba(5,5,5,0.62)", border: "1px solid rgba(231,229,228,0.32)", borderRadius: 3, color: "#e7e5e4", textShadow: "0 2px 8px rgba(0,0,0,0.9)", zIndex: 3, boxShadow: "0 10px 24px rgba(0,0,0,0.32)" },
   sheetCalloutTitle: { color: "#f59e0b", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 800, lineHeight: 1.3 },
   sheetCalloutNum: { fontSize: 16, color: "#fbbf24", marginRight: 8 },
   sheetCalloutDesc: { marginTop: 5, color: "#f5f5f4", fontSize: 12, lineHeight: 1.35 },
