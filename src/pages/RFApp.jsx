@@ -3571,7 +3571,29 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
   const [filterCat, setFilterCat] = useState("all");
   const [filterFreq, setFilterFreq] = useState(0);
   const [sortBy, setSortBy] = useState("name");
-  const [expanded, setExpanded] = useState(activeCable);
+  const [detailId, setDetailId] = useState(activeCable || null);
+  const savedScrollY = useRef(0);
+
+  // Auto-open detail when activeCable changes from outside the library
+  useEffect(() => {
+    if (activeCable && activeCable !== detailId) {
+      setDetailId(activeCable);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCable]);
+
+  const openDetail = (id) => {
+    savedScrollY.current = typeof window !== "undefined" ? window.scrollY : 0;
+    setActiveCable(id);
+    setDetailId(id);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "instant" });
+  };
+  const closeDetail = () => {
+    setDetailId(null);
+    if (typeof window !== "undefined") {
+      requestAnimationFrame(() => window.scrollTo({ top: savedScrollY.current, behavior: "instant" }));
+    }
+  };
 
   const filtered = useMemo(() => {
     let list = Object.entries(CABLES).filter(([id, c]) => {
@@ -3604,6 +3626,22 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
 
   const hasActiveFilter = search || filterZ !== "all" || filterCat !== "all" || filterFreq > 0;
   const clearFilters = () => { setSearch(""); setFilterZ("all"); setFilterCat("all"); setFilterFreq(0); };
+
+  // ── Detail view: take over the page when a cable is selected ──
+  if (detailId && CABLES[detailId]) {
+    return (
+      <CableDetailView
+        id={detailId}
+        cable={CABLES[detailId]}
+        onBack={closeDetail}
+        onDesign={() => loadIntoDesign(detailId)}
+        onAsk={() => askAboutCable(detailId)}
+        compared={comparedCables?.includes(detailId)}
+        toggleCompare={toggleCompare}
+        onPrint={onPrint ? () => onPrint(detailId) : undefined}
+      />
+    );
+  }
 
   return (
     <div style={S.viewInner}>
@@ -3735,11 +3773,13 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
       {/* Cable list */}
       <div style={S.cableList}>
         {filtered.map(([id, c]) => (
-          <CableCard key={id} id={id} cable={c} expanded={expanded === id}
-            onToggle={() => { setExpanded(expanded === id ? null : id); setActiveCable(id); }}
-            onDesign={() => loadIntoDesign(id)} onAsk={() => askAboutCable(id)}
-            compared={comparedCables?.includes(id)} toggleCompare={toggleCompare}
-            onPrint={onPrint} />
+          <CableCard
+            key={id}
+            id={id}
+            cable={c}
+            onOpen={() => openDetail(id)}
+            compared={comparedCables?.includes(id)}
+          />
         ))}
         {filtered.length === 0 && (
           <div style={S.emptyState}>
@@ -3761,37 +3801,27 @@ function LibraryStat({ value, label }) {
   );
 }
 
-function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared, toggleCompare, onPrint }) {
+// Slim list-item card: just the head row, taps open the detail page.
+function CableCard({ id, cable: c, onOpen, compared }) {
   const { units } = useContext(SettingsContext);
   const cat = CATEGORIES[c.cat];
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity];
   const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity];
-
-  const [buildStep, setBuildStep] = useState(4);
-  const [selectedLayer, setSelectedLayer] = useState(null);
-  const [hoveredLayer, setHoveredLayer] = useState(null);
-  const [expandedStep, setExpandedStep] = useState(null);
-
-  useEffect(() => {
-    if (expanded) { setBuildStep(0); setSelectedLayer(null); setExpandedStep(null); }
-  }, [expanded]);
-
-  useEffect(() => {
-    if (expanded && buildStep < 4) {
-      const t = setTimeout(() => setBuildStep(s => s + 1), 750);
-      return () => clearTimeout(t);
-    }
-  }, [buildStep, expanded]);
-
-  const replay = (e) => { e.stopPropagation(); setBuildStep(0); setSelectedLayer(null); };
-  const shieldLayers = getShieldLayers(c.cons);
-  const hasVisualProfile = Boolean(c.render);
   const loss900 = c.atten.find(([f]) => f >= 900)?.[1];
   const lossLabel = Number.isFinite(loss900) ? `${fmt(loss900, 2)} dB/100m` : "n/a";
 
   return (
-    <div className="hover-card" style={{ ...S.cableCard, ...(expanded ? S.cableCardExpanded : {}) }}>
-      <div onClick={onToggle} style={S.cableHead}>
+    <button
+      type="button"
+      onClick={onOpen}
+      className="hover-card"
+      style={{
+        ...S.cableCard,
+        ...S.cableCardClickable,
+        ...(compared ? S.cableCardCompared : {}),
+      }}
+    >
+      <div style={S.cableHead}>
         <div style={S.cableIdentity}>
           <MiniCrossSection c={c} />
           <div style={{ minWidth: 0, flex: 1 }}>
@@ -3799,6 +3829,7 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared
               <span style={S.cableName}>{c.name}</span>
               <span style={{ ...S.catBadge, color: cat.color, borderColor: cat.color }}>{cat.label}</span>
               <span style={{ ...S.cxBadge, background: `${cxColor}22`, color: cxColor, borderColor: cxColor }}>{cxLabel}</span>
+              {compared && <span style={S.compareDot} title="In compare list">●</span>}
             </div>
             {(c.alias || c.apps) && (
               <div style={S.cableMeta}>
@@ -3820,45 +3851,121 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared
             </div>
           </div>
         </div>
-        <span style={S.expandIcon}>{expanded ? "−" : "+"}</span>
+        <span style={S.cableCardOpenIcon}>›</span>
+      </div>
+    </button>
+  );
+}
+
+// Full detail view — takes over the page when a cable is selected from
+// the library list. Has its own breadcrumb / back button, action row, and
+// renders the full poster + layer inspector + signal flow + engineering
+// details in a focused, single-cable layout.
+function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, toggleCompare, onPrint }) {
+  const { units } = useContext(SettingsContext);
+  const cat = CATEGORIES[c.cat];
+  const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity];
+  const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity];
+
+  const [buildStep, setBuildStep] = useState(0);
+  const [selectedLayer, setSelectedLayer] = useState(null);
+  const [hoveredLayer, setHoveredLayer] = useState(null);
+  const [expandedStep, setExpandedStep] = useState(null);
+
+  // Reset build animation whenever the user opens a new cable
+  useEffect(() => {
+    setBuildStep(0); setSelectedLayer(null); setHoveredLayer(null); setExpandedStep(null);
+  }, [id]);
+  useEffect(() => {
+    if (buildStep < 4) {
+      const t = setTimeout(() => setBuildStep(s => s + 1), 750);
+      return () => clearTimeout(t);
+    }
+  }, [buildStep]);
+
+  // Esc to go back
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onBack(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onBack]);
+
+  const replay = () => { setBuildStep(0); setSelectedLayer(null); };
+  const shieldLayers = getShieldLayers(c.cons);
+  const hasVisualProfile = Boolean(c.render);
+
+  return (
+    <div style={S.viewInner}>
+      {/* Breadcrumb / back */}
+      <div style={S.cableDetailBreadcrumb}>
+        <button onClick={onBack} style={S.cableDetailBackBtn} title="Back (Esc)">
+          <span style={{ fontSize: 14 }}>‹</span> Back to Library
+        </button>
+        <span style={S.cableDetailCrumbSep}>/</span>
+        <span style={S.cableDetailCrumbCurrent}>{c.name}</span>
       </div>
 
-      {expanded && (
-        <div style={S.cableDetails}>
-          <div style={S.actionRow}>
-            <button onClick={onDesign} style={S.actionBtn}>→ Load into Designer</button>
-            <button onClick={onAsk} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>Ask Agent about this</button>
-            {toggleCompare && <button onClick={(e) => { e.stopPropagation(); toggleCompare(id); }} style={{ ...S.actionBtn, ...(compared ? { background: "rgba(52,211,153,0.15)", color: "#34d399", borderColor: "#10b981" } : S.actionBtnSecondary) }}>{compared ? "✓ In compare" : "+ Add to compare"}</button>}
-            {onPrint && <button onClick={(e) => { e.stopPropagation(); onPrint(id); }} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>🖨 Print / PDF</button>}
-          </div>
-          {hasVisualProfile ? (
-            <>
-              <CableDatasheetPoster id={id} c={c} units={units} shieldLayers={shieldLayers} />
-              <LibraryDisclosure eyebrow="Construction" title="Layer inspector">
-                <CableConstructionInspector c={c} units={units} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} setSelectedLayer={setSelectedLayer} setHoveredLayer={setHoveredLayer} replay={replay} />
-              </LibraryDisclosure>
-              <LibraryDisclosure eyebrow="Simulator" title="Signal flow and loss">
-                <CableSignalSection cable={c} />
-              </LibraryDisclosure>
-              <LibraryDisclosure eyebrow="Engineering" title="Full cable data">
-                <CableEngineeringDetails c={c} units={units} shieldLayers={shieldLayers} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
-              </LibraryDisclosure>
-            </>
-          ) : (
-            <>
-              <CableConstructionInspector c={c} units={units} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} setSelectedLayer={setSelectedLayer} setHoveredLayer={setHoveredLayer} replay={replay} framed />
-              <CableSignalSection cable={c} framed />
-              <CableEngineeringDetails c={c} units={units} shieldLayers={shieldLayers} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
-            </>
-          )}
+      {/* Action row — sticky-feel toolbar at top */}
+      <div style={S.cableDetailActionRow}>
+        <div style={S.cableDetailHeading}>
+          <span style={{ ...S.catBadge, color: cat.color, borderColor: cat.color, fontSize: 9 }}>{cat.label}</span>
+          <span style={{ ...S.cxBadge, background: `${cxColor}22`, color: cxColor, borderColor: cxColor, fontSize: 9 }}>{cxLabel}</span>
         </div>
-      )}
+        <div style={S.cableDetailActions}>
+          <button onClick={onDesign} style={S.actionBtn}>→ Load into Designer</button>
+          <button onClick={onAsk} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>Ask Agent about this</button>
+          {toggleCompare && (
+            <button
+              onClick={() => toggleCompare(id)}
+              style={{ ...S.actionBtn, ...(compared ? { background: "rgba(52,211,153,0.15)", color: "#34d399", borderColor: "#10b981" } : S.actionBtnSecondary) }}
+            >
+              {compared ? "✓ In compare" : "+ Add to compare"}
+            </button>
+          )}
+          {onPrint && <button onClick={onPrint} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>🖨 Print / PDF</button>}
+        </div>
+      </div>
+
+      {/* Body */}
+      <div style={S.cableDetailBody}>
+        {hasVisualProfile ? (
+          <>
+            <CableDatasheetPoster id={id} c={c} units={units} shieldLayers={shieldLayers} />
+            <LibraryDisclosure eyebrow="Construction" title="Layer inspector" defaultOpen>
+              <CableConstructionInspector c={c} units={units} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} setSelectedLayer={setSelectedLayer} setHoveredLayer={setHoveredLayer} replay={replay} />
+            </LibraryDisclosure>
+            <LibraryDisclosure eyebrow="Simulator" title="Signal flow and loss">
+              <CableSignalSection cable={c} />
+            </LibraryDisclosure>
+            <LibraryDisclosure eyebrow="Engineering" title="Full cable data" defaultOpen>
+              <CableEngineeringDetails c={c} units={units} shieldLayers={shieldLayers} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
+            </LibraryDisclosure>
+          </>
+        ) : (
+          <>
+            <div style={S.cableDetailHero}>
+              <div style={S.cableDetailHeroCopy}>
+                <div style={S.libEyebrow}>◆ {cat.label} · {cxLabel}</div>
+                <h2 style={S.cableDetailHeroTitle}>{c.name}</h2>
+                {c.alias && <div style={S.cableDetailHeroAlias}>{wrapTerms(c.alias)}</div>}
+                {c.apps && <p style={S.cableDetailHeroApps}>{wrapTerms(c.apps)}</p>}
+              </div>
+              <div style={S.cableDetailHeroVisual}>
+                <MiniCrossSection c={c} />
+              </div>
+            </div>
+            <CableConstructionInspector c={c} units={units} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} setSelectedLayer={setSelectedLayer} setHoveredLayer={setHoveredLayer} replay={replay} framed />
+            <CableSignalSection cable={c} framed />
+            <CableEngineeringDetails c={c} units={units} shieldLayers={shieldLayers} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
-function LibraryDisclosure({ eyebrow, title, children }) {
-  const [open, setOpen] = useState(false);
+function LibraryDisclosure({ eyebrow, title, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <section style={S.libraryDisclosure}>
       <button type="button" onClick={() => setOpen(v => !v)} style={S.libraryDisclosureHead}>
@@ -7146,6 +7253,102 @@ const S = {
     textTransform: "uppercase",
   },
   cableInlineStatSep: { color: "#3a2e1f", fontSize: 11 },
+
+  // ── Library card → button styling so the whole card is tappable ──
+  cableCardClickable: {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    color: "inherit",
+    padding: 0,
+  },
+  cableCardCompared: { borderColor: "rgba(52,211,153,0.5)" },
+  cableCardOpenIcon: {
+    color: "#d97706",
+    fontSize: 26,
+    lineHeight: 1,
+    marginLeft: 8,
+    alignSelf: "center",
+    opacity: 0.7,
+    transition: "transform 0.15s, opacity 0.15s",
+  },
+  compareDot: {
+    color: "#34d399",
+    fontSize: 10,
+    marginLeft: 4,
+  },
+
+  // ── Detail view (full-page cable spec) ──
+  cableDetailBreadcrumb: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 14,
+    paddingBottom: 0,
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+    color: "#78716c",
+    letterSpacing: "0.04em",
+  },
+  cableDetailBackBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    background: "transparent",
+    border: "1px solid rgba(217,119,6,0.45)",
+    borderRadius: 3,
+    color: "#fbbf24",
+    fontFamily: "inherit",
+    fontSize: 10,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+    padding: "6px 12px",
+    cursor: "pointer",
+    transition: "all 0.15s",
+  },
+  cableDetailCrumbSep: { color: "#3a2e1f", fontSize: 12 },
+  cableDetailCrumbCurrent: { color: "#fef3c7", fontSize: 11, fontWeight: 600 },
+  cableDetailActionRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+    flexWrap: "wrap",
+    padding: "10px 14px",
+    marginBottom: 14,
+    background: "rgba(8,8,8,0.55)",
+    border: "1px solid rgba(168,162,158,0.14)",
+    borderRadius: 4,
+  },
+  cableDetailHeading: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  cableDetailActions: { display: "flex", gap: 8, flexWrap: "wrap" },
+  cableDetailBody: { display: "flex", flexDirection: "column" },
+  cableDetailHero: {
+    display: "grid",
+    gridTemplateColumns: "1fr auto",
+    gap: 24,
+    alignItems: "center",
+    padding: "18px 20px",
+    marginBottom: 16,
+    background: "linear-gradient(135deg, rgba(7,9,10,0.96), rgba(19,15,11,0.9))",
+    border: "1px solid rgba(168,162,158,0.18)",
+    borderRadius: 5,
+  },
+  cableDetailHeroCopy: { minWidth: 0 },
+  cableDetailHeroTitle: {
+    margin: "4px 0 4px",
+    color: "#fef3c7",
+    fontFamily: "'Fraunces', serif",
+    fontSize: 32,
+    lineHeight: 1.05,
+    fontWeight: 700,
+    letterSpacing: "-0.01em",
+  },
+  cableDetailHeroAlias: { color: "#a8a29e", fontSize: 13, fontStyle: "italic", marginBottom: 8 },
+  cableDetailHeroApps: { margin: 0, color: "#d6cfc4", fontSize: 13, lineHeight: 1.55, maxWidth: 540 },
+  cableDetailHeroVisual: { display: "flex", alignItems: "center", justifyContent: "center" },
   quickStats: { display: "flex", gap: 1, alignItems: "stretch", flex: "0 1 auto", minWidth: 0, background: "rgba(168,162,158,0.1)", border: "1px solid rgba(168,162,158,0.12)" },
   qs: { minWidth: 54, padding: "8px 10px", textAlign: "left", background: "rgba(5,5,5,0.52)" },
   qsWide: { minWidth: 104 },
