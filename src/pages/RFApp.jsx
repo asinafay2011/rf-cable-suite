@@ -3857,33 +3857,33 @@ function CableCard({ id, cable: c, onOpen, compared }) {
   );
 }
 
-// Full detail view — takes over the page when a cable is selected from
-// the library list. Has its own breadcrumb / back button, action row, and
-// renders the full poster + layer inspector + signal flow + engineering
-// details in a focused, single-cable layout.
+// Full detail view — takes over the page when a cable is selected.
+//
+// Layout: action row → hero (always visible) → tab strip → tab panel.
+// Tabs: Overview · Construction · Performance · Engineering. Each tab
+// owns one focused job — no more atten/material lists duplicated across
+// the poster and the Full Cable Data accordion.
 function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, toggleCompare, onPrint }) {
   const { units } = useContext(SettingsContext);
-  const cat = CATEGORIES[c.cat];
-  const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity];
-  const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity];
+  const cat = CATEGORIES[c.cat] || { label: c.cat, color: "#d97706" };
+  const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity] || "#fbbf24";
+  const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity] || c.complexity;
 
+  const [tab, setTab] = useState("overview");
   const [buildStep, setBuildStep] = useState(0);
   const [selectedLayer, setSelectedLayer] = useState(null);
   const [hoveredLayer, setHoveredLayer] = useState(null);
   const [expandedStep, setExpandedStep] = useState(null);
 
-  // Reset build animation whenever the user opens a new cable
   useEffect(() => {
-    setBuildStep(0); setSelectedLayer(null); setHoveredLayer(null); setExpandedStep(null);
+    setTab("overview"); setBuildStep(0); setSelectedLayer(null); setHoveredLayer(null); setExpandedStep(null);
   }, [id]);
   useEffect(() => {
-    if (buildStep < 4) {
+    if (tab === "construction" && buildStep < 4) {
       const t = setTimeout(() => setBuildStep(s => s + 1), 750);
       return () => clearTimeout(t);
     }
-  }, [buildStep]);
-
-  // Esc to go back
+  }, [buildStep, tab]);
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onBack(); };
     document.addEventListener("keydown", onKey);
@@ -3893,6 +3893,23 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
   const replay = () => { setBuildStep(0); setSelectedLayer(null); };
   const shieldLayers = getShieldLayers(c.cons);
   const hasVisualProfile = Boolean(c.render);
+  const bendMm = c.OD * 10;
+  const odPrimary = units === "imperial" ? `${fmt(c.OD / MM_PER_IN, 2)} in` : `${fmt(c.OD, 1)} mm`;
+  const massPrimary = units === "imperial" ? `${fmt(c.mass * 0.672, 0)} lb/1000ft` : `${fmt(c.mass, 0)} g/m`;
+  const heroMetrics = [
+    { icon: Gauge,       label: "Impedance", value: `${c.z} Ω`,         sub: "nominal" },
+    { icon: Activity,    label: "Velocity",  value: `${c.vp}%`,         sub: "VF · % c" },
+    { icon: Ruler,       label: "OD",        value: odPrimary,          sub: hasVisualProfile ? "outer jacket" : "" },
+    { icon: Radio,       label: "Max freq",  value: `${c.fMax} GHz`,    sub: "catalog limit" },
+    { icon: Weight,      label: "Mass",      value: massPrimary,        sub: "" },
+    { icon: ShieldCheck, label: "Shield",    value: "100%",             sub: shieldLayers?.[0]?.name || "" },
+  ];
+  const tabs = [
+    { id: "overview",     label: "Overview" },
+    { id: "construction", label: "Construction" },
+    { id: "performance",  label: "Performance" },
+    { id: "engineering",  label: "Engineering" },
+  ];
 
   return (
     <div style={S.viewInner}>
@@ -3905,7 +3922,7 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
         <span style={S.cableDetailCrumbCurrent}>{c.name}</span>
       </div>
 
-      {/* Action row — sticky-feel toolbar at top */}
+      {/* Action row */}
       <div style={S.cableDetailActionRow}>
         <div style={S.cableDetailHeading}>
           <span style={{ ...S.catBadge, color: cat.color, borderColor: cat.color, fontSize: 9 }}>{cat.label}</span>
@@ -3926,40 +3943,258 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
         </div>
       </div>
 
-      {/* Body */}
-      <div style={S.cableDetailBody}>
-        {hasVisualProfile ? (
-          <>
-            <CableDatasheetPoster id={id} c={c} units={units} shieldLayers={shieldLayers} />
-            <LibraryDisclosure eyebrow="Construction" title="Layer inspector" defaultOpen>
-              <CableConstructionInspector c={c} units={units} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} setSelectedLayer={setSelectedLayer} setHoveredLayer={setHoveredLayer} replay={replay} />
-            </LibraryDisclosure>
-            <LibraryDisclosure eyebrow="Simulator" title="Signal flow and loss">
-              <CableSignalSection cable={c} />
-            </LibraryDisclosure>
-            <LibraryDisclosure eyebrow="Engineering" title="Full cable data" defaultOpen>
-              <CableEngineeringDetails c={c} units={units} shieldLayers={shieldLayers} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
-            </LibraryDisclosure>
-          </>
-        ) : (
-          <>
-            <div style={S.cableDetailHero}>
-              <div style={S.cableDetailHeroCopy}>
-                <div style={S.libEyebrow}>◆ {cat.label} · {cxLabel}</div>
-                <h2 style={S.cableDetailHeroTitle}>{c.name}</h2>
-                {c.alias && <div style={S.cableDetailHeroAlias}>{wrapTerms(c.alias)}</div>}
-                {c.apps && <p style={S.cableDetailHeroApps}>{wrapTerms(c.apps)}</p>}
+      {/* Hero — always visible */}
+      <div style={S.cdHero}>
+        <div style={S.cdHeroCopy}>
+          <div style={S.libEyebrow}>◆ RF Library Profile</div>
+          <h2 style={S.cdHeroTitle}>{c.name}</h2>
+          {c.alias && <div style={S.cdHeroAlias}>{wrapTerms(c.alias)}</div>}
+          {(c.description || c.apps) && (
+            <p style={S.cdHeroDescription}>{wrapTerms(c.description || c.apps)}</p>
+          )}
+          <div style={S.cdHeroMetrics}>
+            {heroMetrics.map((m) => (
+              <div key={m.label} style={S.cdHeroMetric}>
+                <m.icon size={13} style={{ color: "#a8a29e" }} />
+                <div>
+                  <div style={S.cdHeroMetricLabel}>{m.label}</div>
+                  <div style={S.cdHeroMetricValue}>{m.value}</div>
+                  {m.sub && <div style={S.cdHeroMetricSub}>{m.sub}</div>}
+                </div>
               </div>
-              <div style={S.cableDetailHeroVisual}>
-                <MiniCrossSection c={c} />
+            ))}
+          </div>
+        </div>
+        <div style={S.cdHeroVisual}>
+          {hasVisualProfile ? (
+            <>
+              <img src={c.render} alt={`${c.name} cutaway render`} style={S.cdHeroImage} />
+              <div style={S.cdHeroVisualMeta}>
+                <span>Layer render</span>
+                <span>{fmtLen(bendMm, units, 0)} bend guide</span>
+              </div>
+            </>
+          ) : (
+            <div style={S.cdHeroVisualFallback}>
+              <MiniCrossSection c={c} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Tab strip */}
+      <div style={S.cdTabs} role="tablist">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => setTab(t.id)}
+            style={{
+              ...S.cdTab,
+              ...(tab === t.id ? S.cdTabActive : {}),
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div style={S.cdTabPanel}>
+        {tab === "overview" && (
+          <CableTabOverview c={c} shieldLayers={shieldLayers} />
+        )}
+        {tab === "construction" && (
+          <CableConstructionInspector
+            c={c}
+            units={units}
+            shieldLayers={shieldLayers}
+            buildStep={buildStep}
+            selectedLayer={selectedLayer}
+            hoveredLayer={hoveredLayer}
+            setSelectedLayer={setSelectedLayer}
+            setHoveredLayer={setHoveredLayer}
+            replay={replay}
+            framed
+          />
+        )}
+        {tab === "performance" && (
+          <CableTabPerformance c={c} units={units} />
+        )}
+        {tab === "engineering" && (
+          <CableTabEngineering c={c} units={units} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Tab: Overview ─────────────────────────────────────────────
+function CableTabOverview({ c, shieldLayers }) {
+  const shieldLayer = shieldLayers?.[0];
+  const layers = [
+    { n: "01", name: "Outer jacket",                desc: c.cons.jacket,     color: "#57534e" },
+    { n: "02", name: shieldLayer?.name || "Shield", desc: c.cons.shield,     color: shieldLayer?.color || "#f97316" },
+    { n: "03", name: "Dielectric",                  desc: c.cons.dielectric, color: "#fde68a" },
+    { n: "04", name: "Center conductor",            desc: c.cons.conductor,  color: "#fbbf24" },
+  ];
+  const summaryFreqs = c.atten.slice(0, 6);
+  const benefits = c.benefits || [];
+
+  return (
+    <div style={S.cdSectionGrid}>
+      <div>
+        <div style={S.cdSectionTitle}>Layer stack</div>
+        <div style={S.cdLayerList}>
+          {layers.map((layer) => (
+            <div key={layer.n} style={S.cdLayer}>
+              <div style={{ ...S.cdLayerNum, borderColor: layer.color, color: layer.color }}>{layer.n}</div>
+              <div style={{ minWidth: 0 }}>
+                <div style={S.cdLayerName}>{layer.name}</div>
+                <div style={S.cdLayerDesc}>{wrapTerms(layer.desc)}</div>
               </div>
             </div>
-            <CableConstructionInspector c={c} units={units} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} setSelectedLayer={setSelectedLayer} setHoveredLayer={setHoveredLayer} replay={replay} framed />
-            <CableSignalSection cable={c} framed />
-            <CableEngineeringDetails c={c} units={units} shieldLayers={shieldLayers} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
+          ))}
+        </div>
+      </div>
+      <div>
+        <div style={S.cdSectionTitle}>Typical attenuation</div>
+        <div style={S.cdAttenGrid}>
+          {summaryFreqs.map(([freq, loss]) => (
+            <div key={freq} style={S.cdAttenCell}>
+              <div style={S.cdAttenFreq}>{freq < 1000 ? `${freq} MHz` : `${fmt(freq / 1000, 1)} GHz`}</div>
+              <div style={S.cdAttenLoss}>{fmt(loss, 2)} <span style={S.cdAttenUnit}>dB/100m</span></div>
+              <div style={S.cdAttenSub}>{fmt(loss * 0.3048, 2)} dB/100ft</div>
+            </div>
+          ))}
+        </div>
+        {benefits.length > 0 && (
+          <>
+            <div style={{ ...S.cdSectionTitle, marginTop: 22 }}>Key benefits</div>
+            <ul style={S.cdBenefitList}>
+              {benefits.map((b) => (
+                <li key={b} style={S.cdBenefitItem}>
+                  <span style={S.cdBenefitBullet}>◆</span>
+                  <span>{wrapTerms(b)}</span>
+                </li>
+              ))}
+            </ul>
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Tab: Performance ─────────────────────────────────────────
+function CableTabPerformance({ c, units }) {
+  return (
+    <div style={S.cdSectionStack}>
+      <div>
+        <div style={S.cdSectionTitle}>Signal flow simulator</div>
+        <CableSignalSection cable={c} />
+      </div>
+      <div>
+        <div style={S.cdSectionTitle}>Full attenuation table</div>
+        <div style={S.cdTableWrap}>
+          <table style={S.cdAttenTable}>
+            <thead>
+              <tr>
+                <th style={S.cdAttenTh}>Frequency</th>
+                {units !== "imperial" && <th style={S.cdAttenTh}>dB/100m</th>}
+                {units !== "metric"   && <th style={S.cdAttenTh}>dB/100ft</th>}
+                {units !== "metric"   && <th style={S.cdAttenTh}>dB/25ft</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {c.atten.map(([f, a], i) => (
+                <tr key={i} style={i % 2 ? S.cdAttenRowAlt : undefined}>
+                  <td style={S.cdAttenTd}>{f < 1000 ? `${f} MHz` : `${fmt(f / 1000, 1)} GHz`}</td>
+                  {units !== "imperial" && <td style={{ ...S.cdAttenTd, color: "#fbbf24" }}>{a.toFixed(2)}</td>}
+                  {units !== "metric"   && <td style={{ ...S.cdAttenTd, color: "#fbbf24" }}>{(a * 0.3048).toFixed(2)}</td>}
+                  {units !== "metric"   && <td style={{ ...S.cdAttenTd, color: "#fbbf24" }}>{(a * 0.0762).toFixed(3)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={S.cdTableFootnote}>
+          25 ft ≈ 7.62 m — typical RG jumper / patch length. For arbitrary lengths: loss = (dB/100m) × (length in m / 100).
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Tab: Engineering ─────────────────────────────────────────
+function CableTabEngineering({ c, units, expandedStep, setExpandedStep }) {
+  const procSteps = c.proc || [];
+  return (
+    <div style={S.cdSectionGrid}>
+      <div>
+        <div style={S.cdSectionTitle}>Electrical detail</div>
+        <div style={S.cdSpecList}>
+          <SpecRow label="Capacitance"  value={fmtCap(c.cap, units, 1)} />
+          <SpecRow label="Max voltage"  value={`${c.vMax} V RMS`} />
+        </div>
+
+        <div style={{ ...S.cdSectionTitle, marginTop: 22 }}>Mechanical detail</div>
+        <div style={S.cdSpecList}>
+          <SpecRow label="Inner conductor d"   value={fmtLen(c.d, units)} />
+          <SpecRow label="Dielectric D"        value={fmtLen(c.D, units)} />
+          <SpecRow label="Shield OD"           value={fmtLen(c.shield, units)} />
+          <SpecRow label="Jacket OD (Final D)" value={fmtLen(c.OD, units)} />
+        </div>
+
+        {c.makers && (
+          <>
+            <div style={{ ...S.cdSectionTitle, marginTop: 22 }}>Suppliers</div>
+            <div style={S.cdSuppliers}>{wrapTerms(c.makers)}</div>
+          </>
+        )}
+      </div>
+
+      <div>
+        <div style={S.cdSectionTitle}>Manufacturing process</div>
+        <div style={S.cdProcList}>
+          {procSteps.map((s, i) => {
+            const info = explainStep(s);
+            const hasInfo = !!info;
+            const isOpen = expandedStep === i;
+            return (
+              <React.Fragment key={i}>
+                <div
+                  style={{ ...S.cdProcStep, cursor: hasInfo ? "pointer" : "default", ...(isOpen ? { background: "rgba(217,119,6,0.06)" } : {}) }}
+                  onClick={() => hasInfo && setExpandedStep(isOpen ? null : i)}
+                >
+                  <div style={S.cdProcNum}>{i + 1}</div>
+                  <StepIcon text={s} />
+                  <div style={S.cdProcText}>{wrapTerms(s)}</div>
+                  {hasInfo && (
+                    <span style={{ color: "#d97706", fontSize: 11, fontFamily: "monospace", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>▸</span>
+                  )}
+                </div>
+                {isOpen && info && (
+                  <div style={S.cdProcInfo}>
+                    <div style={S.cdProcInfoTitle}>{info.title}</div>
+                    {info.body}
+                  </div>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SpecRow({ label, value }) {
+  return (
+    <div style={S.cdSpecRow}>
+      <span style={S.cdSpecLabel}>{label}</span>
+      <span style={S.cdSpecValue}>{value}</span>
     </div>
   );
 }
@@ -7349,6 +7584,322 @@ const S = {
   cableDetailHeroAlias: { color: "#a8a29e", fontSize: 13, fontStyle: "italic", marginBottom: 8 },
   cableDetailHeroApps: { margin: 0, color: "#d6cfc4", fontSize: 13, lineHeight: 1.55, maxWidth: 540 },
   cableDetailHeroVisual: { display: "flex", alignItems: "center", justifyContent: "center" },
+
+  // ── Detail-view (cd*) — tab-based layout ──
+  cdHero: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px, 0.9fr)",
+    gap: 24,
+    alignItems: "stretch",
+    padding: 22,
+    marginBottom: 14,
+    background: "linear-gradient(135deg, rgba(7,9,10,0.96), rgba(19,15,11,0.9))",
+    border: "1px solid rgba(168,162,158,0.18)",
+    borderRadius: 5,
+  },
+  cdHeroCopy: { minWidth: 0, display: "flex", flexDirection: "column" },
+  cdHeroTitle: {
+    margin: "4px 0 4px",
+    color: "#fef3c7",
+    fontFamily: "'Fraunces', serif",
+    fontSize: 36,
+    lineHeight: 1.05,
+    fontWeight: 700,
+    letterSpacing: "-0.01em",
+  },
+  cdHeroAlias: { color: "#a8a29e", fontSize: 13, fontStyle: "italic", marginBottom: 10 },
+  cdHeroDescription: {
+    margin: "0 0 14px",
+    color: "#d6cfc4",
+    fontSize: 13,
+    lineHeight: 1.6,
+    maxWidth: 580,
+  },
+  cdHeroMetrics: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+    gap: 1,
+    marginTop: "auto",
+    border: "1px solid rgba(168,162,158,0.16)",
+    background: "rgba(168,162,158,0.08)",
+  },
+  cdHeroMetric: {
+    display: "grid",
+    gridTemplateColumns: "20px 1fr",
+    gap: 8,
+    alignItems: "start",
+    padding: "9px 11px",
+    minHeight: 60,
+    background: "rgba(5,5,5,0.6)",
+  },
+  cdHeroMetricLabel: {
+    color: "#a8a29e",
+    fontSize: 8.5,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+    marginBottom: 3,
+  },
+  cdHeroMetricValue: {
+    color: "#fef3c7",
+    fontSize: 14,
+    fontFamily: "'JetBrains Mono', monospace",
+    fontWeight: 600,
+    lineHeight: 1.15,
+  },
+  cdHeroMetricSub: {
+    color: "#78716c",
+    fontSize: 9,
+    lineHeight: 1.3,
+    marginTop: 2,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  cdHeroVisual: {
+    position: "relative",
+    minHeight: 280,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "radial-gradient(circle at 52% 50%, rgba(217,119,6,0.14), transparent 55%)",
+    borderRadius: 4,
+  },
+  cdHeroImage: {
+    width: "100%",
+    maxHeight: 360,
+    objectFit: "contain",
+    display: "block",
+    filter: "drop-shadow(0 24px 32px rgba(0,0,0,0.65))",
+  },
+  cdHeroVisualMeta: {
+    position: "absolute",
+    left: 14, right: 14, bottom: 10,
+    display: "flex",
+    justifyContent: "space-between",
+    color: "#78716c",
+    fontSize: 8.5,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  cdHeroVisualFallback: { padding: 20 },
+
+  // Tab strip
+  cdTabs: {
+    display: "flex",
+    gap: 0,
+    marginBottom: 0,
+    borderBottom: "1px solid rgba(168,162,158,0.18)",
+    overflowX: "auto",
+    flexWrap: "nowrap",
+  },
+  cdTab: {
+    padding: "11px 20px",
+    background: "transparent",
+    border: "none",
+    borderBottom: "2px solid transparent",
+    color: "#a89d8e",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+    transition: "all 0.15s",
+    whiteSpace: "nowrap",
+    marginBottom: -1,
+    fontWeight: 500,
+  },
+  cdTabActive: {
+    color: "#fbbf24",
+    borderBottomColor: "#d97706",
+    fontWeight: 700,
+  },
+  cdTabPanel: {
+    padding: "20px 0 6px",
+    minHeight: 280,
+  },
+
+  // Tab content shared
+  cdSectionGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+    gap: 28,
+  },
+  cdSectionStack: { display: "flex", flexDirection: "column", gap: 28 },
+  cdSectionTitle: {
+    color: "#f59e0b",
+    fontSize: 9.5,
+    letterSpacing: "0.18em",
+    textTransform: "uppercase",
+    marginBottom: 12,
+    fontWeight: 700,
+    fontFamily: "'JetBrains Mono', monospace",
+    paddingBottom: 6,
+    borderBottom: "1px solid rgba(168,162,158,0.12)",
+  },
+
+  // Overview tab
+  cdLayerList: { display: "flex", flexDirection: "column" },
+  cdLayer: {
+    display: "grid",
+    gridTemplateColumns: "36px 1fr",
+    gap: 12,
+    alignItems: "start",
+    padding: "12px 0",
+    borderBottom: "1px solid rgba(168,162,158,0.1)",
+  },
+  cdLayerNum: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    border: "1px solid",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 9,
+    fontWeight: 700,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  cdLayerName: { color: "#fef3c7", fontSize: 13, fontWeight: 600, marginBottom: 3 },
+  cdLayerDesc: { color: "#a8a29e", fontSize: 11.5, lineHeight: 1.5 },
+  cdAttenGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+    gap: 1,
+    background: "rgba(168,162,158,0.12)",
+    border: "1px solid rgba(168,162,158,0.16)",
+  },
+  cdAttenCell: { padding: "10px 12px", background: "rgba(5,5,5,0.6)", minHeight: 70 },
+  cdAttenFreq: {
+    color: "#a8a29e",
+    fontSize: 9.5,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+    marginBottom: 5,
+  },
+  cdAttenLoss: {
+    color: "#fef3c7",
+    fontSize: 14,
+    fontWeight: 700,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  cdAttenUnit: { color: "#78716c", fontSize: 9, fontWeight: 400, marginLeft: 4 },
+  cdAttenSub: {
+    color: "#78716c",
+    fontSize: 9.5,
+    marginTop: 4,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  cdBenefitList: { listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 },
+  cdBenefitItem: {
+    display: "flex",
+    gap: 8,
+    alignItems: "flex-start",
+    fontSize: 12,
+    color: "#d6cfc4",
+    lineHeight: 1.55,
+  },
+  cdBenefitBullet: { color: "#d97706", fontSize: 10, lineHeight: 1.6, flexShrink: 0 },
+
+  // Performance tab — atten table
+  cdTableWrap: {
+    border: "1px solid rgba(168,162,158,0.16)",
+    borderRadius: 3,
+    overflow: "hidden",
+    background: "rgba(5,5,5,0.5)",
+  },
+  cdAttenTable: {
+    width: "100%",
+    borderCollapse: "collapse",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11.5,
+  },
+  cdAttenTh: {
+    color: "#a8a29e",
+    fontSize: 9,
+    letterSpacing: "0.16em",
+    textTransform: "uppercase",
+    textAlign: "left",
+    padding: "10px 14px",
+    borderBottom: "1px solid rgba(168,162,158,0.18)",
+    background: "rgba(168,162,158,0.06)",
+    fontWeight: 600,
+  },
+  cdAttenTd: {
+    color: "#d6cfc4",
+    padding: "8px 14px",
+    borderBottom: "1px solid rgba(168,162,158,0.06)",
+  },
+  cdAttenRowAlt: { background: "rgba(168,162,158,0.03)" },
+  cdTableFootnote: {
+    fontSize: 10,
+    color: "#78716c",
+    marginTop: 8,
+    lineHeight: 1.55,
+    fontStyle: "italic",
+  },
+
+  // Engineering tab
+  cdSpecList: { display: "flex", flexDirection: "column" },
+  cdSpecRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+    padding: "9px 0",
+    borderBottom: "1px solid rgba(168,162,158,0.1)",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11.5,
+  },
+  cdSpecLabel: { color: "#a8a29e" },
+  cdSpecValue: { color: "#fbbf24", fontWeight: 600 },
+  cdSuppliers: {
+    color: "#d6cfc4",
+    fontSize: 12,
+    lineHeight: 1.6,
+    padding: "9px 0",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  cdProcList: { display: "flex", flexDirection: "column", gap: 2 },
+  cdProcStep: {
+    display: "grid",
+    gridTemplateColumns: "26px 22px 1fr 14px",
+    gap: 10,
+    alignItems: "center",
+    padding: "10px 12px",
+    borderRadius: 3,
+    transition: "background 0.12s",
+  },
+  cdProcNum: {
+    width: 22,
+    height: 22,
+    borderRadius: 999,
+    border: "1px solid #d97706",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 9.5,
+    fontWeight: 700,
+    color: "#fbbf24",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  cdProcText: { color: "#d6cfc4", fontSize: 11.5, lineHeight: 1.45 },
+  cdProcInfo: {
+    background: "rgba(217,119,6,0.06)",
+    padding: "10px 14px 12px",
+    margin: "2px 0 6px 36px",
+    borderLeft: "2px solid #d97706",
+    fontSize: 11,
+    lineHeight: 1.6,
+    color: "#d6cfc4",
+    borderRadius: "0 3px 3px 0",
+  },
+  cdProcInfoTitle: {
+    fontWeight: 700,
+    color: "#fbbf24",
+    marginBottom: 5,
+    letterSpacing: "0.06em",
+    fontSize: 10.5,
+  },
   quickStats: { display: "flex", gap: 1, alignItems: "stretch", flex: "0 1 auto", minWidth: 0, background: "rgba(168,162,158,0.1)", border: "1px solid rgba(168,162,158,0.12)" },
   qs: { minWidth: 54, padding: "8px 10px", textAlign: "left", background: "rgba(5,5,5,0.52)" },
   qsWide: { minWidth: 104 },
