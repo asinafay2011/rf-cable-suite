@@ -91,7 +91,7 @@ export const DEFAULT_RECIPE = {
 // Each template is a complete recipe object. Picking one in the UI calls setRecipe(...)
 // which propagates through the entire 9-stage pipeline. Compose realistic baselines,
 // not idealised PASS recipes — engineer should still iterate.
-const RECIPE_TEMPLATES = {
+export const RECIPE_TEMPLATES = {
   default:    { name: 'Default baseline (Cat 6A)', recipe: DEFAULT_RECIPE },
   cat6a_sftp: {
     name: 'Cat 6A S/FTP (foiled-pair + braid)',
@@ -540,7 +540,7 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
 // Hill-climbing search: at each step, apply every mutator to the current best,
 // keep whichever lowers the score the most. Stop on PASS or step budget.
 // Returns { recipe, score, iterations, converged, history }
-function autoFix(initial, maxSteps = 40) {
+export function autoFix(initial, maxSteps = 40) {
   let best = initial
   let bestScore = scoreRecipe(best).score
   const history = [{ step: 0, score: bestScore }]

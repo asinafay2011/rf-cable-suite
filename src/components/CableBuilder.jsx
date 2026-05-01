@@ -1,5 +1,18 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react'
-import { ChevronLeft, ChevronRight, RotateCcw, CheckCircle2, AlertTriangle, SkipForward, Sparkles } from 'lucide-react'
+import React, { useState, useMemo, useEffect } from 'react'
+import {
+  Activity,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  History,
+  RotateCcw,
+  Save,
+  CheckCircle2,
+  AlertTriangle,
+  SkipForward,
+  Sparkles,
+  Wand2,
+} from 'lucide-react'
 import {
   STAGES,
   defaultRecipeFromStages,
@@ -10,10 +23,11 @@ import {
   DIELECTRICS,
   JACKETS,
   WRAP_MATERIALS,
-  FOIL_MATERIALS,
   MATERIALS,
+  RECIPE_TEMPLATES,
   runPipeline,
   computeIL,
+  autoFix,
 } from './ProcessSim.jsx'
 
 // ─────────────────────────────────────────────────────────
@@ -44,6 +58,21 @@ const C = {
 }
 
 const STORAGE_KEY = 'cablelab.builder-state'
+const BASELINE_KEY = 'cablelab.builder-baseline'
+
+const STAGE_LABELS = {
+  conductor: 'Conductor',
+  stranding: 'Stranding',
+  insulation: 'Insulation',
+  pair: 'Twisted pair',
+  pair_wrap: 'Pair wrap',
+  pair_foil: 'Per-pair foil',
+  bundle: 'Bundle',
+  shield: 'Outer shield',
+  jacket: 'Jacket',
+}
+
+const STAGE_FLOW = ['conductor', 'stranding', 'insulation', 'pair', 'pair_wrap', 'pair_foil', 'bundle', 'shield', 'jacket']
 
 function loadState() {
   try {
@@ -61,6 +90,164 @@ function saveState(state) {
     const serializable = { ...state, appliedStages: Array.from(state.appliedStages) }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable))
   } catch {}
+}
+
+function loadBaseline() {
+  try {
+    const raw = localStorage.getItem(BASELINE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function saveBaseline(snapshot) {
+  try {
+    localStorage.setItem(BASELINE_KEY, JSON.stringify(snapshot))
+  } catch {}
+}
+
+function clearSavedBaseline() {
+  try {
+    localStorage.removeItem(BASELINE_KEY)
+  } catch {}
+}
+
+function cloneRecipe(value) {
+  return JSON.parse(JSON.stringify(value || {}))
+}
+
+function allStagesApplied() {
+  return new Set(STAGES.map((s) => s.id))
+}
+
+function hydrateBuilderRecipe(input) {
+  const base = defaultRecipeFromStages()
+  const src = cloneRecipe(input)
+  const next = {
+    ...base,
+    ...src,
+    product: { ...base.product, ...(src.product || {}) },
+    test: { ...base.test, ...(src.test || {}) },
+  }
+
+  for (const stage of STAGES) {
+    next[stage.id] = { ...(base[stage.id] || {}), ...(src[stage.id] || {}) }
+  }
+
+  // Builder has a dedicated outer_foil stage; the process simulator expects
+  // the same knobs inside shield. Keep both views synchronized.
+  next.outer_foil = {
+    ...base.outer_foil,
+    ...(src.outer_foil || {}),
+    foil: src.outer_foil?.foil ?? src.shield?.foil ?? base.outer_foil.foil,
+    foil_overlap: src.outer_foil?.foil_overlap ?? src.shield?.foil_overlap ?? base.outer_foil.foil_overlap,
+  }
+  next.shield = {
+    ...next.shield,
+    foil: next.outer_foil.foil,
+    foil_overlap: next.outer_foil.foil_overlap,
+  }
+
+  return next
+}
+
+function toPipelineRecipe(recipe) {
+  const next = hydrateBuilderRecipe(recipe)
+  return {
+    ...next,
+    shield: {
+      ...next.shield,
+      foil: next.outer_foil?.foil ?? next.shield?.foil ?? false,
+      foil_overlap: next.outer_foil?.foil_overlap ?? next.shield?.foil_overlap ?? 0,
+    },
+  }
+}
+
+function fmtNum(value, digits = 1, suffix = '') {
+  if (value == null || isNaN(value)) return '—'
+  return `${Number(value).toFixed(digits)}${suffix}`
+}
+
+function buildChecks(sim, std) {
+  if (!sim || !std) return []
+  const j = sim.jacket || {}
+  const checks = []
+  if (j.z_diff != null) {
+    const off = Math.abs(j.z_diff - std.z0_diff)
+    checks.push({ label: `Z0 ${std.z0_diff} +/-${std.z0_tol} ohm`, ok: off <= std.z0_tol, value: `${j.z_diff.toFixed(1)} ohm` })
+  }
+  const il100 = computeIL(j, std.freq_il_mhz, 100)
+  if (il100 != null) {
+    checks.push({ label: `IL <= ${std.max_il_db_per_100m} dB/100m @ ${std.freq_il_mhz} MHz`, ok: il100 <= std.max_il_db_per_100m, value: `${il100.toFixed(1)} dB` })
+  }
+  if (std.min_next_db > 0 && j.next_db_estimate != null) {
+    checks.push({ label: `NEXT >= ${std.min_next_db} dB`, ok: j.next_db_estimate >= std.min_next_db, value: `${j.next_db_estimate.toFixed(1)} dB` })
+  }
+  if (std.max_skew_ps_per_m > 0 && j.pair_skew_ps_per_m != null) {
+    checks.push({ label: `Skew <= ${std.max_skew_ps_per_m} ps/m`, ok: j.pair_skew_ps_per_m <= std.max_skew_ps_per_m, value: `${j.pair_skew_ps_per_m.toFixed(1)} ps/m` })
+  }
+  return checks
+}
+
+function collectWarnings(sim) {
+  if (!sim) return []
+  return STAGE_FLOW.flatMap((stageId) => {
+    const warn = sim[stageId]?.warn || []
+    return warn.map((message) => ({ stageId, label: STAGE_LABELS[stageId] || stageId, message }))
+  })
+}
+
+function metricsFromSim(sim, std, recipe) {
+  const j = sim?.jacket || {}
+  return {
+    z0: j.z_diff,
+    il100: sim ? computeIL(j, std?.freq_il_mhz || recipe?.test?.freq_mhz || 500, 100) : null,
+    testIl: sim?.il_db,
+    next: j.next_db_estimate,
+    skew: j.pair_skew_ps_per_m,
+    coverage: j.coverage_pct,
+    od: j.final_od_mm,
+    mass: j.mass_g_per_m,
+    cost: j.cost_per_m,
+  }
+}
+
+function buildReport({ recipe, sim, std, mode, appliedStages }) {
+  const warnings = collectWarnings(sim)
+  const checks = buildChecks(sim, std)
+  return {
+    generated_at: new Date().toISOString(),
+    target: std?.name || recipe.product?.target || 'Custom',
+    mode,
+    applied_stages: Array.from(appliedStages || []),
+    metrics: metricsFromSim(sim, std, recipe),
+    checks,
+    warnings,
+    recipe: toPipelineRecipe(recipe),
+  }
+}
+
+function reportToCsv(report) {
+  const rows = [
+    ['section', 'name', 'value', 'status'],
+    ...Object.entries(report.metrics || {}).map(([name, value]) => ['metric', name, value ?? '', '']),
+    ...(report.checks || []).map((check) => ['check', check.label, check.value, check.ok ? 'PASS' : 'REVIEW']),
+    ...(report.warnings || []).map((warning) => ['warning', warning.label, warning.message, '']),
+  ]
+  return rows
+    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    .join('\n')
+}
+
+function downloadText(filename, text, type = 'text/plain') {
+  const blob = new Blob([text], { type })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 const initialDraft = (stage) => {
@@ -136,7 +323,7 @@ export default function CableBuilder() {
     if (saved) {
       return {
         currentStage: saved.currentStage ?? 0,
-        recipe: saved.recipe || defaultRecipeFromStages(),
+        recipe: hydrateBuilderRecipe(saved.recipe || defaultRecipeFromStages()),
         appliedStages: new Set(saved.appliedStages || []),
         mode: saved.mode || 'sandbox',
         targetStandard: saved.targetStandard || 'cat6a',
@@ -145,7 +332,7 @@ export default function CableBuilder() {
     }
     return {
       currentStage: 0,
-      recipe: defaultRecipeFromStages(),
+      recipe: hydrateBuilderRecipe(defaultRecipeFromStages()),
       appliedStages: new Set(),
       mode: 'sandbox',
       targetStandard: 'cat6a',
@@ -159,11 +346,20 @@ export default function CableBuilder() {
   const [mode, setMode] = useState(initial.mode)
   const [targetStandard, setTargetStandard] = useState(initial.targetStandard)
   const [draftFields, setDraftFields] = useState(initial.draftFields)
+  const [baseline, setBaseline] = useState(() => loadBaseline())
+  const [notice, setNotice] = useState('')
+  const [optimizing, setOptimizing] = useState(false)
 
   // Persist state on change
   useEffect(() => {
     saveState({ currentStage, recipe, appliedStages, mode, targetStandard, draftFields })
   }, [currentStage, recipe, appliedStages, mode, targetStandard, draftFields])
+
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(() => setNotice(''), 2600)
+    return () => clearTimeout(t)
+  }, [notice])
 
   // When the current stage changes, reset the draft from existing recipe values
   // (so navigating Back keeps the previously committed values pre-filled).
@@ -179,13 +375,14 @@ export default function CableBuilder() {
   }, [currentStage])
 
   // ── Pipeline: compute live specs from current recipe ──
+  const pipelineRecipe = useMemo(() => toPipelineRecipe(recipe), [recipe])
   const sim = useMemo(() => {
     try {
-      return runPipeline(recipe)
+      return runPipeline(pipelineRecipe)
     } catch {
       return null
     }
-  }, [recipe])
+  }, [pipelineRecipe])
 
   const std = STANDARDS[targetStandard] || STANDARDS.cat6a
 
@@ -215,10 +412,88 @@ export default function CableBuilder() {
 
   const reset = () => {
     if (!window.confirm('Reset the build and start over?')) return
-    setRecipe(defaultRecipeFromStages())
+    setRecipe(hydrateBuilderRecipe(defaultRecipeFromStages()))
     setAppliedStages(new Set())
     setCurrentStage(0)
     setDraftFields(initialDraft(STAGES[0]))
+  }
+
+  const loadRecipeIntoBuilder = (nextRecipe, message = 'Loaded build') => {
+    const hydrated = hydrateBuilderRecipe(nextRecipe)
+    setRecipe(hydrated)
+    setTargetStandard(hydrated.product?.target || targetStandard)
+    setAppliedStages(allStagesApplied())
+    setCurrentStage(STAGES.length - 1)
+    setDraftFields(hydrated[STAGES[STAGES.length - 1].id] || initialDraft(STAGES[STAGES.length - 1]))
+    setNotice(message)
+  }
+
+  const loadTemplate = (id) => {
+    const template = RECIPE_TEMPLATES[id]
+    if (!template) return
+    loadRecipeIntoBuilder(template.recipe, `Loaded preset: ${template.name}`)
+  }
+
+  const finishRemainingStages = () => {
+    const next = hydrateBuilderRecipe({
+      ...recipe,
+      [stage.id]: { ...(recipe[stage.id] || {}), ...draftFields },
+      product: { ...(recipe.product || {}), target: targetStandard },
+    })
+    loadRecipeIntoBuilder(next, 'Filled remaining stages with current defaults')
+  }
+
+  const runBuilderAutoFix = () => {
+    setOptimizing(true)
+    setTimeout(() => {
+      try {
+        const result = autoFix({
+          ...pipelineRecipe,
+          product: { ...(pipelineRecipe.product || {}), target: targetStandard },
+        }, 50)
+        loadRecipeIntoBuilder(result.recipe, result.converged ? `Auto-fix passed in ${result.iterations} steps` : `Auto-fix found best score ${result.score.toFixed(2)}`)
+      } catch (err) {
+        setNotice(`Auto-fix error: ${err.message || err}`)
+      } finally {
+        setOptimizing(false)
+      }
+    }, 20)
+  }
+
+  const pinBaseline = () => {
+    if (!sim) return
+    const snapshot = {
+      label: `${std.name} baseline · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      recipe: pipelineRecipe,
+      targetStandard,
+    }
+    setBaseline(snapshot)
+    saveBaseline(snapshot)
+    setNotice('Baseline pinned for comparison')
+  }
+
+  const removeBaseline = () => {
+    setBaseline(null)
+    clearSavedBaseline()
+    setNotice('Baseline cleared')
+  }
+
+  const makeCurrentReport = () => buildReport({ recipe, sim, std, mode, appliedStages })
+
+  const copyReport = async () => {
+    const text = JSON.stringify(makeCurrentReport(), null, 2)
+    try {
+      await navigator.clipboard.writeText(text)
+      setNotice('JSON report copied')
+    } catch {
+      downloadText('cable-builder-report.json', text, 'application/json')
+      setNotice('Clipboard blocked, downloaded JSON instead')
+    }
+  }
+
+  const downloadCsv = () => {
+    downloadText('cable-builder-report.csv', reportToCsv(makeCurrentReport()), 'text/csv')
+    setNotice('CSV report downloaded')
   }
 
   // ── Render ──
@@ -313,6 +588,22 @@ export default function CableBuilder() {
         </div>
       </div>
 
+      <BuilderTools
+        targetStandard={targetStandard}
+        setTargetStandard={setTargetStandard}
+        onLoadTemplate={loadTemplate}
+        onFinish={finishRemainingStages}
+        onAutoFix={runBuilderAutoFix}
+        optimizing={optimizing}
+        onPinBaseline={pinBaseline}
+        onClearBaseline={removeBaseline}
+        hasBaseline={!!baseline}
+        onCopyReport={copyReport}
+        onDownloadCsv={downloadCsv}
+        notice={notice}
+        checks={appliedStages.size > 0 ? buildChecks(sim, std) : []}
+      />
+
       {/* Main two-column layout */}
       <div className="grid lg:grid-cols-[1fr_420px] gap-4">
         {/* LEFT: 3D preview + live specs */}
@@ -340,7 +631,14 @@ export default function CableBuilder() {
           </div>
 
           {/* Live specs */}
-          <SpecsPanel sim={sim} std={std} mode={mode} appliedStages={appliedStages} recipe={recipe} />
+          <SpecsPanel sim={sim} std={std} mode={mode} appliedStages={appliedStages} recipe={recipe} setRecipe={setRecipe} />
+          {appliedStages.size > 0 && (
+            <>
+              <DesignReviewPanel sim={sim} std={std} mode={mode} />
+              <BomPanel sim={sim} />
+              <ComparisonPanel baseline={baseline} current={{ recipe: pipelineRecipe, sim, std }} onClear={removeBaseline} />
+            </>
+          )}
         </div>
 
         {/* RIGHT: stage card */}
@@ -368,6 +666,107 @@ export default function CableBuilder() {
         </div>
       </div>
     </div>
+  )
+}
+
+function BuilderTools({
+  targetStandard,
+  setTargetStandard,
+  onLoadTemplate,
+  onFinish,
+  onAutoFix,
+  optimizing,
+  onPinBaseline,
+  onClearBaseline,
+  hasBaseline,
+  onCopyReport,
+  onDownloadCsv,
+  notice,
+  checks,
+}) {
+  const failing = checks.filter((c) => !c.ok).length
+  return (
+    <div className="bg-[#12171a] border border-[#252e33] rounded p-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: C.teal }}>
+            Builder tools
+          </div>
+          <div className="text-[11px] mt-1" style={{ color: C.textMuted }}>
+            Presets, optimizer, reports, baseline compare, and fast finish controls.
+          </div>
+        </div>
+        <div className="font-mono text-[10px] uppercase tracking-wider" style={{ color: failing ? C.amber : C.teal }}>
+          {checks.length ? `${checks.length - failing}/${checks.length} checks passing` : 'No checks yet'}
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-[1fr_1fr_auto] gap-2 mt-3 items-end">
+        <div>
+          <div className="font-mono text-[9px] uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>Load preset</div>
+          <select
+            defaultValue=""
+            onChange={(e) => {
+              if (e.target.value) onLoadTemplate(e.target.value)
+              e.target.value = ''
+            }}
+            className="w-full bg-[#0a0d0f] border border-[#252e33] rounded px-2 py-2 text-[11px] font-mono focus:outline-none focus:border-[#c97b3f]"
+            style={{ color: C.text }}
+          >
+            <option value="" disabled>Choose a full cable recipe...</option>
+            {Object.entries(RECIPE_TEMPLATES).map(([id, t]) => (
+              <option key={id} value={id}>{t.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <div className="font-mono text-[9px] uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>Target standard</div>
+          <select
+            value={targetStandard}
+            onChange={(e) => setTargetStandard(e.target.value)}
+            className="w-full bg-[#0a0d0f] border border-[#252e33] rounded px-2 py-2 text-[11px] font-mono focus:outline-none focus:border-[#c97b3f]"
+            style={{ color: C.amber }}
+          >
+            {Object.entries(STANDARDS).map(([id, s]) => (
+              <option key={id} value={id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-wrap md:justify-end">
+          <ToolButton onClick={onFinish} icon={<SkipForward size={12} />} label="Finish" />
+          <ToolButton onClick={onAutoFix} disabled={optimizing} icon={optimizing ? <Activity size={12} className="animate-pulse" /> : <Wand2 size={12} />} label={optimizing ? 'Fixing' : 'Auto-fix'} accent />
+          <ToolButton onClick={onPinBaseline} icon={<Save size={12} />} label="Pin" />
+          {hasBaseline && <ToolButton onClick={onClearBaseline} icon={<History size={12} />} label="Clear" />}
+          <ToolButton onClick={onCopyReport} icon={<Download size={12} />} label="JSON" />
+          <ToolButton onClick={onDownloadCsv} icon={<Download size={12} />} label="CSV" />
+        </div>
+      </div>
+
+      {notice && (
+        <div className="mt-2 text-[11px] font-mono" style={{ color: C.copperBright }}>
+          {notice}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolButton({ onClick, icon, label, disabled, accent }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="px-2.5 py-2 text-[10px] font-mono uppercase tracking-wider rounded border bg-transparent flex items-center gap-1 disabled:opacity-40"
+      style={{
+        borderColor: accent ? C.copper + '80' : C.borderHi,
+        color: accent ? C.copperBright : C.textDim,
+      }}
+    >
+      {icon}
+      {label}
+    </button>
   )
 }
 
@@ -532,7 +931,7 @@ function Label({ text, hint }) {
 // ─────────────────────────────────────────────────────────
 // Live specs panel — Z₀ / IL / NEXT / skew / cost / coverage
 // ─────────────────────────────────────────────────────────
-function SpecsPanel({ sim, std, mode, appliedStages, recipe }) {
+function SpecsPanel({ sim, std, mode, appliedStages, recipe, setRecipe }) {
   if (!sim || appliedStages.size === 0) {
     return (
       <div className="bg-[#12171a] border border-[#252e33] rounded p-3 text-center text-[11px]" style={{ color: C.textMuted }}>
@@ -543,6 +942,11 @@ function SpecsPanel({ sim, std, mode, appliedStages, recipe }) {
 
   const j = sim.jacket || {}
   const il100 = computeIL(j, std?.freq_il_mhz || 500, 100)
+  const testLength = recipe.test?.length_m ?? 100
+  const testFreq = recipe.test?.freq_mhz ?? std?.freq_il_mhz ?? 500
+  const updateTest = (field, value) => {
+    setRecipe((r) => ({ ...r, test: { ...(r.test || {}), [field]: value } }))
+  }
 
   const tiles = [
     {
@@ -558,6 +962,13 @@ function SpecsPanel({ sim, std, mode, appliedStages, recipe }) {
       fmt: (v) => `${v?.toFixed(1)} dB`,
       verdict: mode === 'challenge' ? verdictColor(il100, null, std.max_il_db_per_100m) : C.text,
       ready: appliedStages.has('insulation'),
+    },
+    {
+      label: `Link IL · ${testLength} m @ ${testFreq} MHz`,
+      value: sim.il_db,
+      fmt: (v) => `${v?.toFixed(2)} dB`,
+      verdict: C.amber,
+      ready: appliedStages.has('jacket'),
     },
     {
       label: std.min_next_db > 0 ? `NEXT ≥ ${std.min_next_db} dB` : 'NEXT',
@@ -581,6 +992,13 @@ function SpecsPanel({ sim, std, mode, appliedStages, recipe }) {
       ready: appliedStages.has('jacket'),
     },
     {
+      label: 'Shield coverage',
+      value: j.coverage_pct,
+      fmt: (v) => `${v?.toFixed(0)}%`,
+      verdict: j.coverage_pct >= 85 ? C.teal : j.coverage_pct >= 65 ? C.amber : C.red,
+      ready: appliedStages.has('shield'),
+    },
+    {
       label: 'Cost / m',
       value: j.cost_per_m,
       fmt: (v) => `$${v?.toFixed(2)}`,
@@ -594,6 +1012,26 @@ function SpecsPanel({ sim, std, mode, appliedStages, recipe }) {
       <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: C.teal }}>
         Live specs · {mode === 'challenge' ? `vs ${std.name}` : 'sandbox readouts'}
       </div>
+      <div className="grid md:grid-cols-2 gap-2 mb-3">
+        <TestInput
+          label="Test length"
+          value={testLength}
+          min={0.1}
+          max={500}
+          step={0.1}
+          unit="m"
+          onChange={(v) => updateTest('length_m', v)}
+        />
+        <TestInput
+          label="Test frequency"
+          value={testFreq}
+          min={1}
+          max={40000}
+          step={1}
+          unit="MHz"
+          onChange={(v) => updateTest('freq_mhz', v)}
+        />
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
         {tiles.map((t, i) => (
           <div key={i} className="bg-[#0a0d0f] border border-[#252e33] rounded p-2">
@@ -603,6 +1041,181 @@ function SpecsPanel({ sim, std, mode, appliedStages, recipe }) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function TestInput({ label, value, min, max, step, unit, onChange }) {
+  return (
+    <label className="bg-[#0a0d0f] border border-[#252e33] rounded p-2 block">
+      <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: C.textMuted }}>{label}</div>
+      <div className="flex items-center gap-2 mt-1">
+        <input
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value) || min)}
+          className="w-full bg-transparent text-[13px] font-mono focus:outline-none"
+          style={{ color: C.amber }}
+        />
+        <span className="font-mono text-[10px]" style={{ color: C.textMuted }}>{unit}</span>
+      </div>
+    </label>
+  )
+}
+
+function DesignReviewPanel({ sim, std }) {
+  if (!sim) return null
+  const checks = buildChecks(sim, std)
+  const warnings = collectWarnings(sim)
+  const failing = checks.filter((c) => !c.ok)
+  const topWarnings = warnings.slice(0, 4)
+
+  return (
+    <div className="bg-[#12171a] border border-[#252e33] rounded p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: C.copperBright }}>
+          Manufacturing review
+        </div>
+        <div className="font-mono text-[10px]" style={{ color: failing.length ? C.amber : C.teal }}>
+          {failing.length ? `${failing.length} spec item${failing.length === 1 ? '' : 's'} need tuning` : 'Spec checks look good'}
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-3 mt-3">
+        <div className="space-y-1.5">
+          {checks.map((check, i) => (
+            <div key={i} className="flex items-start gap-2 text-[11px]">
+              {check.ok ? <CheckCircle2 size={13} className="mt-0.5 shrink-0" style={{ color: C.teal }} /> : <AlertTriangle size={13} className="mt-0.5 shrink-0" style={{ color: C.amber }} />}
+              <span style={{ color: C.textDim }}>{check.label}: <span style={{ color: check.ok ? C.teal : C.amber }}>{check.value}</span></span>
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-1.5">
+          {topWarnings.length === 0 ? (
+            <div className="text-[11px]" style={{ color: C.textMuted }}>No process warnings from the active recipe.</div>
+          ) : (
+            topWarnings.map((warning, i) => (
+              <div key={i} className="text-[11px] leading-relaxed" style={{ color: C.textDim }}>
+                <span className="font-mono uppercase" style={{ color: C.amber }}>{warning.label}</span> · {warning.message}
+              </div>
+            ))
+          )}
+          {warnings.length > topWarnings.length && (
+            <div className="font-mono text-[10px]" style={{ color: C.textMuted }}>
+              +{warnings.length - topWarnings.length} more warnings in later stages
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BomPanel({ sim }) {
+  if (!sim) return null
+  let previousMass = 0
+  let previousCost = 0
+  const rows = STAGE_FLOW
+    .map((stageId) => {
+      const data = sim[stageId]
+      if (!data || data.mass_g_per_m == null || data.cost_per_m == null) return null
+      const mass = Math.max(0, data.mass_g_per_m - previousMass)
+      const cost = Math.max(0, data.cost_per_m - previousCost)
+      previousMass = data.mass_g_per_m
+      previousCost = data.cost_per_m
+      return { stageId, label: STAGE_LABELS[stageId] || stageId, mass, cost, yieldPct: data.yield_pct }
+    })
+    .filter(Boolean)
+
+  return (
+    <div className="bg-[#12171a] border border-[#252e33] rounded p-3">
+      <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: C.teal }}>
+        BOM / process cost
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="font-mono uppercase tracking-wider" style={{ color: C.textMuted }}>
+              <th className="text-left font-normal py-1">Stage</th>
+              <th className="text-right font-normal py-1">Mass</th>
+              <th className="text-right font-normal py-1">Cost</th>
+              <th className="text-right font-normal py-1">Yield</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.stageId} className="border-t" style={{ borderColor: C.border }}>
+                <td className="py-1.5" style={{ color: C.textDim }}>{row.label}</td>
+                <td className="py-1.5 text-right font-mono" style={{ color: C.text }}>{fmtNum(row.mass, 1, ' g/m')}</td>
+                <td className="py-1.5 text-right font-mono" style={{ color: C.copperBright }}>{fmtNum(row.cost, 3, ' $/m')}</td>
+                <td className="py-1.5 text-right font-mono" style={{ color: row.yieldPct >= 96 ? C.teal : C.amber }}>{fmtNum(row.yieldPct, 1, '%')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function ComparisonPanel({ baseline, current, onClear }) {
+  if (!baseline || !current?.sim) return null
+
+  let baseSim = null
+  try {
+    baseSim = runPipeline(toPipelineRecipe(baseline.recipe))
+  } catch {
+    baseSim = null
+  }
+  if (!baseSim) return null
+
+  const baseStd = STANDARDS[baseline.targetStandard] || current.std
+  const base = metricsFromSim(baseSim, baseStd, baseline.recipe)
+  const now = metricsFromSim(current.sim, current.std, current.recipe)
+  const rows = [
+    { label: 'OD', key: 'od', digits: 2, unit: ' mm' },
+    { label: 'Z0', key: 'z0', digits: 1, unit: ' ohm' },
+    { label: 'IL / 100m', key: 'il100', digits: 1, unit: ' dB' },
+    { label: 'Mass', key: 'mass', digits: 0, unit: ' g/m' },
+    { label: 'Cost', key: 'cost', digits: 2, unit: ' $/m' },
+  ]
+
+  return (
+    <div className="bg-[#12171a] border border-[#252e33] rounded p-3">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: C.copperBright }}>
+            Baseline compare
+          </div>
+          <div className="text-[10px] mt-1" style={{ color: C.textMuted }}>{baseline.label}</div>
+        </div>
+        <button
+          onClick={onClear}
+          className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider rounded border bg-transparent"
+          style={{ borderColor: C.borderHi, color: C.textDim }}
+        >
+          Clear
+        </button>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        {rows.map((row) => {
+          const delta = (now[row.key] ?? 0) - (base[row.key] ?? 0)
+          const sign = delta > 0 ? '+' : ''
+          return (
+            <div key={row.key} className="bg-[#0a0d0f] border border-[#252e33] rounded p-2">
+              <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: C.textMuted }}>{row.label}</div>
+              <div className="font-mono text-[13px] mt-0.5" style={{ color: C.text }}>{fmtNum(now[row.key], row.digits, row.unit)}</div>
+              <div className="font-mono text-[10px]" style={{ color: Math.abs(delta) < 0.001 ? C.textMuted : C.amber }}>
+                {sign}{fmtNum(delta, row.digits, row.unit)}
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

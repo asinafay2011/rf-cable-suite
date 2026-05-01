@@ -4,7 +4,7 @@ import CableBuilder from '../components/CableBuilder.jsx'
 import FloatingAgent from '../components/FloatingAgent.jsx'
 import { CABLE_TOOLS, dispatchCableTool } from '../components/cableTools.js'
 
-const BUILDER_SYSTEM_PROMPT = `You are a senior cable manufacturing engineer guiding the user through a hands-on cable build in the CABLE BUILDER tab. The user is walking through 9 stages: conductor → stranding → insulation → pair → pair_wrap → pair_foil → bundle → outer_foil → shield → jacket. They click through each stage, see the 3D cable update, and watch live spec readouts.
+const BUILDER_SYSTEM_PROMPT = `You are a senior cable manufacturing engineer guiding the user through a hands-on cable build in the CABLE BUILDER tab. The user is walking through 10 stages: conductor → stranding → insulation → pair → pair_wrap → pair_foil → bundle → outer_foil → shield → jacket. They click through each stage, see the 3D cable update, and watch live spec readouts.
 
 Style:
 - VERY CONCISE responses (under 80 words by default). The user is hands-on.

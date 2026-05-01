@@ -454,6 +454,7 @@ const CABLES = {
   ava5: { name: "AVA5-50", cat: "heliax", alias: "Andrew AVA low-PIM 7/8\"",
     z: 50, vp: 91, cap: 70, mass: 400, fMax: 5.9, vMax: 4500,
     d: 9.40, D: 23.5, shield: 25.4, OD: 28.0, flex: "low", outdoor: true, power: "high", complexity: "high",
+    render: "/cable-renders/ava5-50-cutaway.png",
     atten: [[100, 0.79], [450, 1.73], [900, 2.55], [2000, 3.97], [2400, 4.40], [5000, 6.80]],
     cons: { conductor: "Solid Cu + low-loss PE spacer", dielectric: "Air + low-loss PE spacer", shield: "Annular corrugated Cu tube", jacket: "Low-halogen PE, black" },
     proc: ["Low-PIM assembly process", "Annular Cu tube + centered spacer", "Dry-gas N2 pressurized", "Low-halogen PE jacket", "PIM tested < -160 dBc at 2 x 43 dBm"],
@@ -3649,6 +3650,7 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared
   }, [buildStep, expanded]);
 
   const replay = (e) => { e.stopPropagation(); setBuildStep(0); setSelectedLayer(null); };
+  const shieldLayers = getShieldLayers(c.cons);
 
   return (
     <div className="hover-card" style={{ ...S.cableCard, ...(expanded ? S.cableCardExpanded : {}) }}>
@@ -3688,7 +3690,13 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared
               <button onClick={replay} style={{ background: "rgba(217,119,6,0.15)", color: "#fbbf24", border: "1px solid #d97706", padding: "3px 10px", fontSize: 9, letterSpacing: 1, cursor: "pointer", borderRadius: 3, textTransform: "uppercase", fontWeight: 600 }}>↻ Replay build</button>
             </div>
             <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap", justifyContent: "center" }}>
-              <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} cons={c.cons} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} onLayerClick={setSelectedLayer} onLayerHover={setHoveredLayer} />
+              {c.render && (
+                <div style={S.generatedRender}>
+                  <div style={S.generatedRenderLabel}>Generated cutaway</div>
+                  <img src={c.render} alt={`${c.name} cutaway render`} style={S.generatedRenderImg} />
+                </div>
+              )}
+              <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} cons={c.cons} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} onLayerClick={setSelectedLayer} onLayerHover={setHoveredLayer} />
               {selectedLayer && <LayerDetailPanel layer={selectedLayer} c={c} onClose={() => setSelectedLayer(null)} units={units} />}
             </div>
           </div>
@@ -3740,7 +3748,9 @@ function CableCard({ id, cable: c, expanded, onToggle, onDesign, onAsk, compared
               <DS title="Materials & Layers">
                 <Layer n="1" name="Inner Conductor" color="#fbbf24" desc={c.cons.conductor} />
                 <Layer n="2" name="Dielectric" color="#fde68a" desc={c.cons.dielectric} />
-                <Layer n="3" name="Shield" color="#9ca3af" desc={c.cons.shield} />
+                {shieldLayers.map((layer, i) => (
+                  <Layer key={layer.key} n={`3.${i + 1}`} name={layer.name} color={layer.color} desc={layer.desc} />
+                ))}
                 <Layer n="4" name="Jacket" color="#57534e" desc={c.cons.jacket} />
               </DS>
               <DS title="Manufacturing Process">
@@ -5748,21 +5758,27 @@ const LAYER_INFO = {
 
 function LayerDetailPanel({ layer, c, onClose, units }) {
   if (!layer) return null;
-  const info = LAYER_INFO[layer];
+  const shieldLayer = layer.startsWith("shield")
+    ? getShieldLayers(c.cons).find(l => l.key === layer) || getShieldLayers(c.cons)[0]
+    : null;
+  const baseLayer = shieldLayer ? "shield" : layer;
+  const info = LAYER_INFO[baseLayer] || LAYER_INFO.shield;
   const dims = {
     conductor: { label: "Inner conductor d", mm: c.d },
     dielectric: { label: "Dielectric OD", mm: c.D },
     shield: { label: "Shield OD", mm: c.shield },
     jacket: { label: "Jacket OD", mm: c.OD },
-  }[layer];
-  const matColor = { conductor: "#fbbf24", dielectric: "#fde68a", shield: "#9ca3af", jacket: "#a8a29e" }[layer];
+  }[baseLayer];
+  const matColor = shieldLayer?.color || { conductor: "#fbbf24", dielectric: "#fde68a", shield: "#9ca3af", jacket: "#a8a29e" }[baseLayer];
+  const displayName = shieldLayer?.name || baseLayer;
+  const materialText = shieldLayer?.desc || c.cons[baseLayer];
   return (
     <div style={{ flex: 1, minWidth: 240, padding: 14, background: "rgba(15,10,5,0.55)", border: `1px solid ${matColor}33`, borderRadius: 4, fontSize: 10.5, lineHeight: 1.55 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingBottom: 8, borderBottom: `1px solid ${matColor}22` }}>
-        <div style={{ color: matColor, fontSize: 10, letterSpacing: 2, fontWeight: 700, textTransform: "uppercase" }}>{layer}</div>
+        <div style={{ color: matColor, fontSize: 10, letterSpacing: 2, fontWeight: 700, textTransform: "uppercase" }}>{displayName}</div>
         <button onClick={onClose} style={{ background: "none", border: "none", color: "#a8a29e", cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1 }}>✕</button>
       </div>
-      <div style={{ color: "#e7e5e4", fontWeight: 600, marginBottom: 4 }}>{wrapTerms(c.cons[layer])}</div>
+      <div style={{ color: "#e7e5e4", fontWeight: 600, marginBottom: 4 }}>{wrapTerms(materialText)}</div>
       <div style={{ color: "#d6cfc4", marginBottom: 10 }}>{dims.label}: {fmtLen(dims.mm, units)}</div>
       <div style={{ color: "#a8a29e", fontSize: 9.5, letterSpacing: 1.5, marginTop: 8, marginBottom: 3, textTransform: "uppercase" }}>Function</div>
       <div style={{ color: "#d6cfc4", marginBottom: 8 }}>{info.function}</div>
@@ -6011,6 +6027,85 @@ function shortMat(s) {
   return before.replace(/^(\d+[- ]?strand(ed)?|solid|bare|single|double|triple|quad)\s+/i, "").replace(/\s+(each|wire)$/i, "");
 }
 
+const SHIELD_LAYER_TYPES = {
+  foil: { name: "Foil shield", color: "#cbd5e1", fill: "url(#foil-p)" },
+  braid: { name: "Braid shield", color: "#9ca3af", fill: "url(#braid-p)" },
+  tube: { name: "Corrugated Cu tube", color: "#c7793d", fill: "url(#corrugated-cu-p)" },
+  shield: { name: "Shield", color: "#9ca3af", fill: "url(#braid-p)" },
+};
+
+function makeShieldLayer(type, index, desc, name) {
+  const meta = SHIELD_LAYER_TYPES[type] || SHIELD_LAYER_TYPES.shield;
+  return {
+    ...meta,
+    key: `shield-${type}-${index + 1}`,
+    type,
+    name: name || meta.name,
+    desc: desc || meta.name,
+  };
+}
+
+function getShieldLayers(cons) {
+  const desc = cons?.shield || "Shield";
+  const text = desc.toLowerCase();
+  const layers = [];
+  const push = (type, name) => layers.push(makeShieldLayer(type, layers.length, desc, name));
+
+  if (/corrugat|annular|seam[- ]?weld|solid\s+(cu|copper)\s+tube|\b(cu|copper)\s+tube|\btube\b/.test(text)) {
+    push("tube", /annular/.test(text) ? "Annular corrugated Cu tube" : "Corrugated Cu tube");
+    return layers;
+  }
+
+  if (/foil\s*\+\s*braid\s*\+\s*foil\s*\+\s*braid|quad/.test(text)) {
+    push("foil", "Inner foil shield");
+    push("braid", "Inner braid shield");
+    push("foil", "Outer foil shield");
+    push("braid", "Outer braid shield");
+    return layers;
+  }
+
+  if (/tri[- ]?shield|triple[- ]?shield/.test(text)) {
+    push("foil", "Inner foil shield");
+    push("braid", "Braid shield");
+    push("foil", "Outer foil shield");
+    return layers;
+  }
+
+  const hasFoil = /foil|duobond|bonded|al[- ]?polymer|aluminum/.test(text);
+  const hasBraid = /braid|serve|woven/.test(text);
+  const foilCount = hasFoil && /dual[- ]?foil|double[- ]?foil/.test(text) ? 2 : hasFoil ? 1 : 0;
+  const braidCount = hasBraid && /double.*braid|dual.*braid/.test(text) ? 2 : hasBraid ? 1 : 0;
+
+  if (foilCount && braidCount) {
+    const foilFirst = text.indexOf("foil") === -1 || (text.indexOf("braid") !== -1 && text.indexOf("foil") < text.indexOf("braid"));
+    const max = Math.max(foilCount, braidCount);
+    for (let i = 0; i < max; i++) {
+      if (foilFirst) {
+        if (i < foilCount) push("foil", foilCount > 1 ? `${i ? "Outer" : "Inner"} foil shield` : "Foil shield");
+        if (i < braidCount) push("braid", braidCount > 1 ? `${i ? "Outer" : "Inner"} braid shield` : "Braid shield");
+      } else {
+        if (i < braidCount) push("braid", braidCount > 1 ? `${i ? "Outer" : "Inner"} braid shield` : "Braid shield");
+        if (i < foilCount) push("foil", foilCount > 1 ? `${i ? "Outer" : "Inner"} foil shield` : "Foil shield");
+      }
+    }
+  } else {
+    for (let i = 0; i < foilCount; i++) push("foil", foilCount > 1 ? `${i ? "Outer" : "Inner"} foil shield` : "Foil shield");
+    for (let i = 0; i < braidCount; i++) push("braid", braidCount > 1 ? `${i ? "Outer" : "Inner"} braid shield` : "Braid shield");
+  }
+
+  if (!layers.length && /(dual|double).*(shield|screen)/.test(text)) {
+    push("shield", "Inner shield");
+    push("shield", "Outer shield");
+  }
+  if (!layers.length) push("shield", "Shield");
+  return layers;
+}
+
+function compactShieldCalloutName(layer) {
+  if (layer.type === "tube") return "Shield tube";
+  return layer.name.replace(/\s+shield$/i, "");
+}
+
 function getStrands(n, totalR) {
   if (n <= 1) return null;
   if (n === 7) {
@@ -6031,7 +6126,7 @@ function getStrands(n, totalR) {
   return { strandR: r, positions };
 }
 
-function CrossSection({ d, D, shield, jacket, units, cons, buildStep = 4, selectedLayer, hoveredLayer, onLayerClick, onLayerHover }) {
+function CrossSection({ d, D, shield, jacket, units, cons, shieldLayers, buildStep = 4, selectedLayer, hoveredLayer, onLayerClick, onLayerHover }) {
   const size = 300, cx = size / 2, cy = size / 2, maxR = size * 0.26;
   const interactive = !!onLayerClick;
   const layerStyle = (key, step) => {
@@ -6052,7 +6147,17 @@ function CrossSection({ d, D, shield, jacket, units, cons, buildStep = 4, select
     onMouseLeave: () => onLayerHover && onLayerHover(null),
   } : {};
   const scale = maxR / (jacket / 2);
-  const r_in = (d / 2) * scale, r_dx = (D / 2) * scale, r_sh = (shield / 2) * scale, r_jk = (jacket / 2) * scale;
+  const r_in = (d / 2) * scale, r_dx = (D / 2) * scale, r_jk = (jacket / 2) * scale;
+  const parsedShieldLayers = shieldLayers?.length ? shieldLayers : getShieldLayers(cons);
+  const shieldSpan = Math.max(0.5, shield - D);
+  const shieldRings = parsedShieldLayers.map((layer, i) => {
+    const outerMm = D + shieldSpan * ((i + 1) / parsedShieldLayers.length);
+    return {
+      ...layer,
+      outerMm,
+      outerR: (outerMm / 2) * scale,
+    };
+  });
 
   const compact = (mm) => {
     const inch = (mm / 25.4).toFixed(3);
@@ -6065,10 +6170,19 @@ function CrossSection({ d, D, shield, jacket, units, cons, buildStep = 4, select
   const strands = strandMatch ? parseInt(strandMatch[1]) : 1;
   const strandData = strands > 1 ? getStrands(strands, r_in) : null;
 
+  const shieldCallouts = shieldRings.map((layer, i) => ({
+    angle: shieldRings.length === 1 ? 40 : 18 + i * 24,
+    r: layer.outerR,
+    name: compactShieldCalloutName(layer),
+    value: compact(layer.outerMm),
+    mat: shortMat(layer.desc),
+    color: layer.color,
+  }));
+
   const callouts = [
     { angle: -140, r: r_in, name: "Conductor", value: compact(d), mat: shortMat(cons?.conductor), color: "#fbbf24" },
     { angle: -40,  r: r_dx, name: "Dielectric", value: compact(D), mat: shortMat(cons?.dielectric), color: "#fde68a" },
-    { angle:  40,  r: r_sh, name: "Shield",    value: compact(shield), mat: shortMat(cons?.shield), color: "#9ca3af" },
+    ...shieldCallouts,
     { angle: 140,  r: r_jk, name: "Jacket",    value: compact(jacket), mat: shortMat(cons?.jacket), color: "#a8a29e" },
   ];
 
@@ -6101,11 +6215,26 @@ function CrossSection({ d, D, shield, jacket, units, cons, buildStep = 4, select
           <path d="M0 3h6M3 0v6" stroke="#9ca3af" strokeWidth="0.7" />
           <animateTransform attributeName="patternTransform" type="rotate" from="45" to="405" dur="60s" repeatCount="indefinite" />
         </pattern>
+        <pattern id="foil-p" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(18)">
+          <rect width="8" height="8" fill="#cbd5e1" />
+          <path d="M0 4h8" stroke="#f8fafc" strokeWidth="1" opacity="0.5" />
+        </pattern>
+        <pattern id="corrugated-cu-p" patternUnits="userSpaceOnUse" width="9" height="9">
+          <rect width="9" height="9" fill="#8a3f18" />
+          <path d="M0 1.5h9M0 6h9" stroke="#f59e0b" strokeWidth="0.8" opacity="0.75" />
+          <path d="M0 3.75h9" stroke="#451a03" strokeWidth="0.6" opacity="0.7" />
+        </pattern>
+        <radialGradient id="dielectric-grad" cx="45%" cy="40%"><stop offset="0%" stopColor="#fff7ed" stopOpacity="0.9" /><stop offset="70%" stopColor="#d6d3d1" stopOpacity="0.78" /><stop offset="100%" stopColor="#a8a29e" stopOpacity="0.68" /></radialGradient>
         <radialGradient id="jk-grad" cx="50%" cy="50%"><stop offset="70%" stopColor="#0a0705" /><stop offset="100%" stopColor="#1f1611" /></radialGradient>
       </defs>
       <circle cx={cx} cy={cy} r={r_jk} fill="url(#jk-grad)" stroke={hoveredLayer === "jacket" || selectedLayer === "jacket" ? "#a8a29e" : "#2a1f15"} strokeWidth={hoveredLayer === "jacket" || selectedLayer === "jacket" ? 2 : 1} style={{ color: "#a8a29e", ...layerStyle("jacket", 4) }} {...handlers("jacket")} />
-      <circle cx={cx} cy={cy} r={r_sh} fill="url(#braid-p)" stroke={hoveredLayer === "shield" || selectedLayer === "shield" ? "#d1d5db" : "#6b7280"} strokeWidth={hoveredLayer === "shield" || selectedLayer === "shield" ? 1.5 : 0.4} style={{ color: "#9ca3af", ...layerStyle("shield", 3) }} {...handlers("shield")} />
-      <circle cx={cx} cy={cy} r={r_dx} fill="rgba(255,250,235,0.14)" stroke={hoveredLayer === "dielectric" || selectedLayer === "dielectric" ? "#fde68a" : "rgba(217,119,6,0.4)"} strokeWidth={hoveredLayer === "dielectric" || selectedLayer === "dielectric" ? 1.5 : 0.5} style={{ color: "#fde68a", ...layerStyle("dielectric", 2) }} {...handlers("dielectric")} />
+      {shieldRings.slice().reverse().map((layer) => {
+        const active = hoveredLayer === layer.key || selectedLayer === layer.key;
+        return (
+          <circle key={layer.key} cx={cx} cy={cy} r={layer.outerR} fill={layer.fill} stroke={active ? layer.color : `${layer.color}99`} strokeWidth={active ? 1.7 : 0.45} style={{ color: layer.color, ...layerStyle(layer.key, 3) }} {...handlers(layer.key)} />
+        );
+      })}
+      <circle cx={cx} cy={cy} r={r_dx} fill="url(#dielectric-grad)" stroke={hoveredLayer === "dielectric" || selectedLayer === "dielectric" ? "#fde68a" : "rgba(217,119,6,0.4)"} strokeWidth={hoveredLayer === "dielectric" || selectedLayer === "dielectric" ? 1.5 : 0.5} style={{ color: "#fde68a", ...layerStyle("dielectric", 2) }} {...handlers("dielectric")} />
 
       {strandData ? (
         <g transform={`translate(${cx}, ${cy})`} style={{ color: "#fbbf24", ...layerStyle("conductor", 1) }} {...handlers("conductor")}>
@@ -6298,6 +6427,9 @@ const S = {
   actionRow: { display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" },
   actionBtn: { padding: "8px 14px", background: "#d97706", color: "#0a0705", border: "none", borderRadius: 2, fontFamily: "inherit", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600 },
   actionBtnSecondary: { background: "transparent", border: "1px solid #d97706", color: "#fbbf24" },
+  generatedRender: { width: 340, maxWidth: "100%", padding: 10, background: "rgba(15,10,5,0.55)", border: "1px solid rgba(217,119,6,0.22)", borderRadius: 4, boxSizing: "border-box" },
+  generatedRenderLabel: { fontSize: 9, letterSpacing: "0.18em", color: "#d97706", textTransform: "uppercase", marginBottom: 8 },
+  generatedRenderImg: { width: "100%", aspectRatio: "1 / 1", objectFit: "contain", display: "block", background: "#050302", border: "1px solid #2a1f15", borderRadius: 3 },
   detailsGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 },
   dsTitle: { fontSize: 9, letterSpacing: "0.2em", color: "#d97706", textTransform: "uppercase", marginBottom: 8, paddingBottom: 4, borderBottom: "1px solid #2a1f15" },
   dr: { display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px dashed #2a1f15", fontSize: 10, gap: 10 },
