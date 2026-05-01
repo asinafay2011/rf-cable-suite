@@ -3869,21 +3869,20 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity] || "#fbbf24";
   const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity] || c.complexity;
 
-  const [tab, setTab] = useState("overview");
   const [buildStep, setBuildStep] = useState(0);
   const [selectedLayer, setSelectedLayer] = useState(null);
   const [hoveredLayer, setHoveredLayer] = useState(null);
   const [expandedStep, setExpandedStep] = useState(null);
 
   useEffect(() => {
-    setTab("overview"); setBuildStep(0); setSelectedLayer(null); setHoveredLayer(null); setExpandedStep(null);
+    setBuildStep(0); setSelectedLayer(null); setHoveredLayer(null); setExpandedStep(null);
   }, [id]);
   useEffect(() => {
-    if (tab === "construction" && buildStep < 4) {
+    if (buildStep < 4) {
       const t = setTimeout(() => setBuildStep(s => s + 1), 750);
       return () => clearTimeout(t);
     }
-  }, [buildStep, tab]);
+  }, [buildStep]);
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onBack(); };
     document.addEventListener("keydown", onKey);
@@ -3903,12 +3902,6 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
     { icon: Radio,       label: "Max freq",  value: `${c.fMax} GHz`,    sub: "catalog limit" },
     { icon: Weight,      label: "Mass",      value: massPrimary,        sub: "" },
     { icon: ShieldCheck, label: "Shield",    value: "100%",             sub: shieldLayers?.[0]?.name || "" },
-  ];
-  const tabs = [
-    { id: "overview",     label: "Overview" },
-    { id: "construction", label: "Construction" },
-    { id: "performance",  label: "Performance" },
-    { id: "engineering",  label: "Engineering" },
   ];
 
   return (
@@ -3982,30 +3975,14 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
         </div>
       </div>
 
-      {/* Tab strip */}
-      <div style={S.cdTabs} role="tablist">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              ...S.cdTab,
-              ...(tab === t.id ? S.cdTabActive : {}),
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* All sections — single scroll, no tabs. Each block has its own
+          big heading so the user can't miss any of the data. */}
+      <div style={S.cdAllSections}>
+        <CableSection eyebrow="01" title="Layer stack" sub="Top-down construction · jacket → conductor">
+          <CableSectionLayerStack c={c} shieldLayers={shieldLayers} />
+        </CableSection>
 
-      {/* Tab content */}
-      <div style={S.cdTabPanel}>
-        {tab === "overview" && (
-          <CableTabOverview c={c} shieldLayers={shieldLayers} />
-        )}
-        {tab === "construction" && (
+        <CableSection eyebrow="02" title="Cross-section · interactive layer inspector" sub="Click any ring to see material + role">
           <CableConstructionInspector
             c={c}
             units={units}
@@ -4016,16 +3993,196 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
             setSelectedLayer={setSelectedLayer}
             setHoveredLayer={setHoveredLayer}
             replay={replay}
-            framed
           />
-        )}
-        {tab === "performance" && (
-          <CableTabPerformance c={c} units={units} />
-        )}
-        {tab === "engineering" && (
-          <CableTabEngineering c={c} units={units} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
+        </CableSection>
+
+        <CableSection eyebrow="03" title="Signal flow · live link-budget simulator" sub="Slide the controls to see how length and frequency hit margin">
+          <CableSignalSection cable={c} />
+        </CableSection>
+
+        <CableSection eyebrow="04" title="Attenuation table" sub="Frequency-resolved insertion loss · dB/100m · dB/100ft · dB/25ft">
+          <CableSectionAttenTable c={c} units={units} />
+        </CableSection>
+
+        <CableSection eyebrow="05" title="Engineering detail" sub="Electrical · mechanical · derived geometry">
+          <CableSectionEngineering c={c} units={units} />
+        </CableSection>
+
+        <CableSection eyebrow="06" title="Manufacturing process" sub="Click any step to expand the operator-facing notes">
+          <CableSectionManufacturing c={c} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
+        </CableSection>
+
+        {(c.makers || (c.benefits && c.benefits.length > 0)) && (
+          <CableSection eyebrow="07" title="Suppliers &amp; key benefits" sub="Typical makers · why pick this cable">
+            <CableSectionMakersBenefits c={c} />
+          </CableSection>
         )}
       </div>
+    </div>
+  );
+}
+
+// One major block on the detail scroll. Big eyebrow number + title + sub
+// description, copper rule above, content below. Repeats 6–7 times so
+// the user can scan the whole page top-to-bottom.
+function CableSection({ eyebrow, title, sub, children }) {
+  return (
+    <section style={S.cdSection}>
+      <header style={S.cdSectionHeader}>
+        <span style={S.cdSectionEyebrow}>◆ {eyebrow}</span>
+        <h3 style={S.cdSectionH}>{title}</h3>
+        {sub && <p style={S.cdSectionSub}>{sub}</p>}
+      </header>
+      <div style={S.cdSectionContent}>{children}</div>
+    </section>
+  );
+}
+
+// ── Section: Layer stack (4 numbered cards) ──
+function CableSectionLayerStack({ c, shieldLayers }) {
+  const shieldLayer = shieldLayers?.[0];
+  const layers = [
+    { n: "01", name: "Outer jacket",                desc: c.cons.jacket,     color: "#57534e" },
+    { n: "02", name: shieldLayer?.name || "Shield", desc: c.cons.shield,     color: shieldLayer?.color || "#f97316" },
+    { n: "03", name: "Dielectric",                  desc: c.cons.dielectric, color: "#fde68a" },
+    { n: "04", name: "Center conductor",            desc: c.cons.conductor,  color: "#fbbf24" },
+  ];
+  return (
+    <div style={S.cdLayerCardGrid}>
+      {layers.map((layer) => (
+        <div key={layer.n} style={{ ...S.cdLayerCard, borderLeft: `3px solid ${layer.color}` }}>
+          <div style={{ ...S.cdLayerCardNum, color: layer.color }}>{layer.n}</div>
+          <div style={S.cdLayerCardName}>{layer.name}</div>
+          <div style={S.cdLayerCardDesc}>{wrapTerms(layer.desc)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Section: Attenuation full table ──
+function CableSectionAttenTable({ c, units }) {
+  return (
+    <>
+      <div style={S.cdTableWrap}>
+        <table style={S.cdAttenTable}>
+          <thead>
+            <tr>
+              <th style={S.cdAttenTh}>Frequency</th>
+              {units !== "imperial" && <th style={S.cdAttenTh}>dB/100m</th>}
+              {units !== "metric"   && <th style={S.cdAttenTh}>dB/100ft</th>}
+              {units !== "metric"   && <th style={S.cdAttenTh}>dB/25ft</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {c.atten.map(([f, a], i) => (
+              <tr key={i} style={i % 2 ? S.cdAttenRowAlt : undefined}>
+                <td style={S.cdAttenTd}>{f < 1000 ? `${f} MHz` : `${fmt(f / 1000, 1)} GHz`}</td>
+                {units !== "imperial" && <td style={{ ...S.cdAttenTd, color: "#fbbf24" }}>{a.toFixed(2)}</td>}
+                {units !== "metric"   && <td style={{ ...S.cdAttenTd, color: "#fbbf24" }}>{(a * 0.3048).toFixed(2)}</td>}
+                {units !== "metric"   && <td style={{ ...S.cdAttenTd, color: "#fbbf24" }}>{(a * 0.0762).toFixed(3)}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={S.cdTableFootnote}>
+        25 ft ≈ 7.62 m — typical RG jumper / patch length. For arbitrary lengths: loss = (dB/100m) × (length in m / 100).
+      </div>
+    </>
+  );
+}
+
+// ── Section: Engineering detail (electrical + mechanical, 2 columns) ──
+function CableSectionEngineering({ c, units }) {
+  return (
+    <div style={S.cdSectionGrid}>
+      <div>
+        <div style={S.cdSubsectionTitle}>Electrical</div>
+        <div style={S.cdSpecList}>
+          <SpecRow label="Impedance"   value={`${c.z} Ω`} />
+          <SpecRow label="VP"          value={`${c.vp}%`} />
+          <SpecRow label="Capacitance" value={fmtCap(c.cap, units, 1)} />
+          <SpecRow label="Max freq"    value={`${c.fMax} GHz`} />
+          <SpecRow label="Max voltage" value={`${c.vMax} V RMS`} />
+        </div>
+      </div>
+      <div>
+        <div style={S.cdSubsectionTitle}>Mechanical</div>
+        <div style={S.cdSpecList}>
+          <SpecRow label="Inner conductor d" value={fmtLen(c.d, units)} />
+          <SpecRow label="Dielectric D"      value={fmtLen(c.D, units)} />
+          <SpecRow label="Shield OD"         value={fmtLen(c.shield, units)} />
+          <SpecRow label="Jacket OD (final)" value={fmtLen(c.OD, units)} />
+          <SpecRow label="Mass"              value={fmtMass(c.mass, units, 1)} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Section: Manufacturing process steps ──
+function CableSectionManufacturing({ c, expandedStep, setExpandedStep }) {
+  const procSteps = c.proc || [];
+  if (procSteps.length === 0) {
+    return <div style={S.cdEmptyHint}>No manufacturing steps recorded for this cable.</div>;
+  }
+  return (
+    <div style={S.cdProcList}>
+      {procSteps.map((s, i) => {
+        const info = explainStep(s);
+        const hasInfo = !!info;
+        const isOpen = expandedStep === i;
+        return (
+          <React.Fragment key={i}>
+            <div
+              style={{ ...S.cdProcStep, cursor: hasInfo ? "pointer" : "default", ...(isOpen ? { background: "rgba(217,119,6,0.06)" } : {}) }}
+              onClick={() => hasInfo && setExpandedStep(isOpen ? null : i)}
+            >
+              <div style={S.cdProcNum}>{i + 1}</div>
+              <StepIcon text={s} />
+              <div style={S.cdProcText}>{wrapTerms(s)}</div>
+              {hasInfo && (
+                <span style={{ color: "#d97706", fontSize: 11, fontFamily: "monospace", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>▸</span>
+              )}
+            </div>
+            {isOpen && info && (
+              <div style={S.cdProcInfo}>
+                <div style={S.cdProcInfoTitle}>{info.title}</div>
+                {info.body}
+              </div>
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Section: Suppliers + key benefits ──
+function CableSectionMakersBenefits({ c }) {
+  const benefits = c.benefits || [];
+  return (
+    <div style={S.cdSectionGrid}>
+      {c.makers && (
+        <div>
+          <div style={S.cdSubsectionTitle}>Typical makers</div>
+          <div style={S.cdSuppliers}>{wrapTerms(c.makers)}</div>
+        </div>
+      )}
+      {benefits.length > 0 && (
+        <div>
+          <div style={S.cdSubsectionTitle}>Key benefits</div>
+          <ul style={S.cdBenefitList}>
+            {benefits.map((b) => (
+              <li key={b} style={S.cdBenefitItem}>
+                <span style={S.cdBenefitBullet}>◆</span>
+                <span>{wrapTerms(b)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -7899,6 +8056,93 @@ const S = {
     marginBottom: 5,
     letterSpacing: "0.06em",
     fontSize: 10.5,
+  },
+
+  // ── Single-scroll section blocks (replaces tabs) ──
+  cdAllSections: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 36,
+    paddingTop: 22,
+  },
+  cdSection: { display: "flex", flexDirection: "column" },
+  cdSectionHeader: {
+    paddingBottom: 14,
+    marginBottom: 18,
+    borderBottom: "1px solid rgba(168,162,158,0.18)",
+  },
+  cdSectionEyebrow: {
+    color: "#d97706",
+    fontSize: 9,
+    letterSpacing: "0.28em",
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontWeight: 600,
+  },
+  cdSectionH: {
+    margin: "6px 0 4px",
+    color: "#fef3c7",
+    fontFamily: "'Fraunces', serif",
+    fontSize: 22,
+    fontWeight: 600,
+    letterSpacing: "-0.005em",
+    lineHeight: 1.15,
+  },
+  cdSectionSub: {
+    margin: 0,
+    color: "#a8a29e",
+    fontSize: 12,
+    lineHeight: 1.55,
+  },
+  cdSectionContent: {},
+  cdSubsectionTitle: {
+    color: "#f59e0b",
+    fontSize: 9.5,
+    letterSpacing: "0.18em",
+    textTransform: "uppercase",
+    marginBottom: 10,
+    fontWeight: 700,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  cdEmptyHint: {
+    color: "#78716c",
+    fontSize: 11,
+    fontStyle: "italic",
+    padding: "12px 0",
+  },
+
+  // Layer-stack as horizontal card grid (more visual than vertical list)
+  cdLayerCardGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 12,
+  },
+  cdLayerCard: {
+    padding: "14px 16px",
+    background: "rgba(8,8,8,0.55)",
+    border: "1px solid rgba(168,162,158,0.14)",
+    borderRadius: 4,
+    minHeight: 100,
+    display: "flex",
+    flexDirection: "column",
+  },
+  cdLayerCardNum: {
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: "0.18em",
+    fontFamily: "'JetBrains Mono', monospace",
+    marginBottom: 6,
+  },
+  cdLayerCardName: {
+    color: "#fef3c7",
+    fontSize: 14,
+    fontWeight: 600,
+    marginBottom: 6,
+  },
+  cdLayerCardDesc: {
+    color: "#a8a29e",
+    fontSize: 11.5,
+    lineHeight: 1.55,
   },
   quickStats: { display: "flex", gap: 1, alignItems: "stretch", flex: "0 1 auto", minWidth: 0, background: "rgba(168,162,158,0.1)", border: "1px solid rgba(168,162,158,0.12)" },
   qs: { minWidth: 54, padding: "8px 10px", textAlign: "left", background: "rgba(5,5,5,0.52)" },
