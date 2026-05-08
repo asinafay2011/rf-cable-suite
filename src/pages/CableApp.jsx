@@ -1281,9 +1281,9 @@ const TAB_INTROS = {
     icon: Activity,
   },
   '3d': {
-    eyebrow: '3D View · interactive cable rendering',
-    title: 'Spin a cable in 3D to understand its structure',
-    desc: 'Pick a preset (Cat 6A, RG-58, semi-rigid, USB4, QSFP DAC...), drag to rotate, zoom, toggle individual layers off, or click Explode to space layers apart. Pure CSS 3D — no external 3D library, no GPU dependence.',
+    eyebrow: '3D View · Blender cable builds',
+    title: 'Watch cable layers build from the inside out',
+    desc: 'Switch between an RF coax shield stack and a high-speed 4-pair bundle build, with Blender source, GLB, and MP4 assets kept beside the viewer.',
     accent: '#a78bfa',
     icon: Box,
   },
