@@ -151,6 +151,145 @@ const BUILDER_STAGE_VISUALS = {
   },
 }
 
+const BUILDER_DEFECT_HOTSPOTS = {
+  pair_wrap: [
+    {
+      id: 'ptfe-gap',
+      marker: 'G',
+      x: 47,
+      y: 47,
+      tone: 'amber',
+      label: 'PTFE tape gap',
+      stage: 'PTFE tape wrap',
+      defect: 'Tape edge opens and exposes the twisted pair.',
+      impact: 'Pair spacing can breathe, causing local impedance ripple and skew drift.',
+      check: 'Look for pair color showing through the wrap or an uneven lap line.',
+      fix: 'Increase overlap, lower tape tension slightly, and re-center the tape head.',
+      metrics: ['Z0 ripple', 'Skew', 'Return loss'],
+    },
+    {
+      id: 'ptfe-wrinkle',
+      marker: 'W',
+      x: 61,
+      y: 42,
+      tone: 'red',
+      label: 'PTFE wrinkle',
+      stage: 'PTFE tape wrap',
+      defect: 'Tape buckles where the helix pitch changes.',
+      impact: 'A wrinkle presses one side of the pair, adding a small capacitive bump.',
+      check: 'Inspect with side light; the lap ridge should be smooth and repeatable.',
+      fix: 'Match tape pitch to take-up speed and reduce dancer oscillation.',
+      metrics: ['Capacitance', 'Delay', 'RL notch'],
+    },
+  ],
+  pair_foil: [
+    {
+      id: 'foil-seam',
+      marker: 'S',
+      x: 52,
+      y: 43,
+      tone: 'amber',
+      label: 'Foil overlap seam',
+      stage: 'Per-pair foil shield',
+      defect: 'Foil seam rides too high or opens at the overlap.',
+      impact: 'Shield transfer impedance rises and pair-to-pair isolation gets weaker.',
+      check: 'Confirm the seam overlaps consistently and the drain remains in contact.',
+      fix: 'Tune foil width, lap angle, and drain-wire pressure before bundle closing.',
+      metrics: ['NEXT', 'Shielding', 'RL'],
+    },
+    {
+      id: 'drain-lift',
+      marker: 'D',
+      x: 72,
+      y: 52,
+      tone: 'red',
+      label: 'Drain wire lift',
+      stage: 'Per-pair foil shield',
+      defect: 'Drain wire floats away from the foil edge.',
+      impact: 'Ground reference becomes intermittent, especially after flexing.',
+      check: 'Peel back a short section and confirm continuous foil-drain contact.',
+      fix: 'Adjust binder pressure and drain placement before the foil head.',
+      metrics: ['Continuity', 'EMI', 'Flex life'],
+    },
+  ],
+  outer_foil: [
+    {
+      id: 'outer-foil-gap',
+      marker: 'O',
+      x: 50,
+      y: 47,
+      tone: 'amber',
+      label: 'Outer foil gap',
+      stage: 'Bundle foil shield',
+      defect: 'Bundle-level foil does not close around the non-round pack.',
+      impact: 'High-frequency shield coverage drops at the bundle valley.',
+      check: 'Inspect the valley between pair groups for exposed binder or spline.',
+      fix: 'Raise foil overlap and guide pressure; avoid flattening the bundle.',
+      metrics: ['EMI', 'Alien crosstalk', 'Coverage'],
+    },
+  ],
+  shield: [
+    {
+      id: 'braid-low-coverage',
+      marker: 'B',
+      x: 55,
+      y: 44,
+      tone: 'red',
+      label: 'Braid low coverage',
+      stage: 'Outer braid',
+      defect: 'Braid carriers spread unevenly over the non-round bundle.',
+      impact: 'Shield holes increase coupling and can create direction-dependent loss.',
+      check: 'Measure picks per inch and coverage around both wide and narrow axes.',
+      fix: 'Tune carrier tension and take-up speed; keep bundle shape stable before braid.',
+      metrics: ['Coverage %', 'EMI', 'NEXT'],
+    },
+    {
+      id: 'bundle-flat',
+      marker: 'F',
+      x: 66,
+      y: 53,
+      tone: 'amber',
+      label: 'Flattened bundle',
+      stage: 'Outer braid',
+      defect: 'Braid or binder pressure flattens the four-pair bundle.',
+      impact: 'Pair spacing changes across axes, pushing skew and impedance apart.',
+      check: 'Compare OD across 0/90 degrees before the jacket die.',
+      fix: 'Reduce closing pressure and balance the braid payoff tension.',
+      metrics: ['Ovality', 'Skew', 'Z0 diff'],
+    },
+  ],
+  jacket: [
+    {
+      id: 'jacket-oval',
+      marker: 'J',
+      x: 64,
+      y: 52,
+      tone: 'red',
+      label: 'Jacket ovality',
+      stage: 'Outer jacket',
+      defect: 'Final jacket follows a flattened shield stack instead of a round OD.',
+      impact: 'The cable may pass visually but fail OD, skew, or connector fit checks.',
+      check: 'Measure major/minor OD and compare to the roundness spec.',
+      fix: 'Re-center the die, stabilize vacuum sizing, and correct bundle ovality upstream.',
+      metrics: ['OD', 'Ovality', 'Skew'],
+    },
+    {
+      id: 'jacket-thin-wall',
+      marker: 'T',
+      x: 75,
+      y: 44,
+      tone: 'amber',
+      label: 'Thin wall',
+      stage: 'Outer jacket',
+      defect: 'Jacket wall is thin on one side of the shield stack.',
+      impact: 'Mechanical protection drops and shield print-through becomes likely.',
+      check: 'Cut a cross-section and compare wall thickness around the perimeter.',
+      fix: 'Center the extrusion tip/die and verify cooling pull-off alignment.',
+      metrics: ['Wall', 'OD', 'Durability'],
+    },
+  ],
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -384,11 +523,33 @@ function latestAppliedStageId(appliedStages) {
   return null
 }
 
-function builderVisualFor(currentStage, appliedStages) {
+function builderVisualIdFor(currentStage, appliedStages) {
   const currentId = STAGES[currentStage]?.id
   const latestId = latestAppliedStageId(appliedStages)
-  const visualId = appliedStages.has(currentId) ? currentId : latestId || 'empty'
-  return BUILDER_STAGE_VISUALS[visualId] || BUILDER_STAGE_VISUALS.empty
+  return appliedStages.has(currentId) ? currentId : latestId || 'empty'
+}
+
+function builderVisualFor(currentStage, appliedStages) {
+  const visualId = builderVisualIdFor(currentStage, appliedStages)
+  return { id: visualId, ...(BUILDER_STAGE_VISUALS[visualId] || BUILDER_STAGE_VISUALS.empty) }
+}
+
+function builderDefectHotspotsFor(visualId) {
+  if (visualId === 'jacket') {
+    return [
+      ...BUILDER_DEFECT_HOTSPOTS.jacket,
+      ...BUILDER_DEFECT_HOTSPOTS.shield.slice(0, 1),
+      ...BUILDER_DEFECT_HOTSPOTS.pair_foil.slice(0, 1),
+      ...BUILDER_DEFECT_HOTSPOTS.pair_wrap.slice(0, 1),
+    ]
+  }
+  return BUILDER_DEFECT_HOTSPOTS[visualId] || []
+}
+
+function hotspotToneColor(tone) {
+  if (tone === 'red') return C.red
+  if (tone === 'teal') return C.teal
+  return C.amber
 }
 
 // ─── Spec verdict against active target ───
@@ -752,6 +913,13 @@ function BuilderBlenderPreview({ currentStage, appliedStages, sim, totalApplied 
   const isEmpty = totalApplied === 0
   const isFinal = appliedStages.has('jacket')
   const progressPct = Math.round((totalApplied / STAGES.length) * 100)
+  const hotspots = useMemo(() => builderDefectHotspotsFor(visual.id), [visual.id])
+  const [activeHotspotId, setActiveHotspotId] = useState('')
+  const activeHotspot = hotspots.find((h) => h.id === activeHotspotId) || hotspots[0] || null
+
+  useEffect(() => {
+    setActiveHotspotId(hotspots[0]?.id || '')
+  }, [visual.id, hotspots])
 
   return (
     <section
@@ -768,6 +936,42 @@ function BuilderBlenderPreview({ currentStage, appliedStages, sim, totalApplied 
           />
         </div>
 
+        {!!hotspots.length && !isEmpty && (
+          <div className="absolute inset-0 pointer-events-none">
+            {hotspots.map((hotspot) => {
+              const selected = activeHotspot?.id === hotspot.id
+              const color = hotspotToneColor(hotspot.tone)
+              return (
+                <button
+                  key={hotspot.id}
+                  type="button"
+                  data-testid={`builder-defect-hotspot-${hotspot.id}`}
+                  aria-label={hotspot.label}
+                  title={`${hotspot.label}: ${hotspot.defect}`}
+                  onClick={() => setActiveHotspotId(hotspot.id)}
+                  className="absolute pointer-events-auto h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-full border font-mono text-[10px] font-bold transition-transform hover:scale-110 focus:outline-none"
+                  style={{
+                    left: `${hotspot.x}%`,
+                    top: `${hotspot.y}%`,
+                    color,
+                    borderColor: color,
+                    background: selected ? '#0a0d0f' : '#0a0d0fcc',
+                    boxShadow: selected ? `0 0 0 4px ${color}2a, 0 0 22px ${color}55` : `0 0 0 2px ${color}18`,
+                  }}
+                >
+                  {selected && (
+                    <span
+                      className="absolute inset-[-6px] rounded-full border animate-ping"
+                      style={{ borderColor: color }}
+                    />
+                  )}
+                  <span className="relative">{hotspot.marker}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em] flex items-center gap-1.5 text-[#5eead4]">
           <Film size={12} /> Blender builder preview
         </div>
@@ -781,6 +985,20 @@ function BuilderBlenderPreview({ currentStage, appliedStages, sim, totalApplied 
               <Sparkles size={24} className="mx-auto mb-2 opacity-60" style={{ color: C.copperBright }} />
               <div className="font-mono text-[11px] uppercase tracking-wider text-[#a7b0b6]">Pick a copper wire to start</div>
             </div>
+          </div>
+        )}
+
+        {activeHotspot && !isEmpty && (
+          <div
+            data-testid="builder-defect-detail"
+            className="hidden md:block absolute top-11 right-2 w-72 max-w-[calc(100%-1rem)] rounded border bg-[#0a0d0f]/90 border-[#384249] p-3 shadow-2xl backdrop-blur"
+          >
+            <BuilderDefectDetail
+              hotspot={activeHotspot}
+              hotspots={hotspots}
+              activeHotspotId={activeHotspotId}
+              onSelect={setActiveHotspotId}
+            />
           </div>
         )}
 
@@ -803,6 +1021,17 @@ function BuilderBlenderPreview({ currentStage, appliedStages, sim, totalApplied 
           </div>
         </div>
       </div>
+
+      {activeHotspot && !isEmpty && (
+        <div className="md:hidden p-3 border-t border-[#252e33]">
+          <BuilderDefectDetail
+            hotspot={activeHotspot}
+            hotspots={hotspots}
+            activeHotspotId={activeHotspotId}
+            onSelect={setActiveHotspotId}
+          />
+        </div>
+      )}
 
       <div className="p-3 border-t border-[#252e33] flex items-center justify-between gap-3 flex-wrap">
         <p className="text-[12px] text-[#a7b0b6] leading-relaxed max-w-2xl">
@@ -831,6 +1060,81 @@ function BuilderBlenderPreview({ currentStage, appliedStages, sim, totalApplied 
         </div>
       </div>
     </section>
+  )
+}
+
+function BuilderDefectDetail({ hotspot, hotspots, activeHotspotId, onSelect }) {
+  const color = hotspotToneColor(hotspot.tone)
+  return (
+    <div className="space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="font-mono text-[9px] uppercase tracking-[0.18em]" style={{ color }}>
+            Defect hotspot
+          </div>
+          <div className="font-mono text-[12px] mt-0.5 text-[#f0ebe2]">{hotspot.label}</div>
+          <div className="text-[10px] mt-0.5 text-[#6b7479]">{hotspot.stage}</div>
+        </div>
+        <AlertTriangle size={15} style={{ color }} />
+      </div>
+
+      <div className="text-[11px] leading-relaxed text-[#a7b0b6]">
+        {hotspot.defect}
+      </div>
+
+      <div className="grid gap-1.5 text-[10px] leading-relaxed">
+        <div>
+          <span className="font-mono uppercase tracking-wider text-[#6b7479]">Impact </span>
+          <span className="text-[#f0ebe2]">{hotspot.impact}</span>
+        </div>
+        <div>
+          <span className="font-mono uppercase tracking-wider text-[#6b7479]">Check </span>
+          <span className="text-[#a7b0b6]">{hotspot.check}</span>
+        </div>
+        <div>
+          <span className="font-mono uppercase tracking-wider text-[#6b7479]">Fix </span>
+          <span className="text-[#a7b0b6]">{hotspot.fix}</span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1">
+        {hotspot.metrics.map((metric) => (
+          <span
+            key={metric}
+            className="px-1.5 py-0.5 rounded border font-mono text-[9px] uppercase tracking-wider"
+            style={{ borderColor: `${color}55`, color }}
+          >
+            {metric}
+          </span>
+        ))}
+      </div>
+
+      {hotspots.length > 1 && (
+        <div className="flex gap-1 pt-1">
+          {hotspots.map((item) => {
+            const selected = item.id === activeHotspotId
+            const itemColor = hotspotToneColor(item.tone)
+            return (
+              <button
+                key={item.id}
+                type="button"
+                data-testid={`builder-defect-selector-${item.id}`}
+                onClick={() => onSelect(item.id)}
+                className="h-6 min-w-6 px-1 rounded border font-mono text-[9px]"
+                style={{
+                  borderColor: selected ? itemColor : C.borderHi,
+                  color: selected ? itemColor : C.textMuted,
+                  background: selected ? `${itemColor}18` : 'transparent',
+                }}
+                title={item.label}
+              >
+                {item.marker}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 

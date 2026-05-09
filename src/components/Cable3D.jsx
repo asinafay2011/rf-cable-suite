@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react'
-import { Cable, Download, Film, Radio } from 'lucide-react'
+import React, { useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, Cable, Download, Film, Radio } from 'lucide-react'
 
 const C = {
   bg: '#0a0d0f',
@@ -59,13 +59,77 @@ const BUILDS = [
   },
 ]
 
+const HIGHSPEED_DEFECT_HOTSPOTS = [
+  {
+    id: 'jacket-oval',
+    marker: 'J',
+    x: 64,
+    y: 52,
+    tone: 'red',
+    label: 'Jacket ovality',
+    stage: 'Outer jacket',
+    defect: 'Final jacket follows a flattened shield stack instead of a round OD.',
+    impact: 'Risk shows up as OD fit issues, skew spread, and inconsistent connector seating.',
+    metric: 'OD / skew',
+  },
+  {
+    id: 'braid-low-coverage',
+    marker: 'B',
+    x: 55,
+    y: 44,
+    tone: 'red',
+    label: 'Braid low coverage',
+    stage: 'Outer braid',
+    defect: 'Braid carriers spread unevenly over the non-round bundle.',
+    impact: 'Shield holes raise coupling and can weaken NEXT/alien crosstalk margin.',
+    metric: 'Coverage %',
+  },
+  {
+    id: 'foil-seam',
+    marker: 'S',
+    x: 50,
+    y: 42,
+    tone: 'amber',
+    label: 'Foil overlap seam',
+    stage: 'Foil shield',
+    defect: 'Foil lap rides high or opens where the bundle shape changes.',
+    impact: 'Transfer impedance rises at high frequency before the braid can help.',
+    metric: 'EMI / RL',
+  },
+  {
+    id: 'ptfe-gap',
+    marker: 'G',
+    x: 43,
+    y: 49,
+    tone: 'amber',
+    label: 'PTFE tape gap',
+    stage: 'Pair wrap',
+    defect: 'Binder tape exposes a section of the twisted pair.',
+    impact: 'Pair geometry can shift, creating local impedance ripple and skew drift.',
+    metric: 'Z0 ripple',
+  },
+]
+
+function hotspotToneColor(tone) {
+  if (tone === 'red') return '#f87171'
+  if (tone === 'teal') return '#5eead4'
+  return '#fbbf24'
+}
+
 export default function Cable3D() {
   const [activeId, setActiveId] = useState('coax')
   const activeBuild = useMemo(
     () => BUILDS.find((build) => build.id === activeId) || BUILDS[0],
     [activeId],
   )
+  const defectHotspots = activeBuild.id === 'highspeed' ? HIGHSPEED_DEFECT_HOTSPOTS : []
+  const [activeHotspotId, setActiveHotspotId] = useState('')
+  const activeHotspot = defectHotspots.find((hotspot) => hotspot.id === activeHotspotId) || defectHotspots[0] || null
   const Icon = activeBuild.icon
+
+  useEffect(() => {
+    setActiveHotspotId(defectHotspots[0]?.id || '')
+  }, [activeBuild.id])
 
   return (
     <section className="space-y-4">
@@ -121,6 +185,38 @@ export default function Cable3D() {
               preload="metadata"
             />
           </div>
+          {!!defectHotspots.length && (
+            <div className="absolute inset-0 pointer-events-none">
+              {defectHotspots.map((hotspot) => {
+                const selected = activeHotspot?.id === hotspot.id
+                const color = hotspotToneColor(hotspot.tone)
+                return (
+                  <button
+                    key={hotspot.id}
+                    type="button"
+                    data-testid={`cable3d-defect-hotspot-${hotspot.id}`}
+                    aria-label={hotspot.label}
+                    title={`${hotspot.label}: ${hotspot.defect}`}
+                    onClick={() => setActiveHotspotId(hotspot.id)}
+                    className="absolute pointer-events-auto h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-full border font-mono text-[10px] font-bold transition-transform hover:scale-110 focus:outline-none"
+                    style={{
+                      left: `${hotspot.x}%`,
+                      top: `${hotspot.y}%`,
+                      color,
+                      borderColor: color,
+                      background: selected ? '#0a0d0f' : '#0a0d0fcc',
+                      boxShadow: selected ? `0 0 0 4px ${color}2a, 0 0 22px ${color}55` : `0 0 0 2px ${color}18`,
+                    }}
+                  >
+                    {selected && (
+                      <span className="absolute inset-[-6px] rounded-full border animate-ping" style={{ borderColor: color }} />
+                    )}
+                    <span className="relative">{hotspot.marker}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
           <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em] flex items-center gap-1.5" style={{ color: activeBuild.accent }}>
             <Film size={12} /> Blender · {activeBuild.eyebrow}
           </div>
@@ -149,6 +245,56 @@ export default function Cable3D() {
             <AssetLink href={activeBuild.video} label="MP4" />
             <AssetLink href={activeBuild.blend} label="BLEND" />
           </div>
+
+          {activeHotspot && (
+            <div data-testid="cable3d-defect-detail" className="rounded border bg-[#0a0d0f] p-3" style={{ borderColor: C.borderHi }}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="font-mono text-[9px] uppercase tracking-[0.18em]" style={{ color: hotspotToneColor(activeHotspot.tone) }}>
+                    Defect audit
+                  </div>
+                  <div className="font-mono text-[12px] mt-0.5" style={{ color: C.text }}>{activeHotspot.label}</div>
+                  <div className="text-[10px] mt-0.5" style={{ color: C.textMuted }}>{activeHotspot.stage}</div>
+                </div>
+                <AlertTriangle size={15} style={{ color: hotspotToneColor(activeHotspot.tone) }} />
+              </div>
+              <div className="text-[11px] leading-relaxed mt-2" style={{ color: C.textDim }}>
+                {activeHotspot.defect}
+              </div>
+              <div className="text-[10px] leading-relaxed mt-2" style={{ color: C.textDim }}>
+                <span className="font-mono uppercase tracking-wider" style={{ color: C.textMuted }}>Impact </span>
+                <span style={{ color: C.text }}>{activeHotspot.impact}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 mt-2">
+                <span className="px-1.5 py-0.5 rounded border font-mono text-[9px] uppercase tracking-wider" style={{ borderColor: `${hotspotToneColor(activeHotspot.tone)}55`, color: hotspotToneColor(activeHotspot.tone) }}>
+                  {activeHotspot.metric}
+                </span>
+                <div className="flex gap-1">
+                  {defectHotspots.map((hotspot) => {
+                    const selected = hotspot.id === activeHotspotId
+                    const color = hotspotToneColor(hotspot.tone)
+                    return (
+                      <button
+                        key={hotspot.id}
+                        type="button"
+                        data-testid={`cable3d-defect-selector-${hotspot.id}`}
+                        onClick={() => setActiveHotspotId(hotspot.id)}
+                        className="h-6 w-6 rounded border font-mono text-[9px]"
+                        style={{
+                          borderColor: selected ? color : C.borderHi,
+                          color: selected ? color : C.textMuted,
+                          background: selected ? `${color}18` : 'transparent',
+                        }}
+                        title={hotspot.label}
+                      >
+                        {hotspot.marker}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </aside>
       </div>
     </section>
