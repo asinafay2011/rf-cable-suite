@@ -89,6 +89,7 @@ const RF_SECTION_LABELS = {
   failure: 'RF Failure Theater',
   launch: 'Connector Launch Lab',
   shielding: 'Shielding Effectiveness Lab',
+  scanner: 'Near-field / EMI Scanner Lab',
   suckout: 'Tape Suckout Sim',
   dielectric: 'Dielectric Stack Designer',
   wizard: 'Wizard',
@@ -132,6 +133,12 @@ const RF_SECTION_STARTERS = {
     'How much does a foil seam gap reduce shielding effectiveness?',
     'What should production inspect for RF shielding leakage?',
     'Show shielding dB vs frequency for a quad-shield coax',
+  ],
+  scanner: [
+    'Scan a coax for a foil seam leakage hotspot',
+    'How would a bad connector bond look on a near-field probe?',
+    'Compare E-field and H-field probes for a shield defect',
+    'What production fix should I try after a pigtail leakage scan?',
   ],
   library: [
     'Compare LMR-400 and RG-213 attenuation at 900 MHz',
@@ -628,6 +635,7 @@ const CABLES = {
   lmr400uf: { name: "LMR-400-UltraFlex", cat: "lmr", alias: "Times ultra-flex 400",
     z: 50, vp: 84, cap: 81, mass: 140, fMax: 5.8, vMax: 3500,
     d: 2.74, D: 7.24, shield: 8.26, OD: 10.29, flex: "high", outdoor: true, power: "high", complexity: "medium",
+    render: "/cable-renders/rf-lmr400uf-ultraflex.png",
     atten: [[100, 2.3], [450, 5.2], [900, 7.4], [2400, 12.6], [5800, 21.5]],
     cons: { conductor: "Stranded bare Cu, multi-strand", dielectric: "Gas-injected foam PE", shield: "Al foil 100% + tinned Cu braid, 92%", jacket: "Black flexible PE" },
     proc: ["Stranded Cu core for 1000+ bend cycles", "Foam PE, VP 84%", "Al-polymer foil + braid", "Flexible PE jacket", "Tested for drum reeling, robot arms"],
@@ -635,6 +643,7 @@ const CABLES = {
   lmr600uf: { name: "LMR-600-UltraFlex", cat: "lmr", alias: "Times ultra-flex 600",
     z: 50, vp: 84, cap: 80, mass: 300, fMax: 4.0, vMax: 4000,
     d: 4.47, D: 11.43, shield: 12.70, OD: 14.99, flex: "medium", outdoor: true, power: "high", complexity: "medium",
+    render: "/cable-renders/rf-lmr600uf-ultraflex.png",
     atten: [[100, 1.5], [450, 3.2], [900, 5.0], [2400, 8.5], [4000, 11.8]],
     cons: { conductor: "Stranded bare Cu", dielectric: "Gas-injection foam PE", shield: "Al foil + tinned Cu braid", jacket: "Flexible black PE" },
     proc: ["Multi-strand Cu 4.47mm", "Foam PE VP 84%", "Foil + braid shield", "Flexible PE jacket", "Repeated-flex qualified large size"],
@@ -642,6 +651,7 @@ const CABLES = {
   sucoflex106: { name: "SUCOFLEX 106", cat: "phase", alias: "H+S 50 GHz precision",
     z: 50, vp: 77, cap: 85, mass: 75, fMax: 50.0, vMax: 500,
     d: 1.10, D: 3.70, shield: 4.60, OD: 5.60, flex: "high", outdoor: false, power: "low", complexity: "high",
+    render: "/cable-renders/rf-sucoflex106-precision.png",
     atten: [[1000, 22.0], [10000, 78.0], [20000, 120.0], [40000, 180.0], [50000, 220.0]],
     cons: { conductor: "SPC stranded", dielectric: "PTFE tape + air", shield: "Double SPC braid", jacket: "FEP" },
     proc: ["SPC stranded", "PTFE tape helical + sintering", "Double SPC braid", "FEP jacket", "50 GHz qualified, phase-match pairs available"],
@@ -649,6 +659,7 @@ const CABLES = {
   sucoflex550s: { name: "SUCOFLEX 550S", cat: "phase", alias: "H+S 67 GHz mmWave",
     z: 50, vp: 79, cap: 82, mass: 55, fMax: 67.0, vMax: 300,
     d: 0.80, D: 3.20, shield: 4.20, OD: 5.00, flex: "high", outdoor: false, power: "low", complexity: "high",
+    render: "/cable-renders/rf-sucoflex550s-mmwave.png",
     atten: [[10000, 85.0], [20000, 125.0], [40000, 200.0], [67000, 280.0]],
     cons: { conductor: "SPC stranded, miniature", dielectric: "PTFE tape + low-density air", shield: "Double SPC braid + outer tape", jacket: "FEP" },
     proc: ["Miniature SPC stranded", "PTFE helical tape, thin layer", "Double SPC braid", "FEP jacket", "67 GHz qualified (5G FR2, V / W-band test)"],
@@ -656,6 +667,7 @@ const CABLES = {
   gorephaseflex024: { name: "Gore PhaseFlex 024", cat: "phase", alias: "Gore miniature VNA",
     z: 50, vp: 80, cap: 85, mass: 20, fMax: 40.0, vMax: 300,
     d: 0.40, D: 1.90, shield: 2.20, OD: 2.40, flex: "high", outdoor: false, power: "low", complexity: "high",
+    render: "/cable-renders/rf-gorephaseflex024-mini.png",
     atten: [[1000, 50.0], [10000, 170.0], [20000, 235.0], [40000, 350.0]],
     cons: { conductor: "SPC stranded, very fine", dielectric: "ePTFE, low density", shield: "SPC braid + conductive tape", jacket: "FEP" },
     proc: ["Fine SPC stranded", "ePTFE stretched for low εr", "SPC braid + spiral tape", "FEP jacket", "Miniature phase-stable for dense arrays / probes"],
@@ -663,6 +675,7 @@ const CABLES = {
   belden1505a: { name: "Belden 1505A", cat: "video", alias: "HD-SDI precision 18 AWG",
     z: 75, vp: 83, cap: 53, mass: 75, fMax: 6.0, vMax: 500,
     d: 1.02, D: 4.80, shield: 5.60, OD: 6.15, flex: "medium", outdoor: false, power: "low", complexity: "high",
+    render: "/cable-renders/rf-belden1505a-sdi.png",
     atten: [[100, 5.5], [400, 10.2], [1000, 17.5], [3000, 31.0], [6000, 46.0]],
     cons: { conductor: "Solid bare Cu, 1.02mm (18 AWG)", dielectric: "Gas-injected foam HDPE", shield: "Duobond foil + tinned Cu braid, 95%", jacket: "Matte black PVC, non-contaminating" },
     proc: ["18 AWG Cu precision draw", "Gas-foam HDPE skin-foam co-extrude", "Duobond foil + 95% braid", "PVC non-contaminating", "Sweep to 6 GHz (6G-SDI)"],
@@ -670,6 +683,7 @@ const CABLES = {
   belden9913f: { name: "Belden 9913F", cat: "lmr", alias: "Flexible 9913 variant",
     z: 50, vp: 84, cap: 81, mass: 140, fMax: 2.0, vMax: 3500,
     d: 2.84, D: 7.24, shield: 8.13, OD: 10.29, flex: "high", outdoor: true, power: "high", complexity: "medium",
+    render: "/cable-renders/rf-belden9913f-flex.png",
     atten: [[100, 3.3], [450, 7.5], [900, 9.6], [1000, 10.1], [2000, 14.7]],
     cons: { conductor: "7-strand bare Cu, 1.02mm", dielectric: "Semi-solid foam PE", shield: "Al foil + tinned Cu braid", jacket: "Black UV PE" },
     proc: ["Stranded Cu for flexibility", "Semi-foam PE", "Al foil 100% + tinned Cu braid", "UV PE jacket", "Flexible variant of 9913 for jumper use"],
@@ -677,6 +691,7 @@ const CABLES = {
   canareL5CFB: { name: "Canare L-5CFB", cat: "video", alias: "Japanese 75Ω studio",
     z: 75, vp: 83, cap: 53, mass: 75, fMax: 3.0, vMax: 450,
     d: 1.02, D: 4.80, shield: 5.60, OD: 7.70, flex: "medium", outdoor: false, power: "low", complexity: "high",
+    render: "/cable-renders/rf-canare-l5cfb-studio.png",
     atten: [[100, 5.0], [400, 9.5], [1000, 15.5], [3000, 28.0]],
     cons: { conductor: "Solid bare Cu, 1.02mm", dielectric: "Foam PE", shield: "Al foil + tinned Cu braid, 95%", jacket: "Black PVC" },
     proc: ["Cu precision draw", "Foam PE extrusion", "Foil + braid for HD-SDI", "PVC jacket", "Japanese studio broadcast standard"],
@@ -684,6 +699,7 @@ const CABLES = {
   cnt400: { name: "CNT-400", cat: "lmr", alias: "CommScope LMR-400 equivalent",
     z: 50, vp: 85, cap: 78, mass: 140, fMax: 5.8, vMax: 3500,
     d: 2.74, D: 7.24, shield: 8.13, OD: 10.29, flex: "medium", outdoor: true, power: "high", complexity: "medium",
+    render: "/cable-renders/rf-cnt400-outdoor.png",
     atten: [[100, 2.2], [450, 4.9], [900, 6.8], [2400, 11.5], [5800, 19.5]],
     cons: { conductor: "Solid bare Cu, 2.74mm", dielectric: "Foam PE", shield: "Al foil + tinned Cu braid, 90%", jacket: "Black UV PE" },
     proc: ["Cu wire 2.74mm", "Foam PE VP 85%", "Al foil + braid", "UV PE jacket", "CommScope / Andrew version of LMR-400"],
@@ -691,6 +707,7 @@ const CABLES = {
   ut034: { name: "UT-034 Micro", cat: "semi", alias: "Micro-Coax UT-034",
     z: 50, vp: 70, cap: 98, mass: 3, fMax: 65.0, vMax: 200,
     d: 0.20, D: 0.66, shield: 0.78, OD: 0.86, flex: "low", outdoor: false, power: "low", complexity: "high",
+    render: "/cable-renders/rf-ut034-micro.png",
     atten: [[1000, 110.0], [10000, 380.0], [18000, 500.0], [40000, 800.0]],
     cons: { conductor: "Solid SPC, 0.20mm", dielectric: "Solid PTFE, εr 2.05", shield: "Solid tin-plated Cu tube", jacket: "None" },
     proc: ["Micro SPC draw", "Very thin PTFE dielectric", "Solid Cu tube swaged / drawn", "No jacket — bare copper", "Very high-freq mmWave interconnect"],
@@ -1781,6 +1798,7 @@ export default function RFCableSuite() {
     { id: "failure", label: "Failure" },
     { id: "launch", label: "Launch Lab" },
     { id: "shielding", label: "Shielding" },
+    { id: "scanner", label: "EMI Scan" },
     {
       group: "build", label: "Build",
       children: [
@@ -2153,6 +2171,7 @@ export default function RFCableSuite() {
           {tab === "failure" && <RFFailureTheater />}
           {tab === "launch" && <ConnectorLaunchLab />}
           {tab === "shielding" && <ShieldingEffectivenessLab />}
+          {tab === "scanner" && <NearFieldEmiScannerLab />}
           {tab === "suckout" && <SuckoutSim accent="#d97706" defaultLayer="ptfe" />}
           {tab === "dielectric" && <DielectricStackDesigner />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
@@ -2745,6 +2764,7 @@ function HomeView({ setTab, comparedCables }) {
     { id: 'failure', icon: 'failure', title: 'RF Failure Theater', sub: 'Blender defect → TDR · S11 · VSWR story', accent: '#f87171' },
     { id: 'launch', icon: 'launch', title: 'Connector Launch Lab', sub: 'Pin depth · strip length · ferrule step → S11', accent: '#38bdf8' },
     { id: 'shielding', icon: 'shielding', title: 'Shielding Effectiveness Lab', sub: 'Braid · foil gap · bond quality → leakage dB', accent: '#22d3ee' },
+    { id: 'scanner', icon: 'scanner', title: 'Near-field / EMI Scanner', sub: 'Probe scan · hotspot map · spectrum clue', accent: '#f472b6' },
     { id: 'suckout', icon: 'wave', title: 'Tape Suckout Sim', sub: 'Multi-layer Bragg-notch designer', accent: '#e89357' },
     { id: 'wizard', icon: 'sparkles', title: 'Cable Selector', sub: 'Wizard: pick the right cable for the job', accent: '#84cc16' },
     { id: 'cheat', icon: 'book', title: 'Cheat Sheet', sub: 'Formulas · constants · standards', accent: '#cbd5e1' },
@@ -3058,6 +3078,15 @@ function ToolGlyph({ kind, color }) {
       <path d="M8 12h8" opacity="0.75" />
       <path d="M9 9c2 1.2 4 1.2 6 0M9 15c2-1.2 4-1.2 6 0" opacity="0.55" />
       <circle cx="12" cy="12" r="1.6" fill={color} stroke="none" />
+    </svg>
+  );
+  if (kind === 'scanner') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 5h16" />
+      <path d="M12 5v6" />
+      <path d="M9.5 11h5l-1.4 3h-2.2L9.5 11z" />
+      <path d="M5 18c2.5-3 4.5-3 7 0s4.5 3 7 0" opacity="0.65" />
+      <circle cx="12" cy="16" r="1.5" fill={color} stroke="none" />
     </svg>
   );
   if (kind === 'wave') return (
@@ -4446,6 +4475,515 @@ function ShieldingFactoryCard({ result, preset }) {
           <div key={check} style={{ display: "grid", gridTemplateColumns: "24px minmax(0, 1fr)", gap: 10, color: "#cbd5e1", lineHeight: 1.55 }}>
             <span style={{ color: index === 0 ? result.gradeColor : preset.accent, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900 }}>{String(index + 1).padStart(2, "0")}</span>
             <span>{check}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const RF_EMI_SCAN_CASES = [
+  {
+    id: "clean",
+    label: "Clean shield",
+    sub: "low baseline",
+    image: "/cable-renders/rf-scanner-clean.png",
+    accent: "#5eead4",
+    defectM: 1.4,
+    widthM: 0.62,
+    basePeak: 38,
+    floor: 25,
+    centerGHz: 1.2,
+    probe: "H",
+    signature: "smooth low-level scan",
+    root: "no obvious leakage source",
+    fix: "Use this trace as the golden baseline before comparing production samples.",
+  },
+  {
+    id: "foil-seam",
+    label: "Foil seam leak",
+    sub: "slot-like aperture",
+    image: "/cable-renders/rf-scanner-foil-seam.png",
+    accent: "#fb923c",
+    defectM: 2.25,
+    widthM: 0.28,
+    basePeak: 70,
+    floor: 30,
+    centerGHz: 2.4,
+    probe: "E",
+    signature: "sharp E-field spike",
+    root: "foil overlap opened into a slot",
+    fix: "Increase foil overlap, stabilize tape tension, and inspect seam wander after bend testing.",
+  },
+  {
+    id: "braid-window",
+    label: "Braid window",
+    sub: "coverage dropout",
+    image: "/cable-renders/rf-scanner-braid-window.png",
+    accent: "#fbbf24",
+    defectM: 3.18,
+    widthM: 0.48,
+    basePeak: 63,
+    floor: 29,
+    centerGHz: 1.8,
+    probe: "H",
+    signature: "wide magnetic-field hill",
+    root: "braid pick density or carrier tension changed",
+    fix: "Check braid angle, carrier tension, pick count, and OD compression through the braid zone.",
+  },
+  {
+    id: "pigtail",
+    label: "Ground pigtail",
+    sub: "common-mode radiator",
+    image: "/cable-renders/rf-scanner-pigtail.png",
+    accent: "#38bdf8",
+    defectM: 4.45,
+    widthM: 0.55,
+    basePeak: 73,
+    floor: 31,
+    centerGHz: 0.45,
+    probe: "H",
+    signature: "low-frequency current plume",
+    root: "shield current forced through a long lead",
+    fix: "Replace the pigtail with a 360-degree clamp, short ferrule bond, or conductive backshell.",
+  },
+  {
+    id: "connector-bond",
+    label: "Connector bond gap",
+    sub: "backshell discontinuity",
+    image: "/cable-renders/rf-scanner-connector-bond.png",
+    accent: "#f472b6",
+    defectM: 6.18,
+    widthM: 0.36,
+    basePeak: 80,
+    floor: 33,
+    centerGHz: 3.2,
+    probe: "E",
+    signature: "hotspot at connector shell",
+    root: "poor 360-degree shield termination",
+    fix: "Verify shell bite, ferrule crimp height, plating contact, and backshell torque.",
+  },
+];
+
+const RF_EMI_FREQ_PRESETS = [
+  { id: "vhf", label: "150 MHz", value: 150 },
+  { id: "uhf", label: "450 MHz", value: 450 },
+  { id: "cell", label: "900 MHz", value: 900 },
+  { id: "wifi", label: "2.4 GHz", value: 2400 },
+  { id: "ism", label: "5.8 GHz", value: 5800 },
+];
+
+function computeNearFieldScan({ scenario, driveDbm, scanHeightMm, freqMHz, probeKind, thresholdDbuv }) {
+  const freqGHz = freqMHz / 1000;
+  const heightPenalty = 20 * Math.log10(Math.max(scanHeightMm, 1) / 5);
+  const driveGain = (driveDbm - 10) * 0.82;
+  const centerBonus = 10 * rfFailureGaussian(freqGHz, scenario.centerGHz, Math.max(0.25, scenario.centerGHz * 0.42));
+  const harmonicBonus = 3.5 * rfFailureGaussian(freqGHz, scenario.centerGHz * 2, Math.max(0.35, scenario.centerGHz * 0.65));
+  const probeBonus = probeKind === scenario.probe ? 4.5 : -4.2;
+  const peak = rfLaunchClamp(scenario.basePeak + driveGain - heightPenalty + centerBonus + harmonicBonus + probeBonus, 18, 105);
+  const baseline = rfLaunchClamp(scenario.floor + driveGain * 0.32 - heightPenalty * 0.42 + (probeKind === "E" ? 1.5 : 0), 12, 72);
+  const margin = thresholdDbuv - peak;
+  const grade = margin >= 10 ? "PASS" : margin >= 0 ? "WATCH" : "HOTSPOT";
+  const gradeColor = margin >= 10 ? "#5eead4" : margin >= 0 ? "#fbbf24" : "#fb7185";
+  const contrast = peak - baseline;
+  const severity = rfLaunchClamp((peak - thresholdDbuv + 18) * 2.4, 0, 100);
+  return {
+    peak,
+    baseline,
+    margin,
+    grade,
+    gradeColor,
+    contrast,
+    severity,
+    root: scenario.root,
+    signature: probeKind === scenario.probe ? scenario.signature : `${scenario.signature}, weaker on ${probeKind}-probe`,
+  };
+}
+
+function makeNearFieldScanTrace({ scenario, scan, driveDbm, scanHeightMm, probeKind }) {
+  return Array.from({ length: 142 }, (_, index) => {
+    const distance = (index / 141) * 7.0;
+    const local = rfFailureGaussian(distance, scenario.defectM, scenario.widthM);
+    const connectorEcho = scenario.id === "connector-bond" ? 8 * rfFailureGaussian(distance, 6.72, 0.22) : 0;
+    const pigtailSkirt = scenario.id === "pigtail" ? 6 * rfFailureGaussian(distance, scenario.defectM + 0.55, 0.9) : 0;
+    const ripple = Math.sin(distance * 4.7 + driveDbm * 0.11) * 1.2 + Math.sin(distance * 9.1 + scanHeightMm * 0.07) * 0.6;
+    const probeTilt = probeKind === scenario.probe ? 0 : -3.5;
+    const level = scan.baseline + (scan.peak - scan.baseline) * local + connectorEcho + pigtailSkirt + ripple + probeTilt * local;
+    return {
+      distance: Number(distance.toFixed(2)),
+      level: Number(rfLaunchClamp(level, 10, 108).toFixed(1)),
+    };
+  });
+}
+
+function makeNearFieldSpectrumTrace({ scenario, scan, driveDbm, probeKind }) {
+  return Array.from({ length: 138 }, (_, index) => {
+    const frequency = 0.05 + (index / 137) * 5.95;
+    const main = (scan.peak - scan.baseline) * 0.74 * rfFailureGaussian(frequency, scenario.centerGHz, Math.max(0.16, scenario.centerGHz * 0.20));
+    const harmonic = (scan.peak - scan.baseline) * 0.28 * rfFailureGaussian(frequency, scenario.centerGHz * 2, Math.max(0.20, scenario.centerGHz * 0.26));
+    const commonMode = scenario.id === "pigtail" ? 13 * Math.exp(-frequency * 0.55) : 0;
+    const comb = scenario.id === "connector-bond" ? 4.5 * Math.abs(Math.sin(frequency * 3.3)) : 0;
+    const mismatch = probeKind === scenario.probe ? 0 : -4.5;
+    const noise = Math.sin(frequency * 5.7 + driveDbm * 0.13) * 0.9;
+    return {
+      frequency: Number(frequency.toFixed(2)),
+      level: Number(rfLaunchClamp(scan.baseline + main + harmonic + commonMode + comb + mismatch + noise, 8, 106).toFixed(1)),
+    };
+  });
+}
+
+function NearFieldEmiScannerLab() {
+  const [caseId, setCaseId] = useState("connector-bond");
+  const activeCase = RF_EMI_SCAN_CASES.find((item) => item.id === caseId) || RF_EMI_SCAN_CASES[4];
+  const [driveDbm, setDriveDbm] = useState(18);
+  const [scanHeightMm, setScanHeightMm] = useState(8);
+  const [freqMHz, setFreqMHz] = useState(2400);
+  const [thresholdDbuv, setThresholdDbuv] = useState(62);
+  const [probeKind, setProbeKind] = useState("E");
+
+  const scan = useMemo(
+    () => computeNearFieldScan({ scenario: activeCase, driveDbm, scanHeightMm, freqMHz, probeKind, thresholdDbuv }),
+    [activeCase, driveDbm, scanHeightMm, freqMHz, probeKind, thresholdDbuv],
+  );
+  const scanTrace = useMemo(
+    () => makeNearFieldScanTrace({ scenario: activeCase, scan, driveDbm, scanHeightMm, probeKind }),
+    [activeCase, scan, driveDbm, scanHeightMm, probeKind],
+  );
+  const spectrumTrace = useMemo(
+    () => makeNearFieldSpectrumTrace({ scenario: activeCase, scan, driveDbm, probeKind }),
+    [activeCase, scan, driveDbm, probeKind],
+  );
+
+  const applyCase = (item) => {
+    setCaseId(item.id);
+    setFreqMHz(Math.round(item.centerGHz * 1000));
+    setProbeKind(item.probe);
+    if (item.id === "clean") {
+      setDriveDbm(14);
+      setThresholdDbuv(58);
+    } else {
+      setDriveDbm(18);
+      setThresholdDbuv(62);
+    }
+  };
+
+  return (
+    <div style={S.viewInner} data-testid="near-field-emi-scanner-lab">
+      <div style={{ ...S.viewIntro, display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 16, alignItems: "center" }}>
+        <div style={{ width: 48, height: 48, border: "1px solid #324047", borderRadius: 4, display: "grid", placeItems: "center", color: "#f472b6" }}>
+          <Radio size={23} />
+        </div>
+        <div>
+          <div style={{ ...RF_FAILURE_UI.eyebrow, color: "#f472b6" }}>Near-field / EMI Scanner Lab</div>
+          <div style={{ ...S.viewIntroStrong, marginTop: 6 }}>Probe scan {"->"} RF leakage hotspot</div>
+          <div style={{ color: "#cbd5e1", lineHeight: 1.7, maxWidth: 940 }}>
+            Move an E-field or H-field probe across coax faults, then connect the visible Blender hotspot to a scan trace, spectrum clue, and production fix.
+          </div>
+        </div>
+      </div>
+
+      <EmiScanReadPanel />
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))", gap: 18, marginTop: 22, alignItems: "stretch" }}>
+        <section style={{ ...RF_FAILURE_UI.panel, overflow: "hidden", minWidth: 0 }}>
+          <div style={{ position: "relative", height: "clamp(390px, 34vw, 560px)", background: "radial-gradient(circle at 50% 18%, #14191c, #050708 68%)" }}>
+            <img
+              src={activeCase.image}
+              alt={`${activeCase.label} near-field EMI scanner Blender render`}
+              style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", opacity: 0.98 }}
+            />
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.03), rgba(0,0,0,0.45))" }} />
+            <div style={{ position: "absolute", top: 16, left: 16, ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>Blender scanner scene</div>
+            <div style={{ position: "absolute", right: 16, top: 16, padding: "9px 11px", border: `1px solid ${scan.gradeColor}`, borderRadius: 4, background: "rgba(5,9,11,0.80)", color: scan.gradeColor, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>
+              {scan.grade}
+            </div>
+            <EmiScanBadge left="16%" top="78%" color="#67e8f9" label="scan height" value={`${scanHeightMm.toFixed(0)} mm`} />
+            <EmiScanBadge left="76%" top="55%" color={scan.gradeColor} label="peak field" value={`${scan.peak.toFixed(1)} dBuV/m`} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, padding: 12 }}>
+            <RfFailureChip label="Scene" value={activeCase.label} accent={activeCase.accent} />
+            <RfFailureChip label="Probe" value={`${probeKind}-field`} accent="#67e8f9" />
+            <RfFailureChip label="Signature" value={scan.signature} accent="#fbbf24" />
+          </div>
+        </section>
+
+        <aside style={{ ...RF_FAILURE_UI.panel, padding: 18, minWidth: 0 }}>
+          <div style={RF_FAILURE_UI.eyebrow}>Scanner Director</div>
+          <p style={{ color: "#cbd5e1", lineHeight: 1.6, margin: "8px 0 16px" }}>
+            Pick a physical leakage source, then tune probe type, height, drive level, and the pass threshold.
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+            {RF_EMI_SCAN_CASES.map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                onClick={() => applyCase(item)}
+                style={{
+                  textAlign: "left",
+                  border: caseId === item.id ? `1px solid ${item.accent}` : "1px solid #243139",
+                  background: caseId === item.id ? `${item.accent}17` : "#070c0e",
+                  color: "#f8fafc",
+                  borderRadius: 4,
+                  padding: "12px 13px",
+                  cursor: "pointer",
+                  minHeight: 70,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", fontFamily: '"JetBrains Mono", monospace', fontSize: 12, fontWeight: 900 }}>
+                  <span>{item.label}</span>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: item.accent }} />
+                </div>
+                <div style={{ marginTop: 6, color: "#7b8990", fontSize: 12 }}>{item.sub}</div>
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8, marginTop: 18 }}>
+            {RF_EMI_FREQ_PRESETS.map((preset) => (
+              <button
+                type="button"
+                key={preset.id}
+                onClick={() => setFreqMHz(preset.value)}
+                style={{
+                  border: Math.abs(freqMHz - preset.value) < 1 ? "1px solid #cbd5e1" : "1px solid #26343a",
+                  background: Math.abs(freqMHz - preset.value) < 1 ? "#1b2227" : "#070c0e",
+                  color: "#dbeafe",
+                  borderRadius: 4,
+                  padding: "10px 6px",
+                  fontFamily: '"JetBrains Mono", monospace',
+                  fontSize: 10,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, marginTop: 14 }}>
+            {["E", "H"].map((kind) => (
+              <button
+                type="button"
+                key={kind}
+                onClick={() => setProbeKind(kind)}
+                style={{
+                  border: probeKind === kind ? `1px solid ${activeCase.accent}` : "1px solid #26343a",
+                  background: probeKind === kind ? `${activeCase.accent}16` : "#070c0e",
+                  color: probeKind === kind ? activeCase.accent : "#dbeafe",
+                  borderRadius: 4,
+                  padding: "10px 8px",
+                  fontFamily: '"JetBrains Mono", monospace',
+                  fontSize: 11,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                {kind}-field probe
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
+            <EmiScanSlider label="Frequency" value={freqMHz} setValue={setFreqMHz} min={50} max={6000} step={50} unit="MHz" accent="#f472b6" formatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(2)} GHz` : `${value.toFixed(0)} MHz`} />
+            <EmiScanSlider label="Drive level" value={driveDbm} setValue={setDriveDbm} min={0} max={30} step={1} unit="dBm" accent="#fbbf24" />
+            <EmiScanSlider label="Probe height" value={scanHeightMm} setValue={setScanHeightMm} min={2} max={40} step={1} unit="mm" accent="#67e8f9" />
+            <EmiScanSlider label="Fail threshold" value={thresholdDbuv} setValue={setThresholdDbuv} min={42} max={85} step={1} unit="dBuV/m" accent="#fb7185" />
+          </div>
+        </aside>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12, marginTop: 18 }}>
+        <RfFailureMetric label="Peak field" value={`${scan.peak.toFixed(1)} dBuV/m`} sub={`${scan.margin >= 0 ? "+" : ""}${scan.margin.toFixed(1)} dB margin`} accent={scan.gradeColor} />
+        <RfFailureMetric label="Hotspot location" value={`${activeCase.defectM.toFixed(2)} m`} sub={activeCase.signature} accent={activeCase.accent} />
+        <RfFailureMetric label="Contrast" value={`${scan.contrast.toFixed(1)} dB`} sub="peak above local floor" accent="#67e8f9" />
+        <RfFailureMetric label="Likely root cause" value={activeCase.root} sub={activeCase.fix} accent="#cbd5e1" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))", gap: 18, marginTop: 18 }}>
+        <section style={{ ...RF_FAILURE_UI.panel, padding: 16, minWidth: 0 }}>
+          <RfFailureChartHeader label="Probe scan trace" value="0-7 m cable sweep" />
+          <div style={{ height: 280 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={scanTrace} margin={{ top: 12, right: 12, bottom: 4, left: -8 }}>
+                <CartesianGrid stroke="#1d2a30" strokeDasharray="4 4" />
+                <XAxis dataKey="distance" type="number" domain={[0, 7]} tick={{ fill: "#718088", fontSize: 11 }} unit="m" />
+                <YAxis domain={[10, 105]} tick={{ fill: "#718088", fontSize: 11 }} unit="dB" />
+                <Tooltip
+                  contentStyle={{ background: "#081013", border: "1px solid #26343a", borderRadius: 4, color: "#e2e8f0" }}
+                  formatter={(value) => [`${Number(value).toFixed(1)} dBuV/m`, "Probe"]}
+                  labelFormatter={(value) => `${Number(value).toFixed(2)} m`}
+                />
+                <ReferenceLine y={thresholdDbuv} stroke="#fb7185" strokeDasharray="3 3" label={{ value: "limit", fill: "#fb7185", fontSize: 10 }} />
+                <ReferenceLine x={activeCase.defectM} stroke={activeCase.accent} strokeDasharray="5 5" />
+                <Line type="monotone" dataKey="level" stroke={scan.gradeColor} strokeWidth={2.6} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+
+        <section style={{ ...RF_FAILURE_UI.panel, padding: 16, minWidth: 0 }}>
+          <RfFailureChartHeader label="Spectrum clue" value="near-field pickup" />
+          <div style={{ height: 280 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={spectrumTrace} margin={{ top: 12, right: 12, bottom: 4, left: -8 }}>
+                <CartesianGrid stroke="#1d2a30" strokeDasharray="4 4" />
+                <XAxis dataKey="frequency" type="number" domain={[0, 6]} tick={{ fill: "#718088", fontSize: 11 }} unit="GHz" />
+                <YAxis domain={[10, 105]} tick={{ fill: "#718088", fontSize: 11 }} unit="dB" />
+                <Tooltip
+                  contentStyle={{ background: "#081013", border: "1px solid #26343a", borderRadius: 4, color: "#e2e8f0" }}
+                  formatter={(value) => [`${Number(value).toFixed(1)} dBuV/m`, "Pickup"]}
+                  labelFormatter={(value) => `${Number(value).toFixed(2)} GHz`}
+                />
+                <ReferenceLine x={freqMHz / 1000} stroke="#f472b6" strokeDasharray="5 5" />
+                <Line type="monotone" dataKey="level" stroke={activeCase.accent} strokeWidth={2.6} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginTop: 18 }}>
+        <EmiScanHeatMap scenario={activeCase} scan={scan} />
+        <EmiScanPlaybook scenario={activeCase} scan={scan} probeKind={probeKind} />
+      </div>
+    </div>
+  );
+}
+
+function EmiScanSlider({ label, value, setValue, min, max, step, unit, accent, formatter }) {
+  const display = formatter ? formatter(value) : `${Number(value).toFixed(0)} ${unit}`;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+        <div style={{ fontFamily: '"JetBrains Mono", monospace', color: "#cbd5e1", fontSize: 11, textTransform: "uppercase", letterSpacing: 1.8 }}>{label}</div>
+        <div style={{ fontFamily: '"JetBrains Mono", monospace', color: accent, fontSize: 12, fontWeight: 900 }}>{display}</div>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => setValue(Number(event.target.value))}
+        style={{ width: "100%", marginTop: 7, accentColor: accent }}
+        aria-label={label}
+      />
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#64727a", fontSize: 10, fontFamily: '"JetBrains Mono", monospace' }}>
+        <span>{min}{unit}</span>
+        <span>{max}{unit}</span>
+      </div>
+    </div>
+  );
+}
+
+function EmiScanReadPanel() {
+  const steps = [
+    { id: "01", label: "Pick the source", value: "Choose clean, foil seam, braid window, pigtail, or connector bond to set the physical leak." },
+    { id: "02", label: "Match the probe", value: "E-field is best for slot/connector gaps. H-field is best for braid current and pigtails." },
+    { id: "03", label: "Read the peak", value: "If Peak field is above the threshold, the scan trace marks where production should inspect first." },
+  ];
+
+  return (
+    <section style={{ ...RF_FAILURE_UI.panel, padding: 14, marginTop: 16, borderColor: "#3b2a36", background: "linear-gradient(135deg, rgba(244,114,182,0.08), rgba(8,16,19,0.92))" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 12, alignItems: "center" }}>
+        <div style={{ width: 34, height: 34, borderRadius: 4, border: "1px solid #f472b6", color: "#f472b6", display: "grid", placeItems: "center" }}>
+          <Radio size={17} />
+        </div>
+        <div>
+          <div style={{ ...RF_FAILURE_UI.eyebrow, color: "#f472b6" }}>Reading the Scan</div>
+          <div style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 1.55, marginTop: 3 }}>
+            This lab is a virtual near-field probe sweep: it finds where shield energy is escaping.
+          </div>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, marginTop: 12 }}>
+        {steps.map((step) => (
+          <div key={step.id} style={{ border: "1px solid #26343a", background: "rgba(5,9,11,0.72)", borderRadius: 4, padding: "11px 12px", minHeight: 86 }}>
+            <div style={{ display: "flex", gap: 9, alignItems: "center", color: "#f8fafc", fontFamily: '"JetBrains Mono", monospace', fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1.2 }}>
+              <span style={{ color: "#f472b6" }}>{step.id}</span>
+              <span>{step.label}</span>
+            </div>
+            <div style={{ color: "#9aa6ad", lineHeight: 1.55, marginTop: 6, fontSize: 12 }}>{step.value}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EmiScanBadge({ left, top, color, label, value }) {
+  return (
+    <div style={{ position: "absolute", left, top, transform: "translate(-50%, -50%)", pointerEvents: "none" }}>
+      <div style={{ width: 56, height: 56, borderRadius: "50%", border: `1px solid ${color}`, boxShadow: `0 0 28px ${color}55`, display: "grid", placeItems: "center", background: "rgba(5,9,11,0.68)" }}>
+        <div style={{ width: 7, height: 7, borderRadius: "50%", background: color }} />
+      </div>
+      <div style={{ marginTop: 7, padding: "6px 9px", border: `1px solid ${color}80`, background: "rgba(5,9,11,0.82)", borderRadius: 4, minWidth: 120, textAlign: "center" }}>
+        <div style={{ color, fontFamily: '"JetBrains Mono", monospace', fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, fontWeight: 900 }}>{label}</div>
+        <div style={{ color: "#dbeafe", fontSize: 11, marginTop: 3 }}>{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function EmiScanHeatMap({ scenario, scan }) {
+  const columns = 30;
+  const rows = 5;
+  const cells = Array.from({ length: columns * rows }, (_, index) => {
+    const col = index % columns;
+    const row = Math.floor(index / columns);
+    const distance = (col / (columns - 1)) * 7;
+    const cross = Math.abs(row - 2) / 2;
+    const local = rfFailureGaussian(distance, scenario.defectM, scenario.widthM * 1.15) * (1 - cross * 0.42);
+    const base = scenario.id === "clean" ? 0.10 : 0.16;
+    const intensity = rfLaunchClamp(base + local * (scan.severity / 100), 0.04, 1);
+    return { index, intensity };
+  });
+
+  return (
+    <section style={{ ...RF_FAILURE_UI.panel, padding: 16, minWidth: 0 }}>
+      <RfFailureChartHeader label="Hotspot map" value={`${scenario.defectM.toFixed(2)} m focus`} />
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, minmax(4px, 1fr))`, gap: 3, marginTop: 16 }}>
+        {cells.map((cell) => (
+          <div
+            key={cell.index}
+            style={{
+              aspectRatio: "1 / 1",
+              borderRadius: 2,
+              background: `rgba(${scenario.accent === "#f472b6" ? "244,114,182" : scenario.accent === "#fb923c" ? "251,146,60" : scenario.accent === "#fbbf24" ? "251,191,36" : scenario.accent === "#38bdf8" ? "56,189,248" : "94,234,212"}, ${0.12 + cell.intensity * 0.75})`,
+              boxShadow: cell.intensity > 0.72 ? `0 0 14px ${scenario.accent}` : "none",
+            }}
+          />
+        ))}
+      </div>
+      <p style={{ color: "#9aa6ad", lineHeight: 1.65, margin: "16px 0 0" }}>
+        The heat map shows the probe raster view: narrow peaks usually point to foil/connector slots, while broader hills point to braid or common-mode current.
+      </p>
+    </section>
+  );
+}
+
+function EmiScanPlaybook({ scenario, scan, probeKind }) {
+  const items = [
+    { label: "Probe choice", value: probeKind === scenario.probe ? `${probeKind}-field is the right first probe for this defect.` : `Try ${scenario.probe}-field next; this defect is weaker on ${probeKind}-field.` },
+    { label: "Measurement call", value: scan.margin < 0 ? `Hotspot exceeds limit by ${Math.abs(scan.margin).toFixed(1)} dB.` : `Peak is ${scan.margin.toFixed(1)} dB below the limit.` },
+    { label: "Production fix", value: scenario.fix },
+  ];
+
+  return (
+    <section style={{ ...RF_FAILURE_UI.panel, padding: 16 }}>
+      <div style={RF_FAILURE_UI.eyebrow}>Debug playbook</div>
+      <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+        {items.map((item, index) => (
+          <div key={item.label} style={{ display: "grid", gridTemplateColumns: "34px minmax(0, 1fr)", gap: 12 }}>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center", border: `1px solid ${index === 1 ? scan.gradeColor : scenario.accent}`, color: index === 1 ? scan.gradeColor : scenario.accent, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>
+              {index + 1}
+            </div>
+            <div>
+              <div style={{ color: "#e2e8f0", fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>{item.label}</div>
+              <div style={{ color: "#9aa6ad", lineHeight: 1.6, marginTop: 3 }}>{item.value}</div>
+            </div>
           </div>
         ))}
       </div>
