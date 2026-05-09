@@ -6056,7 +6056,283 @@ function LibraryRenderCoveragePanel({ total, rendered, coveragePct, familyCount,
   );
 }
 
+const RF_RENDER_LAYER_META = {
+  conductor: { label: "Conductor", color: "#f59e0b" },
+  dielectric: { label: "Dielectric", color: "#fef3c7" },
+  foil: { label: "Foil shield", color: "#cbd5e1" },
+  braid: { label: "Braid shield", color: "#d6b680" },
+  outerShield: { label: "Outer shield", color: "#fb923c" },
+  jacket: { label: "Jacket", color: "#7dd3fc" },
+};
+
+const RF_RENDER_LAYER_TESTS = {
+  conductor: [/conductor/i, /center/i, /solid.*cu/i, /bare.*cu/i, /copper.*core/i],
+  dielectric: [/dielectric/i, /foam/i, /ptfe/i, /polyethylene/i, /pe spacer/i, /smooth.*skin/i],
+  foil: [/foil/i, /duobond/i, /duofoil/i, /lap/i, /tape sleeve/i],
+  braid: [/braid/i, /carrier/i, /woven/i],
+  outerShield: [/corrugated/i, /outer conductor/i, /solid.*tube/i, /metal.*tube/i, /groove shadow/i, /shield sleeve/i],
+  jacket: [/jacket/i, /pvc/i, /fep/i, /pe jacket/i, /cut edge/i, /cut face/i],
+};
+
+const clampValue = (value, min, max) => Math.max(min, Math.min(max, value));
+
+function rfLayerMaskFromName(name) {
+  const mask = new Set();
+  Object.entries(RF_RENDER_LAYER_TESTS).forEach(([layerId, tests]) => {
+    if (tests.some((test) => test.test(name))) mask.add(layerId);
+  });
+  return mask;
+}
+
+function getRfRenderLayers(c) {
+  const cons = c.cons || {};
+  const shield = `${cons.shield || ""} ${c.shield || ""}`;
+  const layers = [
+    { id: "conductor", sub: cons.conductor || `${fmt(c.d, 2)} mm center` },
+    { id: "dielectric", sub: cons.dielectric || `${fmt(c.D, 2)} mm dielectric` },
+  ];
+  if (/foil|duobond|duofoil|tape|al[- ]?polymer/i.test(shield)) {
+    layers.push({ id: "foil", sub: cons.shield || "100% foil barrier" });
+  }
+  if (/braid|carrier|al-mg/i.test(shield)) {
+    layers.push({ id: "braid", sub: cons.shield || "woven shield" });
+  }
+  if (/corrugated|solid.*tube|outer tube|outer conductor|annular/i.test(shield) || (!/foil|braid|duobond|duofoil|tape/i.test(shield) && shield)) {
+    layers.push({ id: "outerShield", sub: cons.shield || "outer conductor" });
+  }
+  if (!/^none\b/i.test(cons.jacket || "")) {
+    layers.push({ id: "jacket", sub: cons.jacket || `${fmt(c.OD, 2)} mm OD` });
+  }
+  return layers.map((layer) => ({
+    ...layer,
+    ...RF_RENDER_LAYER_META[layer.id],
+  }));
+}
+
+function getRfConnectorMatches(c) {
+  const od = Number(c.OD) || 0;
+  const cableFmax = Math.max(Number(c.fMax) || 0.3, 0.3);
+  const targetFmax = Math.min(cableFmax, 18);
+  return Object.entries(CONNECTORS)
+    .map(([connectorId, connector]) => {
+      const [minOd = 0, maxOd = 999] = connector.cableOD || [];
+      const odFit = od >= minOd && od <= maxOd;
+      const zFit = Number(connector.z) === Number(c.z);
+      const freqFit = Number(connector.fMax) >= targetFmax;
+      const odMiss = odFit ? 0 : Math.min(Math.abs(od - minOd), Math.abs(od - maxOd));
+      const odScore = odFit ? 36 : clampValue(28 - odMiss * 6, 0, 28);
+      const freqScore = clampValue((Number(connector.fMax) || 0) / targetFmax, 0, 1) * 20;
+      const score = (zFit ? 44 : 0) + odScore + freqScore;
+      return { connectorId, connector, odFit, zFit, freqFit, odMiss, score };
+    })
+    .sort((a, b) => b.score - a.score || b.connector.fMax - a.connector.fMax)
+    .slice(0, 4);
+}
+
+function getRfBendRisk(c, bendMultiplier) {
+  const recommendedByFlex = { high: 6, medium: 10, low: 15 };
+  const recommendedMultiplier = recommendedByFlex[c.flex] || (/corrugated|hardline|rigid/i.test(c.cat || "") ? 20 : 12);
+  const actualRadius = (Number(c.OD) || 0) * bendMultiplier;
+  const recommendedRadius = (Number(c.OD) || 0) * recommendedMultiplier;
+  const ratio = recommendedRadius ? actualRadius / recommendedRadius : 1;
+  const complexityPenalty = c.complexity === "high" ? 6 : c.complexity === "medium" ? 3 : 0;
+  const risk = clampValue(Math.round((1.35 - ratio) * 78 + complexityPenalty), 4, 96);
+  const label = risk > 70 ? "High crush risk" : risk > 42 ? "Borderline bend" : "Healthy bend";
+  const color = risk > 70 ? "#fb7185" : risk > 42 ? "#fbbf24" : "#5eead4";
+  return { recommendedMultiplier, actualRadius, recommendedRadius, ratio, risk, label, color };
+}
+
+function getRfShieldCoverage(c, freqGHz = 2.4) {
+  const shield = c.cons?.shield || "";
+  const percentMatch = shield.match(/(\d{2,3})\s*%/);
+  const parsedCoverage = percentMatch ? clampValue(Number(percentMatch[1]), 0, 100) : null;
+  let coverage = parsedCoverage ?? 88;
+  let seDb = 55;
+  let family = "Braid";
+
+  if (/corrugated|solid.*tube|outer tube|outer conductor|annular/i.test(shield)) {
+    coverage = 100;
+    seDb = 120;
+    family = "Solid outer conductor";
+  } else if (/foil\+braid\+foil\+braid|quad/i.test(shield)) {
+    coverage = 100;
+    seDb = 108;
+    family = "Quad shield";
+  } else if (/double.*braid|braid.*braid/i.test(shield)) {
+    coverage = Math.max(parsedCoverage ?? 96, 96);
+    seDb = 92;
+    family = "Double braid";
+  } else if (/foil|duobond|duofoil|al[- ]?polymer/i.test(shield) && /braid/i.test(shield)) {
+    coverage = Math.max(parsedCoverage ?? 95, /100/.test(shield) ? 100 : 95);
+    seDb = 88;
+    family = "Foil + braid";
+  } else if (/foil|duobond|duofoil/i.test(shield)) {
+    coverage = Math.max(parsedCoverage ?? 100, 96);
+    seDb = 78;
+    family = "Foil";
+  } else if (/braid/i.test(shield)) {
+    coverage = parsedCoverage ?? 90;
+    seDb = coverage >= 95 ? 72 : coverage >= 85 ? 62 : 50;
+  } else if (/none/i.test(shield)) {
+    coverage = 0;
+    seDb = 0;
+    family = "Unshielded";
+  }
+
+  const freqPenalty = freqGHz > 1 ? Math.log10(freqGHz) * 8 : 0;
+  const effectiveSe = clampValue(seDb - freqPenalty, 0, 130);
+  const leakRisk = clampValue(Math.round(100 - effectiveSe * 0.75 - coverage * 0.18), 2, 96);
+  return { coverage, seDb: effectiveSe, baseSeDb: seDb, family, leakRisk, shield };
+}
+
+function RenderLayerCallouts({ layers, activeLayer, pinnedLayer, onHoverLayer, onToggleLayer }) {
+  return (
+    <section style={S.renderInspectorCard}>
+      <div style={S.renderInspectorHeader}>
+        <span style={S.renderInspectorKicker}>Layer callouts</span>
+        <span style={S.renderInspectorValue}>{layers.length}</span>
+      </div>
+      <div style={S.renderLayerGrid}>
+        {layers.map((layer) => {
+          const active = activeLayer === layer.id;
+          const pinned = pinnedLayer === layer.id;
+          return (
+            <button
+              key={layer.id}
+              type="button"
+              onMouseEnter={() => onHoverLayer(layer.id)}
+              onMouseLeave={() => onHoverLayer(null)}
+              onFocus={() => onHoverLayer(layer.id)}
+              onBlur={() => onHoverLayer(null)}
+              onClick={() => onToggleLayer(layer.id)}
+              style={{
+                ...S.renderLayerButton,
+                borderColor: active ? layer.color : "rgba(168,162,158,0.16)",
+                background: active ? "rgba(94,234,212,0.08)" : "rgba(3,7,8,0.58)",
+                boxShadow: pinned ? `inset 0 0 0 1px ${layer.color}` : "none",
+              }}
+            >
+              <span style={{ ...S.renderLayerSwatch, background: layer.color }} />
+              <span style={S.renderLayerCopy}>
+                <span style={{ ...S.renderLayerName, color: active ? layer.color : "#f5f5f4" }}>{layer.label}</span>
+                <span style={S.renderLayerSub}>{layer.sub}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ConnectorCompatibilityPanel({ cable }) {
+  const matches = useMemo(() => getRfConnectorMatches(cable), [cable]);
+  return (
+    <section style={S.renderInspectorCard}>
+      <div style={S.renderInspectorHeader}>
+        <span style={S.renderInspectorKicker}>Connector fit</span>
+        <span style={S.renderInspectorValue}>{cable.z} Ω</span>
+      </div>
+      <div style={S.renderConnectorList}>
+        {matches.map(({ connectorId, connector, odFit, zFit, freqFit, score }) => (
+          <div key={connectorId} style={S.renderConnectorRow}>
+            <div style={S.renderConnectorTop}>
+              <strong style={S.renderConnectorName}>{connector.name}</strong>
+              <span style={{ ...S.renderFitBadge, color: zFit && odFit ? "#5eead4" : "#fbbf24", borderColor: zFit && odFit ? "rgba(94,234,212,0.45)" : "rgba(251,191,36,0.42)" }}>
+                {Math.round(score)}%
+              </span>
+            </div>
+            <div style={S.renderConnectorFlags}>
+              <span style={{ color: zFit ? "#5eead4" : "#fb7185" }}>Z</span>
+              <span style={{ color: odFit ? "#5eead4" : "#fb7185" }}>OD {connector.cableOD?.[0]}-{connector.cableOD?.[1]} mm</span>
+              <span style={{ color: freqFit ? "#5eead4" : "#fbbf24" }}>{connector.fMax} GHz</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BendCrushPanel({ cable, bendMultiplier, onBendMultiplier }) {
+  const bend = getRfBendRisk(cable, bendMultiplier);
+  return (
+    <section style={S.renderInspectorCard}>
+      <div style={S.renderInspectorHeader}>
+        <span style={S.renderInspectorKicker}>Bend / crush</span>
+        <span style={{ ...S.renderInspectorValue, color: bend.color }}>{bend.risk}%</span>
+      </div>
+      <div style={S.renderRiskMeter}>
+        <div style={{ ...S.renderRiskFill, width: `${bend.risk}%`, background: bend.color }} />
+      </div>
+      <div style={S.renderBendReadout}>
+        <span>{bend.label}</span>
+        <strong>{fmt(bend.actualRadius, 1)} mm R</strong>
+      </div>
+      <input
+        type="range"
+        min={3}
+        max={30}
+        step={1}
+        value={bendMultiplier}
+        onChange={(e) => onBendMultiplier(Number(e.target.value))}
+        style={S.renderSlider}
+      />
+      <div style={S.renderFinePrint}>
+        Set {bendMultiplier}x OD / recommended {bend.recommendedMultiplier}x OD
+      </div>
+    </section>
+  );
+}
+
+function ShieldCoveragePanel({ cable, freqGHz, onFreq }) {
+  const shield = getRfShieldCoverage(cable, freqGHz);
+  return (
+    <section style={S.renderInspectorCard}>
+      <div style={S.renderInspectorHeader}>
+        <span style={S.renderInspectorKicker}>Shield coverage</span>
+        <span style={S.renderInspectorValue}>{fmt(shield.seDb, 0)} dB</span>
+      </div>
+      <div style={S.renderCoverageBar}>
+        <div style={{ ...S.renderCoverageFill, width: `${shield.coverage}%` }} />
+      </div>
+      <div style={S.renderShieldStats}>
+        <span>{shield.family}</span>
+        <strong>{fmt(shield.coverage, 0)}%</strong>
+      </div>
+      <div style={S.renderBendReadout}>
+        <span>Leak risk</span>
+        <strong style={{ color: shield.leakRisk > 45 ? "#fbbf24" : "#5eead4" }}>{shield.leakRisk}%</strong>
+      </div>
+      <div style={S.renderFreqPills}>
+        {[0.9, 2.4, 6, 18].map((freq) => (
+          <button
+            key={freq}
+            type="button"
+            onClick={() => onFreq(freq)}
+            style={{
+              ...S.renderFreqPill,
+              borderColor: freqGHz === freq ? "rgba(94,234,212,0.58)" : "rgba(168,162,158,0.14)",
+              color: freqGHz === freq ? "#5eead4" : "#a8a29e",
+            }}
+          >
+            {freq < 1 ? `${freq * 1000} MHz` : `${freq} GHz`}
+          </button>
+        ))}
+      </div>
+      <div style={S.renderFinePrint}>{shield.shield || "Shield stack not specified"}</div>
+    </section>
+  );
+}
+
 function CableRenderModal({ id, cable: c, onClose }) {
+  const layers = useMemo(() => getRfRenderLayers(c), [c]);
+  const [pinnedLayer, setPinnedLayer] = useState(null);
+  const [hoverLayer, setHoverLayer] = useState(null);
+  const activeLayer = hoverLayer || pinnedLayer;
+  const [bendMultiplier, setBendMultiplier] = useState(c.flex === "high" ? 8 : c.flex === "low" ? 16 : 10);
+  const [shieldFreq, setShieldFreq] = useState(2.4);
+
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -6075,20 +6351,44 @@ function CableRenderModal({ id, cable: c, onClose }) {
             <XIcon size={18} />
           </button>
         </div>
-        <CableGlbViewer cable={c} />
-        <div style={S.renderModalStats}>
-          <RfFailureMetric label="Model" value={id} sub="runtime GLB" accent="#5eead4" />
-          <RfFailureMetric label="OD" value={`${fmt(c.OD, 1)} mm`} sub={`${fmt(c.OD / MM_PER_IN, 2)} in`} accent="#fbbf24" />
-          <RfFailureMetric label="VP" value={`${c.vp}%`} sub={`${c.z} Ω`} accent="#38bdf8" />
+        <div style={S.renderModalBody}>
+          <div style={S.renderModalViewerPane}>
+            <CableGlbViewer cable={c} activeLayer={activeLayer} />
+            <div style={S.renderModalStats}>
+              <RfFailureMetric label="Model" value={id} sub="runtime GLB" accent="#5eead4" />
+              <RfFailureMetric label="OD" value={`${fmt(c.OD, 1)} mm`} sub={`${fmt(c.OD / MM_PER_IN, 2)} in`} accent="#fbbf24" />
+              <RfFailureMetric label="VP" value={`${c.vp}%`} sub={`${c.z} Ω`} accent="#38bdf8" />
+            </div>
+          </div>
+          <aside style={S.renderInspectorPanel}>
+            <RenderLayerCallouts
+              layers={layers}
+              activeLayer={activeLayer}
+              pinnedLayer={pinnedLayer}
+              onHoverLayer={setHoverLayer}
+              onToggleLayer={(layerId) => setPinnedLayer((current) => current === layerId ? null : layerId)}
+            />
+            <ConnectorCompatibilityPanel cable={c} />
+            <BendCrushPanel cable={c} bendMultiplier={bendMultiplier} onBendMultiplier={setBendMultiplier} />
+            <ShieldCoveragePanel cable={c} freqGHz={shieldFreq} onFreq={setShieldFreq} />
+          </aside>
         </div>
       </div>
     </div>
   );
 }
 
-function CableGlbViewer({ cable: c }) {
+function CableGlbViewer({ cable: c, activeLayer }) {
   const mountRef = useRef(null);
+  const modelRootRef = useRef(null);
+  const activeLayerRef = useRef(activeLayer);
+  const applyLayerHighlightRef = useRef(() => {});
   const [status, setStatus] = useState("Loading GLB");
+
+  useEffect(() => {
+    activeLayerRef.current = activeLayer;
+    applyLayerHighlightRef.current(activeLayer);
+  }, [activeLayer]);
 
   useEffect(() => {
     let alive = true;
@@ -6193,6 +6493,46 @@ function CableGlbViewer({ cable: c }) {
         });
 
         const loader = new GLTFLoader();
+        const applyLayerHighlight = (layerId = activeLayerRef.current) => {
+          const root = modelRootRef.current;
+          if (!root) return;
+          const layerColor = layerId && RF_RENDER_LAYER_META[layerId]?.color ? new THREE.Color(RF_RENDER_LAYER_META[layerId].color) : null;
+          root.traverse((node) => {
+            if (!node.isMesh || !node.userData?.rfBaseMaterials) return;
+            const nodeLayers = node.userData.rfLayers || [];
+            const isActive = !layerId || nodeLayers.includes(layerId);
+            const materials = Array.isArray(node.material) ? node.material : [node.material];
+            materials.forEach((mat, index) => {
+              const base = node.userData.rfBaseMaterials[index] || node.userData.rfBaseMaterials[0];
+              if (!base || !mat) return;
+              mat.color.copy(base.color);
+              if (mat.emissive && base.emissive) mat.emissive.copy(base.emissive);
+              mat.opacity = base.opacity;
+              mat.transparent = base.transparent;
+              mat.depthWrite = base.depthWrite;
+              mat.roughness = base.roughness;
+              mat.metalness = base.metalness;
+              if (layerId) {
+                if (isActive) {
+                  if (layerColor) mat.color.lerp(layerColor, 0.28);
+                  if (mat.emissive && layerColor) mat.emissive.copy(layerColor).multiplyScalar(0.24);
+                  mat.opacity = Math.max(base.opacity, 0.92);
+                  mat.transparent = base.transparent && mat.opacity < 1;
+                  mat.depthWrite = true;
+                  mat.roughness = Math.max(0.18, base.roughness * 0.78);
+                } else {
+                  mat.opacity = Math.min(base.opacity, 0.24);
+                  mat.transparent = true;
+                  mat.depthWrite = false;
+                  mat.color.multiplyScalar(0.54);
+                }
+              }
+              mat.needsUpdate = true;
+            });
+          });
+        };
+        applyLayerHighlightRef.current = applyLayerHighlight;
+
         loader.load(
           c.model,
           (gltf) => {
@@ -6203,9 +6543,14 @@ function CableGlbViewer({ cable: c }) {
                 node.castShadow = true;
                 node.receiveShadow = true;
                 if (node.material) {
+                  node.material = Array.isArray(node.material)
+                    ? node.material.map((mat) => mat.clone())
+                    : node.material.clone();
                   const materials = Array.isArray(node.material) ? node.material : [node.material];
+                  const materialNames = materials.map((mat) => mat.name || "").join(" ");
+                  node.userData.rfLayers = Array.from(rfLayerMaskFromName(`${node.name || ""} ${materialNames}`));
                   materials.forEach((mat) => {
-                    const isFoil = /foil|duobond/i.test(mat.name || "");
+                    const isFoil = /foil|duobond/i.test(`${node.name || ""} ${mat.name || ""}`);
                     if (isFoil) {
                       mat.side = THREE.DoubleSide;
                       mat.transparent = false;
@@ -6219,6 +6564,15 @@ function CableGlbViewer({ cable: c }) {
                     }
                     mat.needsUpdate = true;
                   });
+                  node.userData.rfBaseMaterials = materials.map((mat) => ({
+                    color: mat.color.clone(),
+                    emissive: mat.emissive?.clone?.() || new THREE.Color(0x000000),
+                    opacity: mat.opacity ?? 1,
+                    transparent: Boolean(mat.transparent),
+                    depthWrite: mat.depthWrite !== false,
+                    roughness: mat.roughness ?? 0.5,
+                    metalness: mat.metalness ?? 0,
+                  }));
                 }
               }
             });
@@ -6234,6 +6588,8 @@ function CableGlbViewer({ cable: c }) {
             const scale = targetSize / Math.max(size.x, size.y, size.z, 0.001);
             root.scale.setScalar(scale);
             modelGroup.add(root);
+            modelRootRef.current = root;
+            applyLayerHighlight(activeLayerRef.current);
             setStatus("");
           },
           undefined,
@@ -6256,6 +6612,7 @@ function CableGlbViewer({ cable: c }) {
 
     return () => {
       alive = false;
+      modelRootRef.current = null;
       cancelAnimationFrame(frameId);
       resizeObserver?.disconnect?.();
       disposables.forEach((item) => item.dispose?.());
@@ -6270,6 +6627,11 @@ function CableGlbViewer({ cable: c }) {
   return (
     <div style={S.glbViewerStage} data-testid="rf-glb-viewer-stage">
       <div ref={mountRef} style={S.glbCanvasMount} />
+      {activeLayer && (
+        <div style={{ ...S.glbLayerBadge, borderColor: RF_RENDER_LAYER_META[activeLayer]?.color, color: RF_RENDER_LAYER_META[activeLayer]?.color }}>
+          {RF_RENDER_LAYER_META[activeLayer]?.label}
+        </div>
+      )}
       {status && <div style={S.glbViewerStatus}>{status}</div>}
     </div>
   );
@@ -10307,10 +10669,10 @@ const S = {
     backdropFilter: "blur(8px)",
   },
   renderModalCard: {
-    width: "min(1040px, 96vw)",
+    width: "min(1380px, 96vw)",
     maxHeight: "92vh",
     display: "grid",
-    gridTemplateRows: "auto minmax(300px, 1fr) auto",
+    gridTemplateRows: "auto minmax(0, 1fr)",
     overflow: "hidden",
     background: "linear-gradient(135deg, rgba(7,10,11,0.98), rgba(20,12,5,0.96))",
     border: "1px solid rgba(94,234,212,0.28)",
@@ -10353,6 +10715,19 @@ const S = {
     cursor: "pointer",
     flex: "0 0 auto",
   },
+  renderModalBody: {
+    minHeight: 0,
+    display: "grid",
+    gridTemplateColumns: "minmax(520px, 1fr) minmax(330px, 0.43fr)",
+    gap: 0,
+    overflow: "auto",
+  },
+  renderModalViewerPane: {
+    minWidth: 0,
+    display: "grid",
+    gridTemplateRows: "minmax(360px, 1fr) auto",
+    borderRight: "1px solid rgba(168,162,158,0.12)",
+  },
   renderModalStats: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
@@ -10360,6 +10735,188 @@ const S = {
     padding: 14,
     borderTop: "1px solid rgba(168,162,158,0.14)",
     background: "rgba(0,0,0,0.16)",
+  },
+  renderInspectorPanel: {
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    padding: 12,
+    background: "linear-gradient(180deg, rgba(2,6,7,0.72), rgba(17,10,5,0.58))",
+    overflow: "auto",
+  },
+  renderInspectorCard: {
+    border: "1px solid rgba(168,162,158,0.15)",
+    borderRadius: 5,
+    background: "rgba(3,7,8,0.66)",
+    padding: 12,
+    boxShadow: "0 10px 26px rgba(0,0,0,0.2)",
+  },
+  renderInspectorHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 10,
+  },
+  renderInspectorKicker: {
+    color: "#fb923c",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    letterSpacing: "0.2em",
+    textTransform: "uppercase",
+  },
+  renderInspectorValue: {
+    color: "#5eead4",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 12,
+    fontWeight: 900,
+  },
+  renderLayerGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
+    gap: 8,
+  },
+  renderLayerButton: {
+    minHeight: 58,
+    display: "grid",
+    gridTemplateColumns: "12px minmax(0, 1fr)",
+    alignItems: "start",
+    gap: 8,
+    padding: "9px 10px",
+    border: "1px solid rgba(168,162,158,0.16)",
+    borderRadius: 4,
+    color: "#f5f5f4",
+    cursor: "pointer",
+    textAlign: "left",
+    transition: "border-color 0.12s ease, background 0.12s ease, color 0.12s ease",
+  },
+  renderLayerSwatch: {
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    marginTop: 2,
+    boxShadow: "0 0 14px currentColor",
+  },
+  renderLayerCopy: {
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
+  renderLayerName: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+    fontWeight: 900,
+  },
+  renderLayerSub: {
+    color: "#8b9499",
+    fontSize: 10,
+    lineHeight: 1.35,
+  },
+  renderConnectorList: {
+    display: "grid",
+    gap: 8,
+  },
+  renderConnectorRow: {
+    padding: "9px 10px",
+    border: "1px solid rgba(168,162,158,0.12)",
+    borderRadius: 4,
+    background: "rgba(0,0,0,0.2)",
+  },
+  renderConnectorTop: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 6,
+  },
+  renderConnectorName: {
+    color: "#fef3c7",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+  },
+  renderFitBadge: {
+    border: "1px solid rgba(94,234,212,0.45)",
+    borderRadius: 999,
+    padding: "2px 7px",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    fontWeight: 900,
+  },
+  renderConnectorFlags: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 7,
+    color: "#a8a29e",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+  },
+  renderRiskMeter: {
+    height: 8,
+    overflow: "hidden",
+    borderRadius: 999,
+    background: "rgba(168,162,158,0.14)",
+    marginBottom: 9,
+  },
+  renderRiskFill: {
+    height: "100%",
+    borderRadius: 999,
+    boxShadow: "0 0 18px rgba(251,191,36,0.28)",
+  },
+  renderBendReadout: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    color: "#a8a29e",
+    fontSize: 11,
+    marginBottom: 8,
+  },
+  renderSlider: {
+    width: "100%",
+    accentColor: "#d97706",
+  },
+  renderFinePrint: {
+    color: "#78716c",
+    fontSize: 10,
+    lineHeight: 1.45,
+    marginTop: 7,
+  },
+  renderCoverageBar: {
+    height: 10,
+    overflow: "hidden",
+    borderRadius: 999,
+    background: "rgba(168,162,158,0.12)",
+    border: "1px solid rgba(168,162,158,0.1)",
+    marginBottom: 9,
+  },
+  renderCoverageFill: {
+    height: "100%",
+    borderRadius: 999,
+    background: "linear-gradient(90deg, #f59e0b, #5eead4)",
+  },
+  renderShieldStats: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    color: "#a8a29e",
+    fontSize: 11,
+    marginBottom: 9,
+  },
+  renderFreqPills: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: 6,
+  },
+  renderFreqPill: {
+    padding: "6px 5px",
+    background: "rgba(0,0,0,0.24)",
+    border: "1px solid rgba(168,162,158,0.14)",
+    borderRadius: 3,
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    fontWeight: 800,
+    cursor: "pointer",
   },
   glbViewerStage: {
     position: "relative",
@@ -10371,6 +10928,22 @@ const S = {
   glbCanvasMount: {
     position: "absolute",
     inset: 0,
+  },
+  glbLayerBadge: {
+    position: "absolute",
+    left: 14,
+    top: 14,
+    padding: "7px 10px",
+    border: "1px solid rgba(94,234,212,0.4)",
+    borderRadius: 4,
+    background: "rgba(3,7,8,0.72)",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    fontWeight: 900,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    pointerEvents: "none",
+    boxShadow: "0 10px 24px rgba(0,0,0,0.28)",
   },
   glbViewerStatus: {
     position: "absolute",
