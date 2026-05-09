@@ -88,6 +88,7 @@ const RF_SECTION_LABELS = {
   tools: 'Tools (NF / IP3 / Path / Smith)',
   failure: 'RF Failure Theater',
   launch: 'Connector Launch Lab',
+  shielding: 'Shielding Effectiveness Lab',
   suckout: 'Tape Suckout Sim',
   dielectric: 'Dielectric Stack Designer',
   wizard: 'Wizard',
@@ -125,6 +126,12 @@ const RF_SECTION_STARTERS = {
     'What happens if the pin is too long at the connector?',
     'Show TDR and S11 for a dielectric gap at the ferrule',
     'Which connector launch dimensions should QC measure first?',
+  ],
+  shielding: [
+    'Compare braid-only vs foil-braid shielding at 2.4 GHz',
+    'How much does a foil seam gap reduce shielding effectiveness?',
+    'What should production inspect for RF shielding leakage?',
+    'Show shielding dB vs frequency for a quad-shield coax',
   ],
   library: [
     'Compare LMR-400 and RG-213 attenuation at 900 MHz',
@@ -1773,6 +1780,7 @@ export default function RFCableSuite() {
     { id: "tools", label: "Tools" },
     { id: "failure", label: "Failure" },
     { id: "launch", label: "Launch Lab" },
+    { id: "shielding", label: "Shielding" },
     {
       group: "build", label: "Build",
       children: [
@@ -2144,6 +2152,7 @@ export default function RFCableSuite() {
           {tab === "tools" && <ToolsView toolPreset={toolPreset} clearToolPreset={clearToolPreset} />}
           {tab === "failure" && <RFFailureTheater />}
           {tab === "launch" && <ConnectorLaunchLab />}
+          {tab === "shielding" && <ShieldingEffectivenessLab />}
           {tab === "suckout" && <SuckoutSim accent="#d97706" defaultLayer="ptfe" />}
           {tab === "dielectric" && <DielectricStackDesigner />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
@@ -2735,6 +2744,7 @@ function HomeView({ setTab, comparedCables }) {
     { id: 'tools', icon: 'tools', title: 'Tools', sub: 'Friis NF · IP3 · Smith · path loss', accent: '#a78bfa' },
     { id: 'failure', icon: 'failure', title: 'RF Failure Theater', sub: 'Blender defect → TDR · S11 · VSWR story', accent: '#f87171' },
     { id: 'launch', icon: 'launch', title: 'Connector Launch Lab', sub: 'Pin depth · strip length · ferrule step → S11', accent: '#38bdf8' },
+    { id: 'shielding', icon: 'shielding', title: 'Shielding Effectiveness Lab', sub: 'Braid · foil gap · bond quality → leakage dB', accent: '#22d3ee' },
     { id: 'suckout', icon: 'wave', title: 'Tape Suckout Sim', sub: 'Multi-layer Bragg-notch designer', accent: '#e89357' },
     { id: 'wizard', icon: 'sparkles', title: 'Cable Selector', sub: 'Wizard: pick the right cable for the job', accent: '#84cc16' },
     { id: 'cheat', icon: 'book', title: 'Cheat Sheet', sub: 'Formulas · constants · standards', accent: '#cbd5e1' },
@@ -3040,6 +3050,14 @@ function ToolGlyph({ kind, color }) {
       <path d="M10 10h4l3-3h4v10h-4l-3-3h-4" />
       <path d="M18 9v6" opacity="0.55" />
       <circle cx="6" cy="12" r="1.5" fill={color} stroke="none" />
+    </svg>
+  );
+  if (kind === 'shielding') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3l7 3v5c0 4.4-2.8 8-7 10-4.2-2-7-5.6-7-10V6l7-3z" />
+      <path d="M8 12h8" opacity="0.75" />
+      <path d="M9 9c2 1.2 4 1.2 6 0M9 15c2-1.2 4-1.2 6 0" opacity="0.55" />
+      <circle cx="12" cy="12" r="1.6" fill={color} stroke="none" />
     </svg>
   );
   if (kind === 'wave') return (
@@ -3950,6 +3968,484 @@ function LaunchInspectionCard({ launch, preset }) {
               <div style={{ color: "#e2e8f0", fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>{item.label}</div>
               <div style={{ color: "#9aa6ad", lineHeight: 1.6, marginTop: 3 }}>{item.value}</div>
             </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const RF_SHIELD_PRESETS = [
+  {
+    id: "none",
+    label: "No shield",
+    sub: "dielectric + jacket only",
+    image: "/cable-renders/rf-shield-none.png",
+    accent: "#fb7185",
+    coverage: 0,
+    foilOverlap: 0,
+    seamGap: 1.2,
+    transfer: 180,
+    bond: 18,
+    hasFoil: false,
+    stackBonus: 0,
+    layerNote: "No conductive barrier between the incident field and the dielectric.",
+    fix: "Add a continuous shield layer before worrying about connector details.",
+  },
+  {
+    id: "braid70",
+    label: "70% braid",
+    sub: "flexible, visible apertures",
+    image: "/cable-renders/rf-shield-braid70.png",
+    accent: "#fbbf24",
+    coverage: 70,
+    foilOverlap: 0,
+    seamGap: 0.62,
+    transfer: 42,
+    bond: 66,
+    hasFoil: false,
+    stackBonus: 5,
+    layerNote: "Single braid gives a drain path, but aperture leakage rises with frequency.",
+    fix: "Increase braid picks or add foil under the braid for high-frequency isolation.",
+  },
+  {
+    id: "braid95",
+    label: "95% braid",
+    sub: "dense single braid",
+    image: "/cable-renders/rf-shield-braid95.png",
+    accent: "#5eead4",
+    coverage: 95,
+    foilOverlap: 0,
+    seamGap: 0.22,
+    transfer: 15,
+    bond: 82,
+    hasFoil: false,
+    stackBonus: 9,
+    layerNote: "Dense braid closes most optical apertures while staying flexible.",
+    fix: "Control braid coverage, carrier tension, and 360-degree shell contact.",
+  },
+  {
+    id: "foilGap",
+    label: "Foil seam gap",
+    sub: "continuous layer with one leak",
+    image: "/cable-renders/rf-shield-foil-gap.png",
+    accent: "#fb923c",
+    coverage: 100,
+    foilOverlap: 12,
+    seamGap: 0.45,
+    transfer: 24,
+    bond: 70,
+    hasFoil: true,
+    stackBonus: 11,
+    layerNote: "Foil is strong at high frequency, but one seam gap becomes a slot antenna.",
+    fix: "Raise overlap, add adhesive foil control, and inspect seam wander after bending.",
+  },
+  {
+    id: "foilBraid",
+    label: "Foil + braid",
+    sub: "barrier plus low-Z drain",
+    image: "/cable-renders/rf-shield-foil-braid.png",
+    accent: "#38bdf8",
+    coverage: 88,
+    foilOverlap: 35,
+    seamGap: 0.06,
+    transfer: 7,
+    bond: 88,
+    hasFoil: true,
+    stackBonus: 17,
+    layerNote: "Foil blocks high-frequency fields; braid carries current and makes termination practical.",
+    fix: "Keep foil overlap stable and terminate braid to the connector shell all around.",
+  },
+  {
+    id: "quad",
+    label: "Quad shield",
+    sub: "foil + braid + foil + braid",
+    image: "/cable-renders/rf-shield-quad.png",
+    accent: "#a78bfa",
+    coverage: 94,
+    foilOverlap: 50,
+    seamGap: 0.02,
+    transfer: 2.5,
+    bond: 94,
+    hasFoil: true,
+    stackBonus: 30,
+    layerNote: "Alternating foil and braid layers reduce both slot leakage and shield transfer impedance.",
+    fix: "The connector backshell is now the likely weak point; verify bond resistance and pigtail length.",
+  },
+];
+
+const RF_SHIELD_FREQ_PRESETS = [
+  { id: "vhf", label: "150 MHz", value: 150 },
+  { id: "cell", label: "900 MHz", value: 900 },
+  { id: "wifi", label: "2.4 GHz", value: 2400 },
+  { id: "mid", label: "6 GHz", value: 6000 },
+  { id: "ku", label: "18 GHz", value: 18000 },
+];
+
+function computeShieldingEffectiveness({ preset, freqMHz, coveragePct, foilOverlapPct, seamGapMm, transferMilliOhm, bondPct }) {
+  const ghz = freqMHz / 1000;
+  if (!preset.hasFoil && coveragePct < 1) {
+    const openField = rfLaunchClamp(5.5 - Math.log10(freqMHz + 10) * 0.9 - seamGapMm * 1.8 - (100 - bondPct) * 0.015, 0.5, 8);
+    return {
+      seDb: openField,
+      coupledDbuv: 100 - openField,
+      fieldLeakPct: Math.pow(10, -openField / 20) * 100,
+      powerLeakPpm: Math.pow(10, -openField / 10) * 1000000,
+      grade: "OPEN LEAK",
+      gradeColor: "#fb7185",
+      dominant: "missing shield barrier",
+      penalties: {
+        aperture: 100,
+        seam: 100,
+        transfer: 100,
+        bond: rfLaunchClamp(100 - bondPct, 0, 100),
+      },
+    };
+  }
+
+  const openArea = Math.max(0.012, 1 - coveragePct / 100);
+  const braidTerm = coveragePct > 0 ? 10 + 21 * Math.log10(1 / openArea) : 0;
+  const foilTerm = preset.hasFoil ? 34 + Math.min(22, foilOverlapPct * 0.46) : 0;
+  const seamPenalty = seamGapMm * (14 + 7 * Math.log10(freqMHz / 100 + 1));
+  const transferPenalty = 8.5 * Math.log10(transferMilliOhm + 1);
+  const bondPenalty = (100 - bondPct) * 0.22;
+  const freqPenalty = (preset.hasFoil ? 2.8 : 8.2) * Math.log10(ghz + 1);
+  const rawSe = braidTerm + foilTerm + preset.stackBonus - seamPenalty - transferPenalty - bondPenalty - freqPenalty;
+  const seDb = rfLaunchClamp(rawSe, 4, 128);
+  const fieldLeakPct = Math.pow(10, -seDb / 20) * 100;
+  const powerLeakPpm = Math.pow(10, -seDb / 10) * 1000000;
+  const grade = seDb >= 92 ? "EXCELLENT" : seDb >= 72 ? "PRODUCTION" : seDb >= 48 ? "REVIEW" : "LEAK RISK";
+  const gradeColor = seDb >= 92 ? "#a78bfa" : seDb >= 72 ? "#5eead4" : seDb >= 48 ? "#fbbf24" : "#fb7185";
+  const penaltyRows = [
+    { label: "open shield aperture", value: Math.max(0, 96 - coveragePct) * (preset.hasFoil ? 0.35 : 1.05) },
+    { label: "foil seam gap", value: preset.hasFoil ? seamGapMm * 90 : seamGapMm * 28 },
+    { label: "shield transfer impedance", value: transferMilliOhm * 0.65 },
+    { label: "connector bond", value: (100 - bondPct) * 0.9 },
+  ];
+  const dominant = penaltyRows.sort((a, b) => b.value - a.value)[0].label;
+
+  return {
+    seDb,
+    coupledDbuv: 100 - seDb,
+    fieldLeakPct,
+    powerLeakPpm,
+    grade,
+    gradeColor,
+    dominant,
+    penalties: {
+      aperture: rfLaunchClamp(100 - coveragePct, 0, 100),
+      seam: rfLaunchClamp((seamGapMm / 1.2) * 100, 0, 100),
+      transfer: rfLaunchClamp((transferMilliOhm / 180) * 100, 0, 100),
+      bond: rfLaunchClamp(100 - bondPct, 0, 100),
+    },
+  };
+}
+
+function makeShieldingTrace({ preset, coveragePct, foilOverlapPct, seamGapMm, transferMilliOhm, bondPct }) {
+  return Array.from({ length: 130 }, (_, index) => {
+    const freqMHz = 50 + (index / 129) * 17950;
+    const result = computeShieldingEffectiveness({ preset, freqMHz, coveragePct, foilOverlapPct, seamGapMm, transferMilliOhm, bondPct });
+    return {
+      frequency: Number((freqMHz / 1000).toFixed(2)),
+      se: Number(result.seDb.toFixed(1)),
+      coupled: Number(result.coupledDbuv.toFixed(1)),
+    };
+  });
+}
+
+function ShieldingEffectivenessLab() {
+  const [presetId, setPresetId] = useState("foilBraid");
+  const activePreset = RF_SHIELD_PRESETS.find((preset) => preset.id === presetId) || RF_SHIELD_PRESETS[4];
+  const [freqMHz, setFreqMHz] = useState(activePreset.id === "foilBraid" ? 2400 : 900);
+  const [coveragePct, setCoveragePct] = useState(activePreset.coverage);
+  const [foilOverlapPct, setFoilOverlapPct] = useState(activePreset.foilOverlap);
+  const [seamGapMm, setSeamGapMm] = useState(activePreset.seamGap);
+  const [transferMilliOhm, setTransferMilliOhm] = useState(activePreset.transfer);
+  const [bondPct, setBondPct] = useState(activePreset.bond);
+
+  const result = useMemo(
+    () => computeShieldingEffectiveness({ preset: activePreset, freqMHz, coveragePct, foilOverlapPct, seamGapMm, transferMilliOhm, bondPct }),
+    [activePreset, freqMHz, coveragePct, foilOverlapPct, seamGapMm, transferMilliOhm, bondPct],
+  );
+  const trace = useMemo(
+    () => makeShieldingTrace({ preset: activePreset, coveragePct, foilOverlapPct, seamGapMm, transferMilliOhm, bondPct }),
+    [activePreset, coveragePct, foilOverlapPct, seamGapMm, transferMilliOhm, bondPct],
+  );
+
+  const applyPreset = (preset) => {
+    setPresetId(preset.id);
+    setCoveragePct(preset.coverage);
+    setFoilOverlapPct(preset.foilOverlap);
+    setSeamGapMm(preset.seamGap);
+    setTransferMilliOhm(preset.transfer);
+    setBondPct(preset.bond);
+    if (preset.id === "quad") setFreqMHz(6000);
+    else if (preset.id === "none") setFreqMHz(900);
+    else setFreqMHz(2400);
+  };
+
+  const leakLabel = result.fieldLeakPct < 0.001 ? `${result.powerLeakPpm.toExponential(1)} ppm power` : `${result.fieldLeakPct.toFixed(3)}% field`;
+
+  return (
+    <div style={S.viewInner} data-testid="shielding-effectiveness-lab">
+      <div style={{ ...S.viewIntro, display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 16, alignItems: "center" }}>
+        <div style={{ width: 48, height: 48, border: "1px solid #324047", borderRadius: 4, display: "grid", placeItems: "center", color: "#22d3ee" }}>
+          <ShieldCheck size={23} />
+        </div>
+        <div>
+          <div style={{ ...RF_FAILURE_UI.eyebrow, color: "#22d3ee" }}>Shielding Effectiveness Lab</div>
+          <div style={{ ...S.viewIntroStrong, marginTop: 6 }}>Shield stack {"->"} leakage dB</div>
+          <div style={{ color: "#cbd5e1", lineHeight: 1.7, maxWidth: 930 }}>
+            Compare braid coverage, foil overlap, seam gaps, transfer impedance, and connector shell bonding with a Blender RF cutaway and a live shielding-effectiveness trace.
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))", gap: 18, marginTop: 22, alignItems: "stretch" }}>
+        <section style={{ ...RF_FAILURE_UI.panel, overflow: "hidden", minWidth: 0 }}>
+          <div style={{ position: "relative", height: "clamp(390px, 34vw, 560px)", background: "radial-gradient(circle at 24% 18%, #142327, #050808 62%)" }}>
+            <img
+              src={activePreset.image}
+              alt={`${activePreset.label} Blender RF shielding cutaway`}
+              style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", opacity: 0.98 }}
+            />
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.02), rgba(0,0,0,0.42))" }} />
+            <div style={{ position: "absolute", top: 16, left: 16, ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>Blender shielding scene</div>
+            <div style={{ position: "absolute", right: 16, top: 16, padding: "9px 11px", border: `1px solid ${result.gradeColor}`, borderRadius: 4, background: "rgba(5,9,11,0.78)", color: result.gradeColor, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>
+              {result.grade}
+            </div>
+            <ShieldingFieldBadge left="8%" top="24%" color="#fbbf24" label="incident EMI" value={`${freqMHz >= 1000 ? `${(freqMHz / 1000).toFixed(1)} GHz` : `${freqMHz.toFixed(0)} MHz`}`} />
+            <ShieldingFieldBadge left="73%" top="54%" color={result.gradeColor} label="coupled field" value={`${result.coupledDbuv.toFixed(1)} dBuV/m`} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, padding: 12 }}>
+            <RfFailureChip label="Stack" value={activePreset.label} accent={activePreset.accent} />
+            <RfFailureChip label="Dominant leak" value={result.dominant} accent="#67e8f9" />
+            <RfFailureChip label="Leakage" value={leakLabel} accent="#fbbf24" />
+          </div>
+        </section>
+
+        <aside style={{ ...RF_FAILURE_UI.panel, padding: 18, minWidth: 0 }}>
+          <div style={RF_FAILURE_UI.eyebrow}>Shield Stack Director</div>
+          <p style={{ color: "#cbd5e1", lineHeight: 1.6, margin: "8px 0 16px" }}>
+            Pick a construction, then tune the factory variables that usually decide real shielding performance.
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+            {RF_SHIELD_PRESETS.map((preset) => (
+              <button
+                type="button"
+                key={preset.id}
+                onClick={() => applyPreset(preset)}
+                style={{
+                  textAlign: "left",
+                  border: presetId === preset.id ? `1px solid ${preset.accent}` : "1px solid #243139",
+                  background: presetId === preset.id ? `${preset.accent}17` : "#070c0e",
+                  color: "#f8fafc",
+                  borderRadius: 4,
+                  padding: "12px 13px",
+                  cursor: "pointer",
+                  minHeight: 70,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", fontFamily: '"JetBrains Mono", monospace', fontSize: 12, fontWeight: 900 }}>
+                  <span>{preset.label}</span>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: preset.accent }} />
+                </div>
+                <div style={{ marginTop: 6, color: "#7b8990", fontSize: 12 }}>{preset.sub}</div>
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8, marginTop: 18 }}>
+            {RF_SHIELD_FREQ_PRESETS.map((preset) => (
+              <button
+                type="button"
+                key={preset.id}
+                onClick={() => setFreqMHz(preset.value)}
+                style={{
+                  border: Math.abs(freqMHz - preset.value) < 1 ? "1px solid #cbd5e1" : "1px solid #26343a",
+                  background: Math.abs(freqMHz - preset.value) < 1 ? "#1b2227" : "#070c0e",
+                  color: "#dbeafe",
+                  borderRadius: 4,
+                  padding: "10px 6px",
+                  fontFamily: '"JetBrains Mono", monospace',
+                  fontSize: 10,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
+            <ShieldingSlider label="Frequency" value={freqMHz} setValue={setFreqMHz} min={50} max={18000} step={50} unit="MHz" accent="#22d3ee" formatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(2)} GHz` : `${value.toFixed(0)} MHz`} />
+            <ShieldingSlider label="Shield coverage" value={coveragePct} setValue={setCoveragePct} min={0} max={98} step={1} unit="%" accent="#fbbf24" />
+            <ShieldingSlider label="Foil overlap" value={foilOverlapPct} setValue={setFoilOverlapPct} min={0} max={75} step={1} unit="%" accent="#5eead4" />
+            <ShieldingSlider label="Foil seam gap" value={seamGapMm} setValue={setSeamGapMm} min={0} max={1.2} step={0.02} unit="mm" accent="#fb923c" formatter={(value) => `${value.toFixed(2)} mm`} />
+            <ShieldingSlider label="Transfer impedance" value={transferMilliOhm} setValue={setTransferMilliOhm} min={1} max={180} step={1} unit="mOhm/m" accent="#a78bfa" />
+            <ShieldingSlider label="Connector shell bond" value={bondPct} setValue={setBondPct} min={20} max={100} step={1} unit="%" accent="#67e8f9" />
+          </div>
+        </aside>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12, marginTop: 18 }}>
+        <RfFailureMetric label="Shielding effectiveness" value={`${result.seDb.toFixed(1)} dB`} sub="field attenuation" accent={result.gradeColor} />
+        <RfFailureMetric label="Coupled field" value={`${result.coupledDbuv.toFixed(1)} dBuV/m`} sub="100 dBuV/m incident" accent="#fbbf24" />
+        <RfFailureMetric label="Field leakage" value={result.fieldLeakPct < 0.001 ? "<0.001%" : `${result.fieldLeakPct.toFixed(3)}%`} sub={`${result.powerLeakPpm.toExponential(1)} ppm power`} accent="#67e8f9" />
+        <RfFailureMetric label="Weakest contributor" value={result.dominant} sub={activePreset.fix} accent="#cbd5e1" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))", gap: 18, marginTop: 18 }}>
+        <section style={{ ...RF_FAILURE_UI.panel, padding: 16, minWidth: 0 }}>
+          <RfFailureChartHeader label="Shielding effectiveness vs frequency" value="50 MHz-18 GHz" />
+          <div style={{ height: 285 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={trace} margin={{ top: 12, right: 12, bottom: 4, left: -8 }}>
+                <CartesianGrid stroke="#1d2a30" strokeDasharray="4 4" />
+                <XAxis dataKey="frequency" type="number" domain={[0, 18]} tick={{ fill: "#718088", fontSize: 11 }} unit="GHz" />
+                <YAxis domain={[0, 125]} tick={{ fill: "#718088", fontSize: 11 }} unit="dB" />
+                <Tooltip
+                  contentStyle={{ background: "#081013", border: "1px solid #26343a", borderRadius: 4, color: "#e2e8f0" }}
+                  formatter={(value, name) => [`${Number(value).toFixed(1)} ${name === "se" ? "dB" : "dBuV/m"}`, name === "se" ? "SE" : "Coupled"]}
+                  labelFormatter={(value) => `${Number(value).toFixed(2)} GHz`}
+                />
+                <ReferenceLine y={80} stroke="#5eead4" strokeDasharray="3 3" label={{ value: "80 dB", fill: "#5eead4", fontSize: 10 }} />
+                <ReferenceLine y={50} stroke="#f97316" strokeDasharray="3 3" label={{ value: "50 dB", fill: "#f97316", fontSize: 10 }} />
+                <ReferenceLine x={freqMHz / 1000} stroke="#38bdf8" strokeDasharray="5 5" />
+                <Line type="monotone" dataKey="se" stroke={result.gradeColor} strokeWidth={2.6} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+
+        <ShieldingLeakageCard result={result} coveragePct={coveragePct} seamGapMm={seamGapMm} transferMilliOhm={transferMilliOhm} bondPct={bondPct} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginTop: 18 }}>
+        <ShieldingConstructionCard preset={activePreset} result={result} />
+        <ShieldingFactoryCard result={result} preset={activePreset} />
+      </div>
+    </div>
+  );
+}
+
+function ShieldingSlider({ label, value, setValue, min, max, step, unit, accent, formatter }) {
+  const display = formatter ? formatter(value) : `${Number(value).toFixed(step < 1 ? 2 : 0)} ${unit}`;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+        <div style={{ fontFamily: '"JetBrains Mono", monospace', color: "#cbd5e1", fontSize: 11, textTransform: "uppercase", letterSpacing: 1.8 }}>{label}</div>
+        <div style={{ fontFamily: '"JetBrains Mono", monospace', color: accent, fontSize: 12, fontWeight: 900 }}>{display}</div>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => setValue(Number(event.target.value))}
+        style={{ width: "100%", marginTop: 7, accentColor: accent }}
+        aria-label={label}
+      />
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#64727a", fontSize: 10, fontFamily: '"JetBrains Mono", monospace' }}>
+        <span>{min}{unit}</span>
+        <span>{max}{unit}</span>
+      </div>
+    </div>
+  );
+}
+
+function ShieldingFieldBadge({ left, top, color, label, value }) {
+  return (
+    <div style={{ position: "absolute", left, top, transform: "translate(-50%, -50%)", pointerEvents: "none" }}>
+      <div style={{ width: 58, height: 58, borderRadius: "50%", border: `1px solid ${color}`, boxShadow: `0 0 28px ${color}55`, display: "grid", placeItems: "center", background: "rgba(5,9,11,0.62)" }}>
+        <div style={{ width: 28, height: 28, borderRadius: "50%", border: `1px solid ${color}99`, display: "grid", placeItems: "center" }}>
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />
+        </div>
+      </div>
+      <div style={{ marginTop: 7, padding: "6px 9px", border: `1px solid ${color}80`, background: "rgba(5,9,11,0.82)", borderRadius: 4, minWidth: 128, textAlign: "center" }}>
+        <div style={{ color, fontFamily: '"JetBrains Mono", monospace', fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, fontWeight: 900 }}>{label}</div>
+        <div style={{ color: "#dbeafe", fontSize: 11, marginTop: 3 }}>{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function ShieldingLeakageCard({ result, coveragePct, seamGapMm, transferMilliOhm, bondPct }) {
+  const rows = [
+    { label: "Aperture closure", value: coveragePct, note: `${coveragePct.toFixed(0)}% optical coverage`, accent: "#fbbf24" },
+    { label: "Foil seam control", value: 100 - result.penalties.seam, note: `${seamGapMm.toFixed(2)} mm gap`, accent: "#5eead4" },
+    { label: "Low transfer Z", value: 100 - result.penalties.transfer, note: `${transferMilliOhm.toFixed(0)} mOhm/m`, accent: "#a78bfa" },
+    { label: "360 shell bond", value: bondPct, note: `${bondPct.toFixed(0)}% connector contact`, accent: "#67e8f9" },
+  ];
+
+  return (
+    <section style={{ ...RF_FAILURE_UI.panel, padding: 16, minWidth: 0 }}>
+      <RfFailureChartHeader label="Leakage budget" value={result.dominant} />
+      <div style={{ display: "grid", gap: 15, marginTop: 16 }}>
+        {rows.map((row) => (
+          <div key={row.label}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", fontFamily: '"JetBrains Mono", monospace' }}>
+              <span style={{ color: "#dbeafe", fontSize: 11, textTransform: "uppercase", letterSpacing: 1.4 }}>{row.label}</span>
+              <span style={{ color: row.accent, fontSize: 11, fontWeight: 900 }}>{row.note}</span>
+            </div>
+            <div style={{ height: 9, borderRadius: 999, background: "#071012", border: "1px solid #1d2a30", overflow: "hidden", marginTop: 7 }}>
+              <div style={{ width: `${rfLaunchClamp(row.value, 0, 100)}%`, height: "100%", background: `linear-gradient(90deg, ${row.accent}55, ${row.accent})` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <p style={{ color: "#9aa6ad", lineHeight: 1.65, margin: "16px 0 0" }}>
+        Better shielding is the combination of a closed aperture, a continuous foil seam, low shield transfer impedance, and a short 360-degree connector bond.
+      </p>
+    </section>
+  );
+}
+
+function ShieldingConstructionCard({ preset, result }) {
+  const rows = [
+    { label: "Layer stack", value: preset.layerNote },
+    { label: "What the VNA sees", value: `${result.seDb.toFixed(1)} dB isolation at the selected frequency; ${result.dominant} is the first thing to inspect.` },
+    { label: "Manufacturing move", value: preset.fix },
+  ];
+
+  return (
+    <section style={{ ...RF_FAILURE_UI.panel, padding: 16 }}>
+      <div style={RF_FAILURE_UI.eyebrow}>Build interpretation</div>
+      <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+        {rows.map((row, index) => (
+          <div key={row.label} style={{ display: "grid", gridTemplateColumns: "34px minmax(0, 1fr)", gap: 12 }}>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center", border: `1px solid ${preset.accent}`, color: preset.accent, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>
+              {index + 1}
+            </div>
+            <div>
+              <div style={{ color: "#e2e8f0", fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>{row.label}</div>
+              <div style={{ color: "#9aa6ad", lineHeight: 1.6, marginTop: 3 }}>{row.value}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ShieldingFactoryCard({ result, preset }) {
+  const checks = [
+    result.seDb < 48 ? "Treat this as a containment failure before optimizing impedance." : "Shielding is usable; confirm it survives bend and connector assembly.",
+    !preset.hasFoil && preset.coverage < 1 ? "Choose the shield architecture first: braid, foil-braid, or quad shield." : result.dominant === "foil seam gap" ? "Add seam-overlap inspection after tape/foil wrapping." : "Inspect braid picks, carrier tension, and OD after braiding.",
+    result.dominant === "connector bond" ? "Shorten pigtails and prefer a full-circumference clamp or ferrule." : "Terminate every conductive layer intentionally at the connector.",
+  ];
+
+  return (
+    <section style={{ ...RF_FAILURE_UI.panel, padding: 16 }}>
+      <div style={RF_FAILURE_UI.eyebrow}>QC checklist</div>
+      <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+        {checks.map((check, index) => (
+          <div key={check} style={{ display: "grid", gridTemplateColumns: "24px minmax(0, 1fr)", gap: 10, color: "#cbd5e1", lineHeight: 1.55 }}>
+            <span style={{ color: index === 0 ? result.gradeColor : preset.accent, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900 }}>{String(index + 1).padStart(2, "0")}</span>
+            <span>{check}</span>
           </div>
         ))}
       </div>
