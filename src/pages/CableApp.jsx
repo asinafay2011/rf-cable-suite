@@ -2334,9 +2334,51 @@ function Catalog({ onOpenRecipe }) {
 /* ============================================================
    Lab 01 — TDR Simulator
    ============================================================ */
+const TDR_SEGMENTS = 8;
+
+const TDR_DEFECT_CASES = [
+  {
+    id: 'kink',
+    title: 'Kink / bend stress',
+    tag: 'L up',
+    image: '/cable-renders/tdr-defect-kink.png',
+    defects: ['ideal', 'ideal', 'ideal', 'kink', 'ideal', 'ideal', 'ideal', 'ideal'],
+    stage: 'Take-up, reel handling, bend radius',
+    trace: 'Positive Z bump where local inductance rises.',
+  },
+  {
+    id: 'crush',
+    title: 'Crushed jacket',
+    tag: 'C up',
+    image: '/cable-renders/tdr-defect-crush.png',
+    defects: ['ideal', 'ideal', 'ideal', 'ideal', 'crush', 'ideal', 'ideal', 'ideal'],
+    stage: 'Capstan pressure, clamp, pinch roller',
+    trace: 'Negative Z dip where conductors are squeezed closer.',
+  },
+  {
+    id: 'foil',
+    title: 'Foil gap / tape tear',
+    tag: 'shield gap',
+    image: '/cable-renders/tdr-defect-foil-gap.png',
+    defects: ['ideal', 'ideal', 'foil', 'foil', 'ideal', 'ideal', 'ideal', 'ideal'],
+    stage: 'Tape head alignment, overlap, tension',
+    trace: 'Small positive reflection plus EMI risk at the gap.',
+  },
+  {
+    id: 'eccentric',
+    title: 'Off-center dielectric',
+    tag: 'eccentric',
+    image: '/cable-renders/tdr-defect-eccentric.png',
+    defects: ['ideal', 'eccentric', 'eccentric', 'ideal', 'ideal', 'ideal', 'ideal', 'ideal'],
+    stage: 'Extrusion die centering, melt pressure',
+    trace: 'Broad negative Z sag from uneven dielectric spacing.',
+  },
+];
+
 function TDRSim() {
-  const SEGMENTS = 8;
-  const [defects, setDefects] = useState(Array(SEGMENTS).fill('ideal'));
+  const SEGMENTS = TDR_SEGMENTS;
+  const [activeCaseId, setActiveCaseId] = useState(TDR_DEFECT_CASES[0].id);
+  const [defects, setDefects] = useState(TDR_DEFECT_CASES[0].defects);
 
   // Listen for agent-applied presets from FloatingAgent's "Apply" buttons.
   // params = { defects: ['kink', 'ideal', ...] } or { index, type } for a single segment.
@@ -2364,12 +2406,14 @@ function TDRSim() {
     ideal: { label: 'Clean', delta: 0, color: '#171d20', desc: 'Nominal Z₀ — no discontinuity' },
     kink: { label: 'Kink (L↑)', delta: +12, color: '#fbbf24', desc: 'Inductive bump — small bend increases L, raising Z' },
     crush: { label: 'Crush (C↑)', delta: -10, color: '#f87171', desc: 'Capacitive dip — clamp pressure raises C, lowering Z' },
+    foil: { label: 'Foil gap', delta: +6, color: '#cbd5e1', desc: 'Shield/tape break — small local discontinuity plus EMI ingress risk' },
+    eccentric: { label: 'Ecc.', delta: -7, color: '#5eead4', desc: 'Off-center dielectric — broad impedance sag and skew risk' },
     conn: { label: 'Connector', delta: -4, color: '#7dd3fc', desc: 'Connector launch — typical −3 đến −5 Ω' },
     splice: { label: 'Splice', delta: +5, color: '#a78bfa', desc: 'Bobbin-change splice — slight Z bump' },
   };
 
   const cycle = (i) => {
-    const order = ['ideal', 'kink', 'crush', 'conn', 'splice'];
+    const order = ['ideal', 'kink', 'crush', 'foil', 'eccentric', 'conn', 'splice'];
     setDefects((prev) => {
       const cur = order.indexOf(prev[i]);
       const next = [...prev];
@@ -2379,6 +2423,11 @@ function TDRSim() {
   };
 
   const reset = () => setDefects(Array(SEGMENTS).fill('ideal'));
+  const activeCase = TDR_DEFECT_CASES.find((item) => item.id === activeCaseId) || TDR_DEFECT_CASES[0];
+  const applyDefectCase = (item) => {
+    setActiveCaseId(item.id);
+    setDefects(item.defects);
+  };
 
   // Build TDR trace with smooth gaussian-shaped defects
   const trace = useMemo(() => {
@@ -2406,7 +2455,7 @@ function TDRSim() {
       <SectionTitle
         tag="LAB 01 — TDR SIMULATOR"
         title="Time Domain Reflectometry"
-        subtitle="Click each segment to cycle defects and see the TDR trace change. Crush dips down, kink bumps up."
+        subtitle="Click segments or choose a Blender defect preview to connect the physical damage with the Z(x) signature."
         icon={Activity}
       />
 
@@ -2461,6 +2510,13 @@ function TDRSim() {
           <span>100 m</span>
         </div>
       </div>
+
+      <TDRDefectVisualizer
+        cases={TDR_DEFECT_CASES}
+        activeCase={activeCase}
+        activeCaseId={activeCaseId}
+        onSelect={applyDefectCase}
+      />
 
       {/* TDR trace */}
       <div className="p-6 border border-[#252e33] bg-[#12171a] mb-6">
@@ -2530,9 +2586,119 @@ function TDRSim() {
   );
 }
 
+function TDRDefectVisualizer({ cases, activeCase, activeCaseId, onSelect }) {
+  return (
+    <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-4 mb-6">
+      <div className="relative border border-[#252e33] bg-[#0a0d0f] rounded overflow-hidden">
+        <div className="aspect-video min-h-[260px]">
+          <img
+            src={activeCase.image}
+            alt={activeCase.title}
+            className="w-full h-full object-cover"
+          />
+        </div>
+        <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[#5eead4]">
+          Blender defect preview
+        </div>
+        <div className="absolute bottom-2 left-2 right-2 grid sm:grid-cols-3 gap-2">
+          <div className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+            <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">Defect</div>
+            <div className="font-mono text-[11px] text-[#f0ebe2]">{activeCase.title}</div>
+          </div>
+          <div className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+            <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">Stage</div>
+            <div className="text-[11px] text-[#a7b0b6]">{activeCase.stage}</div>
+          </div>
+          <div className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+            <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">TDR</div>
+            <div className="text-[11px] text-[#a7b0b6]">{activeCase.trace}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="border border-[#252e33] bg-[#12171a] rounded p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#c97b3f]">Blender fault library</div>
+            <div className="text-xs text-[#a7b0b6] mt-1">Click a defect to load the matching TDR pattern.</div>
+          </div>
+          <Box size={18} className="text-[#5eead4]" />
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2">
+          {cases.map((item) => {
+            const active = item.id === activeCaseId;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSelect(item)}
+                className={`text-left rounded border p-3 transition-colors ${
+                  active ? 'border-[#5eead4] bg-[#0f2a28]' : 'border-[#252e33] bg-[#0a0d0f] hover:border-[#384249]'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-mono text-[11px] text-[#f0ebe2]">{item.title}</span>
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-[#fbbf24]">{item.tag}</span>
+                </div>
+                <div className="text-[10px] leading-relaxed text-[#a7b0b6]">{item.trace}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ============================================================
    Lab 02 — Braid Coverage Calculator
    ============================================================ */
+const BRAID_COVERAGE_VISUALS = [
+  {
+    id: 'open',
+    min: 0,
+    max: 65,
+    label: 'Open',
+    range: '<65%',
+    image: '/cable-renders/braid-coverage-open.png',
+    tone: '#f87171',
+    note: 'Large optical apertures; use foil or raise PR/P before calling this a shield.',
+  },
+  {
+    id: 'general',
+    min: 65,
+    max: 85,
+    label: 'General',
+    range: '65-85%',
+    image: '/cable-renders/braid-coverage-general.png',
+    tone: '#fbbf24',
+    note: 'Basic shield coverage with visible diamond windows.',
+  },
+  {
+    id: 'high',
+    min: 85,
+    max: 95,
+    label: 'High perf',
+    range: '85-95%',
+    image: '/cable-renders/braid-coverage-high.png',
+    tone: '#5eead4',
+    note: 'Good production braid for Cat 6A, broadcast, and instrumentation.',
+  },
+  {
+    id: 'dense',
+    min: 95,
+    max: 101,
+    label: 'EMI critical',
+    range: '>=95%',
+    image: '/cable-renders/braid-coverage-dense.png',
+    tone: '#7dd3fc',
+    note: 'Very tight optical coverage; better shielding but higher stiffness and cost.',
+  },
+];
+
+function braidCoverageVisualFor(K) {
+  return BRAID_COVERAGE_VISUALS.find((item) => K >= item.min && K < item.max) || BRAID_COVERAGE_VISUALS[BRAID_COVERAGE_VISUALS.length - 1];
+}
+
 /* Realistic basket-weave with under/over crossing pattern */
 function WeaveVis({ alpha, K, picksPerInch, carriers, animated = false }) {
   const w = 320;
@@ -2870,6 +3036,171 @@ function TubeVis({ alpha, K, picksPerInch }) {
   );
 }
 
+function BraidBlenderPreview({ visual, K, alpha, picksPerInch, carriers, apertureMm }) {
+  return (
+    <div className="border border-[#252e33] bg-[#0a0d0f] overflow-hidden rounded-sm">
+      <div className="relative aspect-video min-h-[260px]">
+        <img
+          data-testid="braid-blender-preview"
+          src={visual.image}
+          alt={`${visual.label} braid coverage Blender preview`}
+          className="w-full h-full object-cover"
+        />
+        <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[#5eead4] bg-[#0a0d0f]/70 border border-[#252e33] px-2 py-1">
+          Blender braid preview
+        </div>
+        <div className="absolute top-2 right-2 font-mono text-[10px] uppercase tracking-wider px-2 py-1 border bg-[#0a0d0f]/75" style={{ color: visual.tone, borderColor: visual.tone + '66' }}>
+          {visual.range}
+        </div>
+        <div className="absolute bottom-2 left-2 right-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+          {[
+            ['K', `${K.toFixed(1)}%`],
+            ['alpha', `${alpha.toFixed(1)}°`],
+            ['PR', `${picksPerInch} ppi`],
+            ['aperture', `${apertureMm.toFixed(2)} mm`],
+          ].map(([label, value]) => (
+            <div key={label} className="bg-[#0a0d0f]/85 border border-[#252e33] rounded-sm p-2">
+              <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+              <div className="font-mono text-[11px]" style={{ color: label === 'K' ? visual.tone : '#fbbf24' }}>{value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="p-3 border-t border-[#252e33]">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+          {BRAID_COVERAGE_VISUALS.map((item) => {
+            const selected = item.id === visual.id;
+            return (
+              <div
+                key={item.id}
+                data-testid={`braid-visual-band-${item.id}`}
+                className={`rounded-sm border px-2 py-1.5 ${selected ? 'bg-[#10201f]' : 'bg-[#12171a]'}`}
+                style={{ borderColor: selected ? item.tone : '#252e33' }}
+              >
+                <div className="font-mono text-[10px] uppercase tracking-wider" style={{ color: selected ? item.tone : '#a7b0b6' }}>
+                  {item.label}
+                </div>
+                <div className="font-mono text-[9px] text-[#6b7479]">{item.range}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="text-[11px] leading-relaxed text-[#a7b0b6]">
+          {visual.note} Current braid uses <span className="font-mono text-[#fbbf24]">{carriers}</span> total carriers.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BraidDiamondMap({ alpha, K, picksPerInch, carriers, strandMm, apertureMm, animated = false }) {
+  const w = 420;
+  const h = 260;
+  const safeAlpha = Math.max(18, Math.min(68, alpha));
+  const alphaRad = (safeAlpha * Math.PI) / 180;
+  const pitchMm = 25.4 / picksPerInch;
+  const cellW = Math.max(28, Math.min(74, pitchMm * 13));
+  const cellH = Math.max(30, Math.min(94, cellW * Math.tan(alphaRad) * 0.72));
+  const strandPx = Math.max(2.4, Math.min(9, strandMm * 42));
+  const dx = h / Math.tan(alphaRad);
+  const lineCount = Math.ceil((w + dx + cellW * 4) / cellW);
+  const openFactor = Math.max(0.08, Math.min(1, (100 - K) / 34));
+  const apertureColor = K < 65 ? '#f87171' : K < 85 ? '#fbbf24' : K < 95 ? '#5eead4' : '#7dd3fc';
+  const lines = [];
+  const diamonds = [];
+
+  for (let i = -4; i < lineCount; i++) {
+    const x = i * cellW - dx;
+    lines.push({ key: `s${i}`, x1: x, y1: 0, x2: x + dx, y2: h, dir: 's' });
+    lines.push({ key: `z${i}`, x1: x, y1: h, x2: x + dx, y2: 0, dir: 'z' });
+  }
+
+  for (let row = 0; row < Math.ceil(h / cellH) + 2; row++) {
+    for (let col = -1; col < Math.ceil(w / cellW) + 2; col++) {
+      const cx = col * cellW + (row % 2 ? cellW / 2 : 0);
+      const cy = row * cellH * 0.82;
+      const rx = cellW * 0.22 * openFactor;
+      const ry = cellH * 0.22 * openFactor;
+      diamonds.push({ key: `${row}-${col}`, cx, cy, rx, ry });
+    }
+  }
+
+  return (
+    <div className="border border-[#252e33] bg-[#0a0d0f] rounded-sm overflow-hidden">
+      <div className="flex justify-between items-baseline px-4 pt-4 pb-2">
+        <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f]">
+          Unwrapped diamond map
+        </div>
+        <div className="font-mono text-[10px] text-[#6b7479]">
+          1 in pitch basis
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: 260 }}>
+        <defs>
+          <clipPath id="braidDiamondClip">
+            <rect x="0" y="32" width={w} height={h - 58} />
+          </clipPath>
+          <linearGradient id="diamondCopper" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#f59e0b" />
+            <stop offset="52%" stopColor="#c97b3f" />
+            <stop offset="100%" stopColor="#7a4a26" />
+          </linearGradient>
+          <linearGradient id="diamondTin" x1="1" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#f3f4f6" />
+            <stop offset="52%" stopColor="#a8a29e" />
+            <stop offset="100%" stopColor="#57534e" />
+          </linearGradient>
+        </defs>
+        <rect width={w} height={h} fill="#06090b" />
+        <g clipPath="url(#braidDiamondClip)">
+          {diamonds.map((dmd, index) => (
+            <polygon
+              key={dmd.key}
+              points={`${dmd.cx},${dmd.cy - dmd.ry} ${dmd.cx + dmd.rx},${dmd.cy} ${dmd.cx},${dmd.cy + dmd.ry} ${dmd.cx - dmd.rx},${dmd.cy}`}
+              fill={apertureColor}
+              opacity={K < 95 ? Math.max(0.08, (100 - K) / 90) : 0.04}
+              stroke={index % 3 === 0 ? apertureColor : 'none'}
+              strokeOpacity="0.18"
+            />
+          ))}
+          {lines.map((line) => (
+            <line
+              key={line.key}
+              x1={line.x1}
+              y1={line.y1}
+              x2={line.x2}
+              y2={line.y2}
+              stroke={line.dir === 's' ? 'url(#diamondCopper)' : 'url(#diamondTin)'}
+              strokeWidth={strandPx}
+              strokeLinecap="round"
+              opacity={Math.min(0.96, 0.34 + K / 135)}
+              strokeDasharray={animated ? '10 6' : undefined}
+              className={animated ? (line.dir === 's' ? 'strand-flow-fwd' : 'strand-flow-bwd') : undefined}
+            />
+          ))}
+        </g>
+        <rect x="0" y="0" width={w} height="32" fill="#06090b" opacity="0.92" />
+        <rect x="0" y={h - 26} width={w} height="26" fill="#06090b" opacity="0.92" />
+        <text x={12} y={18} fontSize="9" fill="#fbbf24" fontFamily="JetBrains Mono">pitch = {pitchMm.toFixed(2)} mm</text>
+        <text x={12} y={h - 12} fontSize="9" fill="#5eead4" fontFamily="JetBrains Mono">{carriers} carriers · d {strandMm.toFixed(3)} mm</text>
+        <text x={w - 12} y={18} fontSize="9" fill={apertureColor} fontFamily="JetBrains Mono" textAnchor="end">aperture ~ {apertureMm.toFixed(2)} mm</text>
+      </svg>
+      <div className="grid grid-cols-3 gap-2 p-3 border-t border-[#252e33]">
+        {[
+          ['diamond height', `${cellH.toFixed(0)} px`],
+          ['strand width', `${strandPx.toFixed(1)} px`],
+          ['open factor', `${(openFactor * 100).toFixed(0)}%`],
+        ].map(([label, value]) => (
+          <div key={label} className="border border-[#252e33] bg-[#12171a] rounded-sm p-2">
+            <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+            <div className="font-mono text-[11px] text-[#fbbf24]">{value}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* Coverage gauge — circular dial with zones */
 function CoverageGauge({ K }) {
   const size = 200;
@@ -3157,6 +3488,7 @@ function BraidCoverage() {
     return { color: '#7dd3fc', label: 'EMI CRITICAL', sub: 'Aerospace, MIL, SpaceWire grade', tone: 'teal' };
   };
   const s = status(result.K);
+  const braidVisual = braidCoverageVisualFor(result.K);
 
   // Cu price + material premium for cost calc
   const [cuPriceUSD, setCuPriceUSD] = useState(9.5);
@@ -3621,29 +3953,25 @@ function BraidCoverage() {
         </div>
       )}
 
-      {/* DUAL VISUALIZATION ROW */}
-      <div className="grid md:grid-cols-2 gap-6 mb-6">
-        <div className="p-4 border border-[#252e33] bg-[#0a0d0f]">
-          <div className="flex justify-between items-baseline mb-3 px-2">
-            <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f]">Weave pattern · flat</div>
-            <div className="font-mono text-[10px] text-[#6b7479]">basket weave</div>
-          </div>
-          <WeaveVis alpha={result.alpha} K={result.K} picksPerInch={PR} carriers={N} animated={animated} />
-          <div className="mt-2 px-2 text-[10px] font-mono text-[#6b7479]">
-            {result.K < 90 ? '⚠ Red glows show open apertures where EM leaks through' : '✓ Tight weave — minimal apertures'}
-          </div>
-        </div>
-
-        <div className="p-4 border border-[#252e33] bg-[#0a0d0f]">
-          <div className="flex justify-between items-baseline mb-3 px-2">
-            <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f]">Cable wrap · 3D</div>
-            <div className="font-mono text-[10px] text-[#6b7479]">helical strands</div>
-          </div>
-          <TubeVis alpha={result.alpha} K={result.K} picksPerInch={PR} />
-          <div className="mt-2 px-2 text-[10px] font-mono text-[#6b7479]">
-            S-direction (copper) + Z-direction (silver) strands cross at α
-          </div>
-        </div>
+      {/* BLENDER + LIVE GEOMETRY VISUALIZATION */}
+      <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-6 mb-6">
+        <BraidBlenderPreview
+          visual={braidVisual}
+          K={result.K}
+          alpha={result.alpha}
+          picksPerInch={PR}
+          carriers={N}
+          apertureMm={aperture_mm}
+        />
+        <BraidDiamondMap
+          alpha={result.alpha}
+          K={result.K}
+          picksPerInch={PR}
+          carriers={N}
+          strandMm={d}
+          apertureMm={aperture_mm}
+          animated={animated}
+        />
       </div>
 
       {/* CONTROLS ROW */}

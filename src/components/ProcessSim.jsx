@@ -87,6 +87,117 @@ export const DEFAULT_RECIPE = {
   test: { length_m: 100, freq_mhz: 500 },
 }
 
+const PROCESS_STAGE_VISUALS = [
+  {
+    id: 'conductor',
+    idx: 1,
+    title: 'Conductor draw',
+    image: '/cable-renders/process-stage-01-conductor.png',
+    stageKey: 'conductor',
+    cue: 'Rod is drawn down to the target AWG before the polymer stack is built.',
+    metrics: (sim) => [
+      ['strand', mmIn(sim.conductor.strand_d_mm, 3)],
+      ['dc r', `${(sim.conductor.dc_R_per_m * 1000).toFixed(2)} mOhm/m`],
+    ],
+  },
+  {
+    id: 'stranding',
+    idx: 2,
+    title: 'Stranding',
+    image: '/cable-renders/process-stage-02-stranding.png',
+    stageKey: 'stranding',
+    cue: 'Optional bunching builds a flexible conductor before insulation.',
+    metrics: (sim) => [
+      ['conductor', mmIn(sim.stranding.conductor_d_mm, 3)],
+      ['mass', `${sim.stranding.mass_g_per_m.toFixed(2)} g/m`],
+    ],
+  },
+  {
+    id: 'insulation',
+    idx: 3,
+    title: 'Insulation extrusion',
+    image: '/cable-renders/process-stage-03-insulation.png',
+    stageKey: 'insulation',
+    cue: 'Foamed or solid dielectric controls impedance, capacitance, and skew stability.',
+    metrics: (sim) => [
+      ['od', mmIn(sim.insulation.insulated_d_mm, 3)],
+      ['er eff', sim.insulation.er_effective.toFixed(3)],
+    ],
+  },
+  {
+    id: 'pair',
+    idx: 4,
+    title: 'Pair twisting',
+    image: '/cable-renders/process-stage-04-pair-twist.png',
+    stageKey: 'pair',
+    cue: 'Two insulated wires twist evenly; lay length drives skew and NEXT.',
+    metrics: (sim) => [
+      ['z diff', `${sim.pair.z_diff.toFixed(1)} Ohm`],
+      ['skew', `${sim.pair.skew_ps_per_m.toFixed(1)} ps/m`],
+    ],
+  },
+  {
+    id: 'wrap',
+    idx: 5,
+    title: 'Pair binder / wrap',
+    image: '/cable-renders/process-stage-05-pair-wrap.png',
+    stageKey: 'pair_wrap',
+    cue: 'Binder tape keeps the pair geometry stable before foil shielding.',
+    metrics: (sim) => [
+      ['wrapped od', mmIn(sim.pair_wrap.wrapped_pair_od_mm, 3)],
+      ['yield', `${sim.pair_wrap.yield_pct.toFixed(1)}%`],
+    ],
+  },
+  {
+    id: 'pair-foil',
+    idx: 6,
+    title: 'Pair foil shield',
+    image: '/cable-renders/process-stage-06-pair-foil.png',
+    stageKey: 'pair_foil',
+    cue: 'Foil and drain wire give each pair its local shield and return path.',
+    metrics: (sim) => [
+      ['shielded od', mmIn(sim.pair_foil.shielded_pair_od_mm, 3)],
+      ['zt', `${sim.pair_foil.pair_zt_mohm_per_m.toFixed(0)} mOhm/m`],
+    ],
+  },
+  {
+    id: 'bundle',
+    idx: 7,
+    title: 'Bundle lay-up',
+    image: '/cable-renders/process-stage-07-bundle.png',
+    stageKey: 'bundle',
+    cue: 'Four pairs gather around filler; bundle geometry sets pair spacing and NEXT.',
+    metrics: (sim) => [
+      ['bundle od', mmIn(sim.bundle.bundle_d_mm, 2)],
+      ['next', `${sim.bundle.next_db_estimate.toFixed(1)} dB`],
+    ],
+  },
+  {
+    id: 'shield',
+    idx: 8,
+    title: 'Outer shielding',
+    image: '/cable-renders/process-stage-08-outer-shield.png',
+    stageKey: 'shield',
+    cue: 'Outer foil and braid wrap over the bundle, following the non-round core.',
+    metrics: (sim) => [
+      ['coverage', `${sim.shield.coverage_pct.toFixed(1)}%`],
+      ['zt', `${sim.shield.zt_mohm_per_m.toFixed(0)} mOhm/m`],
+    ],
+  },
+  {
+    id: 'jacket',
+    idx: 9,
+    title: 'Jacketing',
+    image: '/cable-renders/process-stage-09-jacket.png',
+    stageKey: 'jacket',
+    cue: 'Final jacket locks the shield stack and sets final OD, flex, and environment rating.',
+    metrics: (sim) => [
+      ['final od', mmIn(sim.jacket.final_od_mm, 2)],
+      ['mass', `${sim.jacket.mass_g_per_m.toFixed(0)} g/m`],
+    ],
+  },
+]
+
 // ── Recipe templates (one-click factory presets) ────────
 // Each template is a complete recipe object. Picking one in the UI calls setRecipe(...)
 // which propagates through the entire 9-stage pipeline. Compose realistic baselines,
@@ -1102,6 +1213,8 @@ export default function ProcessSim() {
         </div>
       )}
 
+      <ProcessStageWalkthrough sim={sim} />
+
       {/* Manufacturing flow — vertical timeline with per-stage cross-section + status */}
       <div className="relative">
         <Stage idx={1} title="Conductor draw" icon={Atom} accent={C.copper} stage={sim.conductor} preview={<XSConductor d={sim.conductor.strand_d_mm * 8} />}>
@@ -1400,6 +1513,98 @@ function RecipeCompareModal({ left, right, onClose, onLoad }) {
         </div>
       </div>
     </div>
+  )
+}
+
+function ProcessStageWalkthrough({ sim }) {
+  const [activeId, setActiveId] = useState(PROCESS_STAGE_VISUALS[0].id)
+  const active = PROCESS_STAGE_VISUALS.find((stage) => stage.id === activeId) || PROCESS_STAGE_VISUALS[0]
+  const activeStage = sim[active.stageKey]
+  const warnCount = activeStage?.warn?.length || 0
+  const yieldPct = activeStage?.yield_pct ?? 100
+  const status = yieldPct < 80 ? 'red' : warnCount > 0 ? 'amber' : 'green'
+  const statusColor = status === 'red' ? C.red : status === 'amber' ? C.amber : C.teal
+
+  return (
+    <section className="bg-[#12171a] border border-[#252e33] rounded-md overflow-hidden">
+      <div className="grid lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="relative bg-[#0a0d0f] border-b lg:border-b-0 lg:border-r border-[#252e33]">
+          <div className="aspect-video min-h-[280px]">
+            <img
+              data-testid="process-stage-preview"
+              src={active.image}
+              alt={active.title}
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[#5eead4]">
+            Blender process walkthrough
+          </div>
+          <div className="absolute bottom-2 left-2 right-2 grid sm:grid-cols-3 gap-2">
+            <div className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+              <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">Stage</div>
+              <div className="font-mono text-[11px] text-[#f0ebe2]">{String(active.idx).padStart(2, '0')} · {active.title}</div>
+            </div>
+            {active.metrics(sim).map(([label, value]) => (
+              <div key={label} className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+                <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+                <div className="font-mono text-[11px]" style={{ color: C.amber }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-4">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#c97b3f]">
+                Visual manufacturing flow
+              </div>
+              <p className="text-[12px] text-[#a7b0b6] leading-relaxed mt-1 max-w-xl">
+                {active.cue}
+              </p>
+            </div>
+            <div
+              className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border shrink-0"
+              style={{ borderColor: statusColor + '60', color: statusColor }}
+            >
+              {yieldPct.toFixed(1)}%
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-2">
+            {PROCESS_STAGE_VISUALS.map((stage) => {
+              const selected = stage.id === active.id
+              const stageResult = sim[stage.stageKey]
+              const stageWarns = stageResult?.warn?.length || 0
+              const stageYield = stageResult?.yield_pct ?? 100
+              const stageStatus = stageYield < 80 ? C.red : stageWarns > 0 ? C.amber : C.teal
+              return (
+                <button
+                  key={stage.id}
+                  data-testid={`process-stage-visual-${stage.id}`}
+                  onClick={() => setActiveId(stage.id)}
+                  className={`text-left rounded border p-2 transition-colors ${
+                    selected ? 'bg-[#0d1f1d]' : 'bg-[#0a0d0f] hover:bg-[#101719]'
+                  }`}
+                  style={{ borderColor: selected ? C.teal : C.border }}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="font-mono text-[10px]" style={{ color: selected ? C.teal : C.textDim }}>
+                      {String(stage.idx).padStart(2, '0')}
+                    </span>
+                    <span className="w-2 h-2 rounded-full" style={{ background: stageStatus }} />
+                  </div>
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-[#f0ebe2] truncate">
+                    {stage.title}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </section>
   )
 }
 
