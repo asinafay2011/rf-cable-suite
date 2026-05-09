@@ -534,15 +534,24 @@ def jacket_color_from_text(name: str, jacket: str) -> tuple[float, float, float,
     text = f"{name} {jacket}".lower()
     if "white" in text:
         return (0.86, 0.84, 0.76, 1)
+    if "plenum" in text or "lszh" in text:
+        return (0.82, 0.80, 0.72, 1)
     if "brown" in text:
         return (0.34, 0.20, 0.11, 1)
-    if "tan" in text:
+    if "tan" in text or "fep" in text:
         return (0.52, 0.40, 0.27, 1)
     if "blue" in text:
         return (0.03, 0.12, 0.28, 1)
     if "orange" in text:
         return (0.50, 0.18, 0.04, 1)
     return (0.010, 0.010, 0.010, 1)
+
+
+def jacket_cut_color(color: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    rgb = color[:3]
+    if max(rgb) < 0.08:
+        return (0.018, 0.017, 0.015, 1)
+    return tuple(max(channel * 0.58, 0.035) for channel in rgb) + (color[3],)
 
 
 def conductor_kind_from_text(text: str) -> str:
@@ -1064,7 +1073,7 @@ def build_video_coax_model(spec: dict) -> None:
     braid_shadow = make_material("braid shadow pass", braid_shadow_color, metallic=0.55, roughness=0.4, alpha=0.46)
     inner_braid = make_material(f"inner {braid_kind.replace('_', ' ')} braid", tuple(min(c * 1.08, 1) for c in braid_color[:3]) + (1,), metallic=0.78, roughness=0.27)
     jacket = make_material("matte black pvc jacket", spec["jacket_color"], roughness=0.86)
-    jacket_edge = make_material("fresh jacket cut edge", (0.018, 0.017, 0.015, 1), roughness=0.74)
+    jacket_edge = make_material("fresh jacket cut edge", jacket_cut_color(spec["jacket_color"]), roughness=0.74)
 
     objects: list[bpy.types.Object] = []
     has_foil = spec.get("foil", True)
