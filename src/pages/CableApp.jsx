@@ -3,7 +3,7 @@ import {
   Cable, Calculator, Layers, Shield, Box, FlaskConical, BookOpen,
   ChevronRight, ChevronDown, Activity, Ruler, Zap, Atom, Wrench, Library,
   ArrowRight, Plus, Minus, Info, Eye, Radio, Coins, Boxes, Search, X, Settings,
-  GitBranch, Sparkles, Home,
+  GitBranch, Home,
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import FloatingAgent from '../components/FloatingAgent.jsx';
@@ -850,7 +850,7 @@ function HomeView({ setSection }) {
               From a strand of copper to a <span style={{ color: '#c97b3f', fontStyle: 'italic' }}>controlled-impedance</span> cable.
             </h1>
             <p style={{ marginTop: 18, color: '#a7b0b6', fontSize: 14, lineHeight: 1.6, maxWidth: 640 }}>
-              Build a Cat 6A / Cat 8 / USB4 / coax recipe stage-by-stage and watch its predicted Z₀, IL, NEXT, and skew update in real time.
+              Build a Cat 6A / Cat 8 / USB4 / shielded-pair recipe stage-by-stage and watch its predicted Z₀, IL, NEXT, and skew update in real time.
               Every formula cited (Wadell, SCTE 51, IEC 61156). Every test path local. Every datasheet URL clickable.
             </p>
             <div className="hs-ctas" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 22 }}>
@@ -872,7 +872,7 @@ function HomeView({ setSection }) {
         {/* STATS BAR */}
         <section className="hs-fade" style={{ animationDelay: '120ms', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 1, background: '#252e33', border: '1px solid #252e33', borderRadius: 4, marginTop: 32, overflow: 'hidden' }}>
           <HsStatTile value="9" label="Mfg stages" sub="conductor → jacket pipeline" color="#c97b3f" />
-          <HsStatTile value={cableCount} label="Cable presets" sub="RG · LMR · Cat · USB4 · IB · DAC" color="#5eead4" />
+          <HsStatTile value={cableCount} label="Cable presets" sub="Cat · USB4 · IB · DAC · STP" color="#5eead4" />
           <HsStatTile value="276" label="Z₀ formula" sub="log/√εᵣ · Wadell" color="#fbbf24" />
           <HsStatTile value={standardCount} label="Standards" sub="TIA · IEC · IEEE · SCTE · MIL" color="#a78bfa" />
         </section>
@@ -1283,7 +1283,7 @@ const TAB_INTROS = {
   '3d': {
     eyebrow: '3D View · Blender cable builds',
     title: 'Watch cable layers build from the inside out',
-    desc: 'Switch between an RF coax shield stack and a high-speed 4-pair bundle build, with Blender source, GLB, and MP4 assets kept beside the viewer.',
+    desc: 'Switch between high-speed pair wrapping, shield application, and 4-pair bundle builds, with Blender source, GLB, and MP4 assets kept beside the viewer.',
     accent: '#a78bfa',
     icon: Box,
   },

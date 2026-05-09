@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect, createContext, useContext } from "react";
 import { Link } from "react-router-dom";
-import { Activity, Flame, Gauge, Menu, Radio, Ruler, ShieldCheck, Weight, X as XIcon, Zap, ChevronDown } from "lucide-react";
+import { Activity, Flame, Gauge, Menu, Radio, Ruler, ShieldCheck, Sparkles, Weight, X as XIcon, Zap, ChevronDown } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import FloatingAgent from "../components/FloatingAgent.jsx";
 import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
 import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
@@ -85,6 +86,8 @@ const RF_SECTION_LABELS = {
   connectors: 'Connectors',
   link: 'Link Budget',
   tools: 'Tools (NF / IP3 / Path / Smith)',
+  failure: 'RF Failure Theater',
+  launch: 'Connector Launch Lab',
   suckout: 'Tape Suckout Sim',
   dielectric: 'Dielectric Stack Designer',
   wizard: 'Wizard',
@@ -110,6 +113,18 @@ const RF_SECTION_STARTERS = {
     'Why does first-stage NF dominate?',
     'Convert VSWR 2.0 to return loss',
     'Compute mismatch loss between source VSWR 1.5 and load VSWR 1.8',
+  ],
+  failure: [
+    'Show me how a crushed RF cable appears in TDR and return loss',
+    'Which physical defects hurt high-frequency return loss most?',
+    'What does a bad connector launch look like?',
+    'How do I explain a foil gap to production using RF data?',
+  ],
+  launch: [
+    'Tune an SMA launch for best return loss to 18 GHz',
+    'What happens if the pin is too long at the connector?',
+    'Show TDR and S11 for a dielectric gap at the ferrule',
+    'Which connector launch dimensions should QC measure first?',
   ],
   library: [
     'Compare LMR-400 and RG-213 attenuation at 900 MHz',
@@ -1756,6 +1771,8 @@ export default function RFCableSuite() {
     },
     { id: "link", label: "Link" },
     { id: "tools", label: "Tools" },
+    { id: "failure", label: "Failure" },
+    { id: "launch", label: "Launch Lab" },
     {
       group: "build", label: "Build",
       children: [
@@ -2125,6 +2142,8 @@ export default function RFCableSuite() {
           {tab === "connectors" && <ConnectorView />}
           {tab === "link" && <LinkView openInLibrary={openInLibrary} onPrint={() => setPrintSetup({ type: "link" })} toolPreset={toolPreset} clearToolPreset={clearToolPreset} />}
           {tab === "tools" && <ToolsView toolPreset={toolPreset} clearToolPreset={clearToolPreset} />}
+          {tab === "failure" && <RFFailureTheater />}
+          {tab === "launch" && <ConnectorLaunchLab />}
           {tab === "suckout" && <SuckoutSim accent="#d97706" defaultLayer="ptfe" />}
           {tab === "dielectric" && <DielectricStackDesigner />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
@@ -2714,6 +2733,8 @@ function HomeView({ setTab, comparedCables }) {
     { id: 'design', icon: 'layers', title: 'Design Workbench', sub: 'Compose chains · paste configs · share', accent: '#5eead4' },
     { id: 'link', icon: 'link', title: 'Link Budget', sub: 'TX → cable → FSPL → RX with margin', accent: '#7dd3fc' },
     { id: 'tools', icon: 'tools', title: 'Tools', sub: 'Friis NF · IP3 · Smith · path loss', accent: '#a78bfa' },
+    { id: 'failure', icon: 'failure', title: 'RF Failure Theater', sub: 'Blender defect → TDR · S11 · VSWR story', accent: '#f87171' },
+    { id: 'launch', icon: 'launch', title: 'Connector Launch Lab', sub: 'Pin depth · strip length · ferrule step → S11', accent: '#38bdf8' },
     { id: 'suckout', icon: 'wave', title: 'Tape Suckout Sim', sub: 'Multi-layer Bragg-notch designer', accent: '#e89357' },
     { id: 'wizard', icon: 'sparkles', title: 'Cable Selector', sub: 'Wizard: pick the right cable for the job', accent: '#84cc16' },
     { id: 'cheat', icon: 'book', title: 'Cheat Sheet', sub: 'Formulas · constants · standards', accent: '#cbd5e1' },
@@ -3006,6 +3027,21 @@ function ToolGlyph({ kind, color }) {
       <path d="M3 21l8-8m0 0l3-3m-3 3l-3-3m6 0l5 5-3 3-5-5m3-3l3-3-5-5-3 3" />
     </svg>
   );
+  if (kind === 'failure') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 13h4l1.5-4 1.5 8 2-12 2.5 15 1.5-7h5" />
+      <path d="M17 5l4 4M21 5l-4 4" opacity="0.7" />
+    </svg>
+  );
+  if (kind === 'launch') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12h7" />
+      <path d="M10 8v8" />
+      <path d="M10 10h4l3-3h4v10h-4l-3-3h-4" />
+      <path d="M18 9v6" opacity="0.55" />
+      <circle cx="6" cy="12" r="1.5" fill={color} stroke="none" />
+    </svg>
+  );
   if (kind === 'wave') return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
       <path d="M2 12c2-4 3-4 5 0s3 4 5 0 3-4 5 0 3 4 5 0" />
@@ -3067,6 +3103,857 @@ function SmithChartBadge() {
       {/* Center label */}
       <text x="100" y="190" fontFamily="JetBrains Mono, monospace" fontSize="9" fill="#6b7479" textAnchor="middle" letterSpacing="2">SMITH · 50 Ω</text>
     </svg>
+  );
+}
+
+const RF_FAILURE_UI = {
+  panel: {
+    background: "linear-gradient(180deg, rgba(18,24,27,0.96), rgba(10,14,16,0.98))",
+    border: "1px solid #26343a",
+    borderRadius: 6,
+    boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
+  },
+  eyebrow: {
+    fontFamily: '"JetBrains Mono", monospace',
+    fontSize: 11,
+    letterSpacing: 3,
+    textTransform: "uppercase",
+    color: "#fb923c",
+    fontWeight: 800,
+  },
+};
+
+const RF_FAILURE_BANDS = [
+  { id: "low", label: "0-6 GHz", min: 0, max: 6 },
+  { id: "mid", label: "0-18 GHz", min: 0, max: 18 },
+  { id: "mmwave", label: "0-40 GHz", min: 0, max: 40 },
+];
+
+const RF_FAILURE_CASES = [
+  {
+    id: "kink",
+    label: "Kink / tight bend",
+    tag: "bend stress",
+    accent: "#facc15",
+    preview: "/cable-renders/rf-failure-kink.png",
+    scene: "Local bend collapses the coax geometry and changes dielectric spacing.",
+    tdr: "positive echo then recovery",
+    s11: "broad return-loss lift",
+    distanceM: 4.8,
+    zShift: 6.5,
+    width: 0.95,
+    notchGHz: 7.2,
+    notchWidth: 2.5,
+    rlBase: 25.5,
+    rlDamage: 12.2,
+    fix: "Increase bend radius, reroute clamp points, and re-test TDR before final VNA sweep.",
+  },
+  {
+    id: "crush",
+    label: "Crushed jacket",
+    tag: "clamp pressure",
+    accent: "#fb7185",
+    preview: "/cable-renders/rf-failure-crush.png",
+    scene: "Compression flattens the shield and dielectric, lowering local impedance.",
+    tdr: "negative impedance dip",
+    s11: "mid-band VSWR rise",
+    distanceM: 6.3,
+    zShift: -7.4,
+    width: 1.1,
+    notchGHz: 5.9,
+    notchWidth: 2.9,
+    rlBase: 26.8,
+    rlDamage: 14.8,
+    fix: "Replace hard clamps with saddles or strain relief, then inspect OD with a go/no-go gauge.",
+  },
+  {
+    id: "foil-gap",
+    label: "Foil gap / shield tear",
+    tag: "shield leak",
+    accent: "#cbd5e1",
+    preview: "/cable-renders/rf-failure-foil-gap.png",
+    scene: "A shield discontinuity leaks energy and creates a high-frequency reflection point.",
+    tdr: "small positive echo",
+    s11: "high-frequency ripple",
+    distanceM: 8.7,
+    zShift: 4.3,
+    width: 0.62,
+    notchGHz: 14.4,
+    notchWidth: 4.7,
+    rlBase: 27.2,
+    rlDamage: 10.6,
+    fix: "Add overlap control, verify foil tension, and check braid coverage at the same station.",
+  },
+  {
+    id: "eccentric",
+    label: "Off-center dielectric",
+    tag: "eccentric core",
+    accent: "#5eead4",
+    preview: "/cable-renders/rf-failure-eccentric.png",
+    scene: "The center conductor is not concentric, creating a long impedance slope.",
+    tdr: "slow impedance ramp",
+    s11: "standing-wave ripple",
+    distanceM: 5.7,
+    zShift: 3.1,
+    width: 2.8,
+    notchGHz: 10.8,
+    notchWidth: 5.5,
+    rlBase: 28.0,
+    rlDamage: 13.2,
+    fix: "Tune extrusion centering, cooling stability, and take cross-section samples by reel.",
+  },
+  {
+    id: "launch",
+    label: "Bad connector launch",
+    tag: "pin / ferrule step",
+    accent: "#7dd3fc",
+    preview: "/cable-renders/rf-failure-launch.png",
+    scene: "The connector transition creates an abrupt 50 ohm discontinuity at the launch.",
+    tdr: "sharp near-end spike",
+    s11: "narrow launch resonance",
+    distanceM: 0.35,
+    zShift: 9.2,
+    width: 0.34,
+    notchGHz: 18.5,
+    notchWidth: 3.2,
+    rlBase: 26.0,
+    rlDamage: 9.8,
+    fix: "Adjust strip length, pin depth, ferrule crimp, and use a launch coupon for first-article approval.",
+  },
+];
+
+function rfFailureClamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function rfFailureGaussian(x, center, width) {
+  const normalized = (x - center) / Math.max(width, 0.001);
+  return Math.exp(-0.5 * normalized * normalized);
+}
+
+function rfFailureVswrFromReturnLoss(returnLossDb) {
+  const gamma = Math.pow(10, -Math.max(returnLossDb, 0.1) / 20);
+  return (1 + gamma) / Math.max(1 - gamma, 0.001);
+}
+
+function makeRfFailureTdrTrace(failure, severity) {
+  const severityGain = severity / 100;
+  return Array.from({ length: 96 }, (_, index) => {
+    const distance = (index / 95) * 12;
+    const echo = failure.zShift * severityGain * rfFailureGaussian(distance, failure.distanceM, failure.width);
+    const ringing = Math.sin((distance - failure.distanceM) * 7) * echo * 0.12;
+    return {
+      distance: Number(distance.toFixed(2)),
+      ohms: Number((50 + echo + ringing).toFixed(2)),
+    };
+  });
+}
+
+function makeRfFailureReturnLossTrace(failure, band, severity) {
+  const severityGain = severity / 100;
+  const maxGHz = band.max || 6;
+  return Array.from({ length: 120 }, (_, index) => {
+    const frequency = band.min + (index / 119) * (maxGHz - band.min);
+    const base = failure.rlBase - 1.8 * Math.log10(frequency + 1);
+    const notch = (failure.rlDamage + severityGain * 10) * rfFailureGaussian(frequency, failure.notchGHz, failure.notchWidth);
+    const ripple = Math.sin(frequency * 2.1 + failure.distanceM) * severityGain * 1.1;
+    return {
+      frequency: Number(frequency.toFixed(2)),
+      rl: Number((-rfFailureClamp(base - notch + ripple, 8, 34)).toFixed(2)),
+    };
+  });
+}
+
+function RFFailureTheater() {
+  const [activeId, setActiveId] = useState("foil-gap");
+  const [severity, setSeverity] = useState(72);
+  const [bandId, setBandId] = useState("mid");
+
+  const activeFailure = RF_FAILURE_CASES.find((item) => item.id === activeId) || RF_FAILURE_CASES[0];
+  const activeBand = RF_FAILURE_BANDS.find((item) => item.id === bandId) || RF_FAILURE_BANDS[0];
+  const tdrTrace = useMemo(() => makeRfFailureTdrTrace(activeFailure, severity), [activeFailure, severity]);
+  const rlTrace = useMemo(() => makeRfFailureReturnLossTrace(activeFailure, activeBand, severity), [activeFailure, activeBand, severity]);
+  const worstReturnLoss = Math.abs(Math.max(...rlTrace.map((point) => point.rl)));
+  const peakVswr = rfFailureVswrFromReturnLoss(worstReturnLoss);
+  const tdrPeak = Math.max(...tdrTrace.map((point) => Math.abs(point.ohms - 50)));
+
+  return (
+    <div style={S.viewInner} data-testid="rf-failure-theater">
+      <div style={{ ...S.viewIntro, display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 16, alignItems: "center" }}>
+        <div style={{ width: 48, height: 48, border: "1px solid #324047", borderRadius: 4, display: "grid", placeItems: "center", color: "#fb923c" }}>
+          <Sparkles size={22} />
+        </div>
+        <div>
+          <div style={RF_FAILURE_UI.eyebrow}>RF Failure Theater</div>
+          <div style={{ ...S.viewIntroStrong, marginTop: 6 }}>Physical defect {"->"} RF symptom</div>
+          <div style={{ color: "#cbd5e1", lineHeight: 1.7, maxWidth: 820 }}>
+            Coax-focused failure scenes connect a visible build defect to TDR impedance, return loss, VSWR, and the manufacturing fix.
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, marginTop: 22 }}>
+        <section style={{ ...RF_FAILURE_UI.panel, overflow: "hidden" }}>
+          <div style={{ position: "relative", height: "clamp(330px, 28vw, 430px)", background: "linear-gradient(135deg, #050808, #151b1e)" }}>
+            <img
+              src={activeFailure.preview}
+              alt={`${activeFailure.label} RF coax defect preview`}
+              style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", opacity: 0.94 }}
+            />
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.58))" }} />
+            <div style={{ position: "absolute", top: 14, left: 14, ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>Blender RF Scene</div>
+            <div style={{ position: "absolute", top: 18, right: 18, border: `1px solid ${activeFailure.accent}`, color: activeFailure.accent, borderRadius: 4, padding: "6px 10px", fontFamily: '"JetBrains Mono", monospace', fontSize: 11, fontWeight: 800 }}>
+              REVIEW
+            </div>
+            <div style={{ position: "absolute", left: "55%", top: "58%", transform: "translate(-50%, -50%)", width: 62, height: 62, borderRadius: "50%", border: `1px solid ${activeFailure.accent}`, display: "grid", placeItems: "center", color: "#fff", background: "rgba(6,10,12,0.74)", boxShadow: `0 0 36px ${activeFailure.accent}66` }}>
+              <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 12, fontWeight: 800 }}>RF</span>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, padding: 12 }}>
+            <RfFailureChip label="Scene" value={activeFailure.label} />
+            <RfFailureChip label="TDR" value={activeFailure.tdr} accent="#67e8f9" />
+            <RfFailureChip label="S11" value={activeFailure.s11} accent="#fbbf24" />
+          </div>
+        </section>
+
+        <aside style={{ ...RF_FAILURE_UI.panel, padding: 18 }}>
+          <div style={RF_FAILURE_UI.eyebrow}>Failure Director</div>
+          <p style={{ color: "#cbd5e1", lineHeight: 1.6, margin: "8px 0 18px" }}>
+            Select a coax fault, then tune severity and frequency band.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+            {RF_FAILURE_CASES.map((failure) => (
+              <button
+                type="button"
+                key={failure.id}
+                onClick={() => setActiveId(failure.id)}
+                style={{
+                  textAlign: "left",
+                  border: activeId === failure.id ? `1px solid ${failure.accent}` : "1px solid #243139",
+                  background: activeId === failure.id ? `${failure.accent}16` : "#070c0e",
+                  color: "#f8fafc",
+                  borderRadius: 4,
+                  padding: "13px 14px",
+                  cursor: "pointer",
+                  minHeight: 70,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", fontFamily: '"JetBrains Mono", monospace', fontSize: 12, fontWeight: 900 }}>
+                  <span>{failure.label}</span>
+                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: failure.accent }} />
+                </div>
+                <div style={{ marginTop: 6, color: "#7b8990", fontSize: 12 }}>{failure.tag}</div>
+              </button>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontFamily: '"JetBrains Mono", monospace', fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 2 }}>
+              <span>Severity</span>
+              <strong style={{ color: "#e2e8f0" }}>{severity}%</strong>
+            </div>
+            <input
+              type="range"
+              min="20"
+              max="100"
+              value={severity}
+              onChange={(event) => setSeverity(Number(event.target.value))}
+              style={{ width: "100%", marginTop: 12, accentColor: activeFailure.accent }}
+              aria-label="RF failure severity"
+            />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginTop: 18 }}>
+            {RF_FAILURE_BANDS.map((band) => (
+              <button
+                type="button"
+                key={band.id}
+                onClick={() => setBandId(band.id)}
+                style={{
+                  border: bandId === band.id ? "1px solid #cbd5e1" : "1px solid #26343a",
+                  background: bandId === band.id ? "#1b2227" : "#070c0e",
+                  color: "#dbeafe",
+                  borderRadius: 4,
+                  padding: "10px 8px",
+                  fontFamily: '"JetBrains Mono", monospace',
+                  fontSize: 11,
+                  cursor: "pointer",
+                }}
+              >
+                {band.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginTop: 16 }}>
+            <RfFailureMetric label="Worst RL" value={`${worstReturnLoss.toFixed(1)} dB`} sub={`clean ${activeFailure.rlBase.toFixed(1)}`} accent="#fbbf24" />
+            <RfFailureMetric label="Peak VSWR" value={peakVswr.toFixed(2)} sub="from S11" accent="#fbbf24" />
+            <RfFailureMetric label="TDR peak" value={`${tdrPeak.toFixed(1)} Ω`} sub={activeFailure.tdr} accent="#fbbf24" />
+          </div>
+        </aside>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, marginTop: 18 }}>
+        <section style={{ ...RF_FAILURE_UI.panel, padding: 16 }}>
+          <RfFailureChartHeader label="TDR impedance trace" value={`${activeFailure.distanceM.toFixed(1)} m defect`} />
+          <div style={{ height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={tdrTrace} margin={{ top: 12, right: 12, bottom: 4, left: -10 }}>
+                <CartesianGrid stroke="#1d2a30" strokeDasharray="4 4" />
+                <XAxis dataKey="distance" tick={{ fill: "#718088", fontSize: 11 }} unit="m" />
+                <YAxis domain={[38, 62]} tick={{ fill: "#718088", fontSize: 11 }} unit="Ω" />
+                <Tooltip
+                  contentStyle={{ background: "#081013", border: "1px solid #26343a", borderRadius: 4, color: "#e2e8f0" }}
+                  formatter={(value) => [`${Number(value).toFixed(1)} Ω`, "Impedance"]}
+                  labelFormatter={(value) => `${Number(value).toFixed(1)} m`}
+                />
+                <ReferenceLine y={50} stroke="#64748b" strokeDasharray="3 3" />
+                <ReferenceLine x={activeFailure.distanceM} stroke={activeFailure.accent} strokeDasharray="5 5" />
+                <Line type="monotone" dataKey="ohms" stroke={activeFailure.accent} strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+
+        <section style={{ ...RF_FAILURE_UI.panel, padding: 16 }}>
+          <RfFailureChartHeader label="Return loss / S11" value={activeBand.label} />
+          <div style={{ height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={rlTrace} margin={{ top: 12, right: 12, bottom: 4, left: -10 }}>
+                <CartesianGrid stroke="#1d2a30" strokeDasharray="4 4" />
+                <XAxis dataKey="frequency" tick={{ fill: "#718088", fontSize: 11 }} unit="GHz" />
+                <YAxis domain={[-35, -8]} tick={{ fill: "#718088", fontSize: 11 }} unit="dB" />
+                <Tooltip
+                  contentStyle={{ background: "#081013", border: "1px solid #26343a", borderRadius: 4, color: "#e2e8f0" }}
+                  formatter={(value) => [`${Number(value).toFixed(1)} dB`, "S11"]}
+                  labelFormatter={(value) => `${Number(value).toFixed(1)} GHz`}
+                />
+                <ReferenceLine y={-15} stroke="#f97316" strokeDasharray="3 3" label={{ value: "-15 dB", fill: "#f97316", fontSize: 10 }} />
+                <ReferenceLine x={activeFailure.notchGHz} stroke={activeFailure.accent} strokeDasharray="5 5" />
+                <Line type="monotone" dataKey="rl" stroke={activeFailure.accent} strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16, marginTop: 18 }}>
+        <RfFailureSmithCard failure={activeFailure} worstReturnLoss={worstReturnLoss} peakVswr={peakVswr} />
+        <RfFailureChainCard failure={activeFailure} />
+      </div>
+    </div>
+  );
+}
+
+function RfFailureChip({ label, value, accent = "#f8fafc" }) {
+  return (
+    <div style={{ border: "1px solid #25333a", background: "#080d10", borderRadius: 4, padding: "10px 12px", minHeight: 60 }}>
+      <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 10, color: "#718088", textTransform: "uppercase", letterSpacing: 1.5 }}>{label}</div>
+      <div style={{ color: accent, fontFamily: '"JetBrains Mono", monospace', fontWeight: 800, fontSize: 12, marginTop: 7 }}>{value}</div>
+    </div>
+  );
+}
+
+function RfFailureMetric({ label, value, sub, accent }) {
+  return (
+    <div style={{ border: "1px solid #25333a", background: "#080d10", borderRadius: 4, padding: 12 }}>
+      <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 10, color: "#718088", textTransform: "uppercase", letterSpacing: 1.5 }}>{label}</div>
+      <div style={{ color: accent, fontSize: 20, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, marginTop: 8 }}>{value}</div>
+      <div style={{ color: "#6b7479", fontSize: 11, marginTop: 3 }}>{sub}</div>
+    </div>
+  );
+}
+
+function RfFailureChartHeader({ label, value }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 10 }}>
+      <div style={RF_FAILURE_UI.eyebrow}>{label}</div>
+      <div style={{ fontFamily: '"JetBrains Mono", monospace', color: "#94a3b8", fontSize: 11 }}>{value}</div>
+    </div>
+  );
+}
+
+function RfFailureSmithCard({ failure, worstReturnLoss, peakVswr }) {
+  const gamma = Math.pow(10, -worstReturnLoss / 20);
+  const dotX = 96 + Math.cos(failure.notchGHz * 0.7) * gamma * 76;
+  const dotY = 96 + Math.sin(failure.notchGHz * 0.7) * gamma * 76;
+
+  return (
+    <section style={{ ...RF_FAILURE_UI.panel, padding: 16 }}>
+      <div style={RF_FAILURE_UI.eyebrow}>Smith / mismatch view</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, alignItems: "center", marginTop: 12 }}>
+        <svg viewBox="0 0 192 192" style={{ width: "100%", maxWidth: 210, justifySelf: "center" }} aria-label="Simplified Smith chart">
+          <circle cx="96" cy="96" r="82" fill="#071012" stroke="#334149" />
+          <circle cx="126" cy="96" r="52" fill="none" stroke="#41515a" />
+          <circle cx="146" cy="96" r="32" fill="none" stroke="#41515a" />
+          <circle cx="96" cy="46" r="50" fill="none" stroke="#26343a" />
+          <circle cx="96" cy="146" r="50" fill="none" stroke="#26343a" />
+          <line x1="14" y1="96" x2="178" y2="96" stroke="#41515a" />
+          <circle cx="96" cy="96" r="4" fill="#5eead4" />
+          <circle cx={dotX} cy={dotY} r="7" fill={failure.accent} filter="url(#rfFailureGlow)" />
+          <defs>
+            <filter id="rfFailureGlow" x="-100%" y="-100%" width="300%" height="300%">
+              <feGaussianBlur stdDeviation="4" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+        </svg>
+        <div>
+          <div style={{ color: "#e2e8f0", fontSize: 18, fontWeight: 800 }}>{peakVswr.toFixed(2)} VSWR peak</div>
+          <p style={{ color: "#9aa6ad", lineHeight: 1.65, margin: "8px 0 0" }}>
+            The reflection vector moves away from the 50 ohm center as the physical defect gets stronger. Worst return loss is {worstReturnLoss.toFixed(1)} dB in this band.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function RfFailureChainCard({ failure }) {
+  const steps = [
+    { label: "Physical", value: failure.scene },
+    { label: "Measurement", value: `${failure.tdr}; ${failure.s11}.` },
+    { label: "Production fix", value: failure.fix },
+  ];
+
+  return (
+    <section style={{ ...RF_FAILURE_UI.panel, padding: 16 }}>
+      <div style={RF_FAILURE_UI.eyebrow}>Root cause chain</div>
+      <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+        {steps.map((step, index) => (
+          <div key={step.label} style={{ display: "grid", gridTemplateColumns: "38px minmax(0, 1fr)", gap: 12 }}>
+            <div style={{ width: 30, height: 30, borderRadius: "50%", display: "grid", placeItems: "center", border: `1px solid ${failure.accent}`, color: failure.accent, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>
+              {index + 1}
+            </div>
+            <div>
+              <div style={{ color: "#e2e8f0", fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>{step.label}</div>
+              <div style={{ color: "#9aa6ad", lineHeight: 1.6, marginTop: 3 }}>{step.value}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const CONNECTOR_LAUNCH_PRESETS = [
+  {
+    id: "sma18",
+    label: "SMA 18 GHz",
+    sub: "test cable launch",
+    accent: "#38bdf8",
+    targetRl: 24,
+    pinMm: 0.04,
+    stripMm: 0.00,
+    gapMm: 0.04,
+    stepMm: 0.03,
+    ovalityPct: 4,
+    bandId: "mid",
+    fix: "Tighten pin depth, keep PTFE support flush, and verify strip length under microscope before crimp.",
+  },
+  {
+    id: "nType",
+    label: "N-Type field",
+    sub: "rugged crimp",
+    accent: "#fbbf24",
+    targetRl: 21,
+    pinMm: 0.08,
+    stripMm: 0.12,
+    gapMm: 0.08,
+    stepMm: 0.05,
+    ovalityPct: 8,
+    bandId: "low",
+    fix: "Use a strip-stop tool, inspect ferrule shoulder seating, and reject oval crimps above the spec limit.",
+  },
+  {
+    id: "bnc75",
+    label: "75Ω BNC",
+    sub: "video / broadcast",
+    accent: "#5eead4",
+    targetRl: 23,
+    pinMm: -0.03,
+    stripMm: -0.08,
+    gapMm: 0.03,
+    stepMm: 0.02,
+    ovalityPct: 5,
+    bandId: "low",
+    fix: "Keep dielectric flush to the rear insulator and avoid nicking the foil shield during strip.",
+  },
+  {
+    id: "mmwave",
+    label: "2.92 mm",
+    sub: "mmWave sensitive",
+    accent: "#a78bfa",
+    targetRl: 28,
+    pinMm: 0.02,
+    stripMm: 0.04,
+    gapMm: 0.02,
+    stepMm: 0.02,
+    ovalityPct: 3,
+    bandId: "mmwave",
+    fix: "Control pin plane within a few mils, polish the dielectric face, and use VNA time-gating to isolate the launch.",
+  },
+];
+
+function rfLaunchClamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function computeConnectorLaunch({ preset, pinMm, stripMm, gapMm, stepMm, ovalityPct, band }) {
+  const pinRisk = Math.abs(pinMm) / 0.35;
+  const stripRisk = Math.abs(stripMm) / 0.8;
+  const gapRisk = gapMm / 0.55;
+  const stepRisk = stepMm / 0.28;
+  const ovalRisk = ovalityPct / 30;
+  const rawRisk = pinRisk * 26 + stripRisk * 20 + gapRisk * 24 + stepRisk * 22 + ovalRisk * 16;
+  const risk = rfLaunchClamp(rawRisk, 0, 100);
+  const deltaZ = pinMm * 18 + stripMm * 6 + gapMm * 11 - stepMm * 15 + ovalityPct * 0.08;
+  const resonance = rfLaunchClamp(
+    2.2 + Math.abs(pinMm) * 12 + Math.abs(stripMm) * 6.5 + gapMm * 13 + stepMm * 18 + (band.max > 18 ? 10 : band.max > 6 ? 4 : 0),
+    0.8,
+    Math.max(1.2, band.max * 0.92),
+  );
+  const bandPenalty = band.max > 18 ? 5 : band.max > 6 ? 2 : 0;
+  const worstReturnLoss = rfLaunchClamp(preset.targetRl - risk * 0.17 - bandPenalty, 6.2, 34);
+  const gamma = Math.pow(10, -worstReturnLoss / 20);
+  const peakVswr = (1 + gamma) / Math.max(1 - gamma, 0.001);
+  const mismatchLoss = -10 * Math.log10(Math.max(1 - gamma * gamma, 0.001));
+  const grade = worstReturnLoss >= 20 ? "PASS" : worstReturnLoss >= 14 ? "REVIEW" : "REWORK";
+  const gradeColor = worstReturnLoss >= 20 ? "#5eead4" : worstReturnLoss >= 14 ? "#fbbf24" : "#fb7185";
+  const dominant = [
+    { label: "Pin plane", value: pinRisk },
+    { label: "Strip length", value: stripRisk },
+    { label: "Dielectric gap", value: gapRisk },
+    { label: "Ferrule step", value: stepRisk },
+    { label: "Crimp ovality", value: ovalRisk },
+  ].sort((a, b) => b.value - a.value)[0].label;
+
+  return { risk, deltaZ, resonance, worstReturnLoss, peakVswr, mismatchLoss, grade, gradeColor, dominant };
+}
+
+function makeConnectorLaunchTdr({ pinMm, stripMm, gapMm, stepMm, ovalityPct }) {
+  return Array.from({ length: 110 }, (_, index) => {
+    const mm = (index / 109) * 52;
+    const pinEcho = pinMm * 18 * rfFailureGaussian(mm, 7, 3.2);
+    const stripEcho = stripMm * 7 * rfFailureGaussian(mm, 17, 6.2);
+    const gapEcho = gapMm * 14 * rfFailureGaussian(mm, 27, 4.4);
+    const stepEcho = -stepMm * 18 * rfFailureGaussian(mm, 38, 5.2);
+    const crimpEcho = ovalityPct * 0.075 * Math.sin(mm * 0.55) * rfFailureGaussian(mm, 33, 14);
+    return {
+      mm: Number(mm.toFixed(1)),
+      ohms: Number((50 + pinEcho + stripEcho + gapEcho + stepEcho + crimpEcho).toFixed(2)),
+    };
+  });
+}
+
+function makeConnectorLaunchS11({ preset, band, launch }) {
+  const maxGHz = band.max || 6;
+  return Array.from({ length: 130 }, (_, index) => {
+    const frequency = band.min + (index / 129) * (maxGHz - band.min);
+    const clean = preset.targetRl + 6 - 1.6 * Math.log10(frequency + 1);
+    const launchDip = (9 + launch.risk * 0.17) * rfFailureGaussian(frequency, launch.resonance, Math.max(0.55, maxGHz * 0.075));
+    const harmonic = (2 + launch.risk * 0.045) * rfFailureGaussian(frequency, launch.resonance * 1.85, Math.max(0.75, maxGHz * 0.09));
+    const ripple = Math.sin(frequency * 2.4 + launch.deltaZ * 0.12) * launch.risk * 0.018;
+    const positiveRl = rfLaunchClamp(clean - launchDip - harmonic + ripple, 5.5, 34);
+    return {
+      frequency: Number(frequency.toFixed(2)),
+      rl: Number((-positiveRl).toFixed(2)),
+    };
+  });
+}
+
+function ConnectorLaunchLab() {
+  const [presetId, setPresetId] = useState("sma18");
+  const selectedPreset = CONNECTOR_LAUNCH_PRESETS.find((preset) => preset.id === presetId) || CONNECTOR_LAUNCH_PRESETS[0];
+  const [pinMm, setPinMm] = useState(selectedPreset.pinMm);
+  const [stripMm, setStripMm] = useState(selectedPreset.stripMm);
+  const [gapMm, setGapMm] = useState(selectedPreset.gapMm);
+  const [stepMm, setStepMm] = useState(selectedPreset.stepMm);
+  const [ovalityPct, setOvalityPct] = useState(selectedPreset.ovalityPct);
+  const [bandId, setBandId] = useState(selectedPreset.bandId);
+
+  const activeBand = RF_FAILURE_BANDS.find((band) => band.id === bandId) || RF_FAILURE_BANDS[1];
+  const launch = useMemo(
+    () => computeConnectorLaunch({ preset: selectedPreset, pinMm, stripMm, gapMm, stepMm, ovalityPct, band: activeBand }),
+    [selectedPreset, pinMm, stripMm, gapMm, stepMm, ovalityPct, activeBand],
+  );
+  const tdrTrace = useMemo(() => makeConnectorLaunchTdr({ pinMm, stripMm, gapMm, stepMm, ovalityPct }), [pinMm, stripMm, gapMm, stepMm, ovalityPct]);
+  const s11Trace = useMemo(() => makeConnectorLaunchS11({ preset: selectedPreset, band: activeBand, launch }), [selectedPreset, activeBand, launch]);
+  const applyPreset = (preset) => {
+    setPresetId(preset.id);
+    setPinMm(preset.pinMm);
+    setStripMm(preset.stripMm);
+    setGapMm(preset.gapMm);
+    setStepMm(preset.stepMm);
+    setOvalityPct(preset.ovalityPct);
+    setBandId(preset.bandId);
+  };
+
+  const pinLabel = pinMm >= 0 ? "pin long" : "pin short";
+  const stripLabel = stripMm >= 0 ? "over-strip" : "under-strip";
+
+  return (
+    <div style={S.viewInner} data-testid="connector-launch-lab">
+      <div style={{ ...S.viewIntro, display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 16, alignItems: "center" }}>
+        <div style={{ width: 48, height: 48, border: "1px solid #324047", borderRadius: 4, display: "grid", placeItems: "center", color: "#38bdf8" }}>
+          <Gauge size={22} />
+        </div>
+        <div>
+          <div style={{ ...RF_FAILURE_UI.eyebrow, color: "#38bdf8" }}>Connector Launch Lab</div>
+          <div style={{ ...S.viewIntroStrong, marginTop: 6 }}>Connector geometry {"->"} return-loss story</div>
+          <div style={{ color: "#cbd5e1", lineHeight: 1.7, maxWidth: 860 }}>
+            Tune pin plane, strip length, dielectric gap, ferrule step, and crimp ovality to see the near-end TDR echo and S11 resonance move.
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, marginTop: 22 }}>
+        <section style={{ ...RF_FAILURE_UI.panel, overflow: "hidden" }}>
+          <div style={{ position: "relative", height: "clamp(340px, 30vw, 470px)", background: "linear-gradient(135deg, #050808, #11181b)" }}>
+            <img
+              src="/cable-renders/rf-failure-launch.png"
+              alt="RF connector launch Blender cutaway"
+              style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", opacity: 0.96 }}
+            />
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.06), rgba(0,0,0,0.48))" }} />
+            <div style={{ position: "absolute", top: 14, left: 14, ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>Blender launch cutaway</div>
+            <LaunchHotspot left="79%" top="50%" color="#38bdf8" label="Pin plane" value={`${pinMm.toFixed(2)} mm · ${pinLabel}`} />
+            <LaunchHotspot left="70%" top="33%" color="#fbbf24" label="Dielectric face" value={`${gapMm.toFixed(2)} mm gap`} />
+            <LaunchHotspot left="58%" top="70%" color="#fb923c" label="Ferrule step" value={`${stepMm.toFixed(2)} mm`} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, padding: 12 }}>
+            <RfFailureChip label="Launch grade" value={launch.grade} accent={launch.gradeColor} />
+            <RfFailureChip label="Dominant risk" value={launch.dominant} accent="#67e8f9" />
+            <RfFailureChip label="Resonance" value={`${launch.resonance.toFixed(1)} GHz`} accent="#fbbf24" />
+          </div>
+        </section>
+
+        <aside style={{ ...RF_FAILURE_UI.panel, padding: 18 }}>
+          <div style={RF_FAILURE_UI.eyebrow}>Launch Tuner</div>
+          <p style={{ color: "#cbd5e1", lineHeight: 1.6, margin: "8px 0 16px" }}>
+            Pick a connector baseline, then move the assembly dimensions away from nominal.
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+            {CONNECTOR_LAUNCH_PRESETS.map((preset) => (
+              <button
+                type="button"
+                key={preset.id}
+                onClick={() => applyPreset(preset)}
+                style={{
+                  textAlign: "left",
+                  border: presetId === preset.id ? `1px solid ${preset.accent}` : "1px solid #243139",
+                  background: presetId === preset.id ? `${preset.accent}16` : "#070c0e",
+                  color: "#f8fafc",
+                  borderRadius: 4,
+                  padding: "12px 13px",
+                  cursor: "pointer",
+                  minHeight: 66,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", fontFamily: '"JetBrains Mono", monospace', fontSize: 12, fontWeight: 900 }}>
+                  <span>{preset.label}</span>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: preset.accent }} />
+                </div>
+                <div style={{ marginTop: 6, color: "#7b8990", fontSize: 12 }}>{preset.sub}</div>
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
+            <LaunchSlider label="Pin protrusion" value={pinMm} setValue={setPinMm} min={-0.35} max={0.35} step={0.01} unit="mm" hint={pinLabel} accent="#38bdf8" />
+            <LaunchSlider label="Strip length error" value={stripMm} setValue={setStripMm} min={-0.8} max={0.8} step={0.02} unit="mm" hint={stripLabel} accent="#fbbf24" />
+            <LaunchSlider label="Dielectric gap" value={gapMm} setValue={setGapMm} min={0} max={0.55} step={0.01} unit="mm" hint="air at launch" accent="#5eead4" />
+            <LaunchSlider label="Ferrule shoulder step" value={stepMm} setValue={setStepMm} min={0} max={0.28} step={0.01} unit="mm" hint="shield discontinuity" accent="#fb923c" />
+            <LaunchSlider label="Crimp ovality" value={ovalityPct} setValue={setOvalityPct} min={0} max={30} step={1} unit="%" hint="roundness loss" accent="#f87171" />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginTop: 18 }}>
+            {RF_FAILURE_BANDS.map((band) => (
+              <button
+                type="button"
+                key={band.id}
+                onClick={() => setBandId(band.id)}
+                style={{
+                  border: bandId === band.id ? "1px solid #cbd5e1" : "1px solid #26343a",
+                  background: bandId === band.id ? "#1b2227" : "#070c0e",
+                  color: "#dbeafe",
+                  borderRadius: 4,
+                  padding: "10px 8px",
+                  fontFamily: '"JetBrains Mono", monospace',
+                  fontSize: 11,
+                  cursor: "pointer",
+                }}
+              >
+                {band.label}
+              </button>
+            ))}
+          </div>
+        </aside>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12, marginTop: 18 }}>
+        <RfFailureMetric label="Worst return loss" value={`${launch.worstReturnLoss.toFixed(1)} dB`} sub={`target ${selectedPreset.targetRl} dB`} accent={launch.gradeColor} />
+        <RfFailureMetric label="Peak VSWR" value={launch.peakVswr.toFixed(2)} sub="from worst S11" accent="#fbbf24" />
+        <RfFailureMetric label="Launch ΔZ" value={`${launch.deltaZ >= 0 ? "+" : ""}${launch.deltaZ.toFixed(1)} Ω`} sub="near-end discontinuity" accent="#67e8f9" />
+        <RfFailureMetric label="Mismatch loss" value={`${launch.mismatchLoss.toFixed(3)} dB`} sub="reflection only" accent="#cbd5e1" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, marginTop: 18 }}>
+        <section style={{ ...RF_FAILURE_UI.panel, padding: 16 }}>
+          <RfFailureChartHeader label="Near-end TDR launch trace" value="0-52 mm from connector" />
+          <div style={{ height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={tdrTrace} margin={{ top: 12, right: 12, bottom: 4, left: -10 }}>
+                <CartesianGrid stroke="#1d2a30" strokeDasharray="4 4" />
+                <XAxis dataKey="mm" tick={{ fill: "#718088", fontSize: 11 }} unit="mm" />
+                <YAxis domain={[42, 58]} tick={{ fill: "#718088", fontSize: 11 }} unit="Ω" />
+                <Tooltip
+                  contentStyle={{ background: "#081013", border: "1px solid #26343a", borderRadius: 4, color: "#e2e8f0" }}
+                  formatter={(value) => [`${Number(value).toFixed(1)} Ω`, "Impedance"]}
+                  labelFormatter={(value) => `${Number(value).toFixed(1)} mm`}
+                />
+                <ReferenceLine y={50} stroke="#64748b" strokeDasharray="3 3" />
+                <ReferenceLine x={7} stroke="#38bdf8" strokeDasharray="4 4" />
+                <ReferenceLine x={27} stroke="#5eead4" strokeDasharray="4 4" />
+                <Line type="monotone" dataKey="ohms" stroke={launch.gradeColor} strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+
+        <section style={{ ...RF_FAILURE_UI.panel, padding: 16 }}>
+          <RfFailureChartHeader label="Return loss / launch resonance" value={activeBand.label} />
+          <div style={{ height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={s11Trace} margin={{ top: 12, right: 12, bottom: 4, left: -10 }}>
+                <CartesianGrid stroke="#1d2a30" strokeDasharray="4 4" />
+                <XAxis dataKey="frequency" tick={{ fill: "#718088", fontSize: 11 }} unit="GHz" />
+                <YAxis domain={[-34, -5]} tick={{ fill: "#718088", fontSize: 11 }} unit="dB" />
+                <Tooltip
+                  contentStyle={{ background: "#081013", border: "1px solid #26343a", borderRadius: 4, color: "#e2e8f0" }}
+                  formatter={(value) => [`${Number(value).toFixed(1)} dB`, "S11"]}
+                  labelFormatter={(value) => `${Number(value).toFixed(1)} GHz`}
+                />
+                <ReferenceLine y={-20} stroke="#5eead4" strokeDasharray="3 3" label={{ value: "-20 dB", fill: "#5eead4", fontSize: 10 }} />
+                <ReferenceLine y={-14} stroke="#f97316" strokeDasharray="3 3" label={{ value: "-14 dB", fill: "#f97316", fontSize: 10 }} />
+                <ReferenceLine x={launch.resonance} stroke="#38bdf8" strokeDasharray="5 5" />
+                <Line type="monotone" dataKey="rl" stroke={launch.gradeColor} strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginTop: 18 }}>
+        <LaunchSmithCard launch={launch} />
+        <LaunchInspectionCard launch={launch} preset={selectedPreset} />
+      </div>
+    </div>
+  );
+}
+
+function LaunchSlider({ label, value, setValue, min, max, step, unit, hint, accent }) {
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+        <div style={{ fontFamily: '"JetBrains Mono", monospace', color: "#cbd5e1", fontSize: 11, textTransform: "uppercase", letterSpacing: 1.8 }}>{label}</div>
+        <div style={{ fontFamily: '"JetBrains Mono", monospace', color: accent, fontSize: 12, fontWeight: 900 }}>
+          {value >= 0 ? "+" : ""}{Number(value).toFixed(step < 0.02 ? 2 : 1)} {unit}
+        </div>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => setValue(Number(event.target.value))}
+        style={{ width: "100%", marginTop: 7, accentColor: accent }}
+        aria-label={label}
+      />
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#64727a", fontSize: 10, fontFamily: '"JetBrains Mono", monospace' }}>
+        <span>{min}{unit}</span>
+        <span>{hint}</span>
+        <span>{max}{unit}</span>
+      </div>
+    </div>
+  );
+}
+
+function LaunchHotspot({ left, top, color, label, value }) {
+  return (
+    <div style={{ position: "absolute", left, top, transform: "translate(-50%, -50%)", display: "grid", placeItems: "center", pointerEvents: "none" }}>
+      <div style={{ width: 50, height: 50, borderRadius: "50%", border: `1px solid ${color}`, boxShadow: `0 0 24px ${color}55`, display: "grid", placeItems: "center", background: "rgba(5,9,11,0.70)" }}>
+        <div style={{ width: 7, height: 7, borderRadius: "50%", background: color }} />
+      </div>
+      <div style={{ marginTop: 6, padding: "6px 9px", border: `1px solid ${color}80`, background: "rgba(5,9,11,0.78)", borderRadius: 4, minWidth: 120, textAlign: "center" }}>
+        <div style={{ color, fontFamily: '"JetBrains Mono", monospace', fontSize: 10, textTransform: "uppercase", letterSpacing: 1.6, fontWeight: 900 }}>{label}</div>
+        <div style={{ color: "#dbeafe", fontSize: 11, marginTop: 3 }}>{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function LaunchSmithCard({ launch }) {
+  const gamma = Math.pow(10, -launch.worstReturnLoss / 20);
+  const angle = Math.atan2(launch.deltaZ, 12) + launch.resonance * 0.42;
+  const dotX = 96 + Math.cos(angle) * gamma * 82;
+  const dotY = 96 + Math.sin(angle) * gamma * 82;
+
+  return (
+    <section style={{ ...RF_FAILURE_UI.panel, padding: 16 }}>
+      <div style={RF_FAILURE_UI.eyebrow}>Launch Smith pin</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, alignItems: "center", marginTop: 12 }}>
+        <svg viewBox="0 0 192 192" style={{ width: "100%", maxWidth: 210, justifySelf: "center" }} aria-label="Connector launch Smith chart">
+          <circle cx="96" cy="96" r="82" fill="#071012" stroke="#334149" />
+          <circle cx="126" cy="96" r="52" fill="none" stroke="#41515a" />
+          <circle cx="146" cy="96" r="32" fill="none" stroke="#41515a" />
+          <circle cx="96" cy="46" r="50" fill="none" stroke="#26343a" />
+          <circle cx="96" cy="146" r="50" fill="none" stroke="#26343a" />
+          <line x1="14" y1="96" x2="178" y2="96" stroke="#41515a" />
+          <circle cx="96" cy="96" r="4" fill="#5eead4" />
+          <path d={`M96 96 L${dotX.toFixed(1)} ${dotY.toFixed(1)}`} stroke="#64748b" strokeDasharray="3 3" />
+          <circle cx={dotX} cy={dotY} r="7" fill={launch.gradeColor} />
+        </svg>
+        <div>
+          <div style={{ color: launch.gradeColor, fontSize: 18, fontWeight: 900 }}>{launch.grade} · {launch.worstReturnLoss.toFixed(1)} dB RL</div>
+          <p style={{ color: "#9aa6ad", lineHeight: 1.65, margin: "8px 0 0" }}>
+            The Smith point moves away from center as the launch impedance step grows. Delta-Z is {launch.deltaZ >= 0 ? "+" : ""}{launch.deltaZ.toFixed(1)} ohms.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function LaunchInspectionCard({ launch, preset }) {
+  const items = [
+    { label: "First inspection", value: `${launch.dominant} is the biggest contributor in this setup.` },
+    { label: "VNA view", value: `Time-gate the near-end launch around ${launch.resonance.toFixed(1)} GHz to separate connector from cable loss.` },
+    { label: "Production action", value: preset.fix },
+  ];
+
+  return (
+    <section style={{ ...RF_FAILURE_UI.panel, padding: 16 }}>
+      <div style={RF_FAILURE_UI.eyebrow}>QC playbook</div>
+      <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+        {items.map((item, index) => (
+          <div key={item.label} style={{ display: "grid", gridTemplateColumns: "34px minmax(0, 1fr)", gap: 12 }}>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center", border: `1px solid ${launch.gradeColor}`, color: launch.gradeColor, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>
+              {index + 1}
+            </div>
+            <div>
+              <div style={{ color: "#e2e8f0", fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>{item.label}</div>
+              <div style={{ color: "#9aa6ad", lineHeight: 1.6, marginTop: 3 }}>{item.value}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
