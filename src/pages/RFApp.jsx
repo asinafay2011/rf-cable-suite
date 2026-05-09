@@ -889,6 +889,7 @@ const CONNECTORS = {
     z: 50, fMax: 11, maxPower: 1500, precisionFMax: 18,
     mate: "threaded", thread: "5/8-24 UNEF-2A", weatherproof: "variant (N-Wp)",
     sizeMm: 17, lengthMm: 32, massG: 25, cableOD: [5, 13],
+    render: "/connector-renders/rf-connector-n-type.png",
     typicalIL: "<0.15 dB @ 11 GHz", typicalVSWR: "<1.2 @ 6 GHz",
     apps: "Cellular, broadcast, test, general outdoor 50Ω RF",
     pros: "Rugged, weatherproof variants, good power, ubiquitous",
@@ -916,6 +917,7 @@ const CONNECTORS = {
     z: 50, fMax: 18, maxPower: 100, precisionFMax: 26.5,
     mate: "threaded", thread: "1/4-36 UNS-2A", weatherproof: "no",
     sizeMm: 8, lengthMm: 20, massG: 5, cableOD: [2, 7],
+    render: "/connector-renders/rf-connector-sma.png",
     typicalIL: "<0.2 dB @ 18 GHz", typicalVSWR: "<1.3 @ 18 GHz",
     apps: "Bench test, RF modules, small boards, GPS receivers",
     pros: "Compact, widely available, good freq range, precision variants to 26.5 GHz",
@@ -934,6 +936,7 @@ const CONNECTORS = {
     z: 50, fMax: 4, maxPower: 500,
     mate: "bayonet", thread: "none (quarter-turn bayonet lock)", weatherproof: "no",
     sizeMm: 14, lengthMm: 28, massG: 15, cableOD: [3, 7],
+    render: "/connector-renders/rf-connector-bnc.png",
     typicalIL: "<0.2 dB @ 4 GHz", typicalVSWR: "<1.3 @ 1 GHz",
     apps: "Test / oscilloscope probes, video (75Ω variant), legacy Ethernet (10Base2)",
     pros: "Fast quarter-turn mate, ubiquitous on lab equipment",
@@ -952,6 +955,7 @@ const CONNECTORS = {
     z: 75, fMax: 3, maxPower: 100,
     mate: "threaded", thread: "7/16-28 UNEF-2A", weatherproof: "poor",
     sizeMm: 10, lengthMm: 18, massG: 5, cableOD: [5, 7.5],
+    render: "/connector-renders/rf-connector-f-type.png",
     typicalIL: "<0.3 dB @ 1 GHz", typicalVSWR: "<1.4 @ 1 GHz",
     apps: "Cable TV drop, satellite LNB, home consumer RF",
     pros: "Cheap, uses cable's center conductor as pin — no pin to damage",
@@ -970,6 +974,7 @@ const CONNECTORS = {
     z: 50, fMax: 7.5, maxPower: 2500,
     mate: "threaded", thread: "M29 × 1.5", weatherproof: "yes (IP67)",
     sizeMm: 28, lengthMm: 53, massG: 150, cableOD: [9, 16],
+    render: "/connector-renders/rf-connector-716-din.png",
     typicalIL: "<0.1 dB @ 6 GHz", typicalVSWR: "<1.1 @ 2 GHz", typicalPIM: "-160 dBc (low-PIM)",
     apps: "Cellular base stations (2G/3G/4G), broadcast, high-power low-PIM",
     pros: "Excellent low-PIM (<-160 dBc), high power, weatherproof, precision",
@@ -8245,7 +8250,7 @@ function ConnectorView() {
             <div key={id} className="hover-card" style={{ ...S.cableCard, ...(isOpen ? S.cableCardExpanded : {}) }}>
               <div onClick={() => setExpanded(isOpen ? null : id)} style={S.cableHead}>
                 <div style={{ display: "flex", alignItems: "center", gap: 14, flex: 1, minWidth: 0 }}>
-                  <ConnectorIcon cat={c.cat} color={cat.color} />
+                  <ConnectorPreviewThumb c={c} cat={cat} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
                       <span style={S.cableName}>{c.name}</span>
@@ -8287,6 +8292,7 @@ function ConnectorView() {
                       </DS>
                     </div>
                     <div>
+                      {c.render && <ConnectorDetailVisual c={c} />}
                       <DS title="Standards"><DR label="Spec" v={wrapTerms(c.alias)} /></DS>
                       <DS title="Pros">
                         <div style={{ fontSize: 10.5, color: "#86efac", lineHeight: 1.55 }}>✓ {wrapTerms(c.pros)}</div>
@@ -8311,6 +8317,36 @@ function ConnectorView() {
         })}
         {filtered.length === 0 && <div style={S.emptyState}>No connectors match filters.</div>}
       </div>
+    </div>
+  );
+}
+
+function ConnectorPreviewThumb({ c, cat }) {
+  if (c.render) {
+    return (
+      <span style={S.connectorThumb} aria-hidden="true">
+        <img
+          src={c.render}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          style={S.connectorThumbImage}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span style={S.connectorThumbFallback} aria-hidden="true">
+      <ConnectorIcon cat={c.cat} color={cat.color} />
+    </span>
+  );
+}
+
+function ConnectorDetailVisual({ c }) {
+  return (
+    <div style={S.connectorDetailVisual}>
+      <img src={c.render} alt={`${c.name} connector render`} style={S.connectorDetailImage} />
     </div>
   );
 }
@@ -9743,6 +9779,35 @@ const S = {
     display: "block",
     filter: "contrast(1.05) saturate(1.05)",
   },
+  connectorThumb: {
+    flex: "0 0 auto",
+    width: 92,
+    height: 58,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    borderRadius: 5,
+    border: "1px solid rgba(168,162,158,0.18)",
+    background: "linear-gradient(135deg, rgba(3,3,3,0.92), rgba(18,18,18,0.7))",
+    boxShadow: "inset 0 0 0 1px rgba(56,189,248,0.04), 0 8px 18px rgba(0,0,0,0.26)",
+  },
+  connectorThumbImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    objectPosition: "center",
+    display: "block",
+    filter: "contrast(1.05) saturate(1.04)",
+  },
+  connectorThumbFallback: {
+    flex: "0 0 auto",
+    width: 58,
+    height: 58,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   cableNameRow: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 },
   cableName: { fontFamily: "'Fraunces', serif", fontSize: 17, color: "#fef3c7", fontWeight: 650, lineHeight: 1.05 },
   catBadge: { fontSize: 8, padding: "3px 8px", border: "1px solid", borderRadius: 999, letterSpacing: "0.12em", textTransform: "uppercase", background: "rgba(0,0,0,0.25)" },
@@ -10289,6 +10354,22 @@ const S = {
   expandIcon: { color: "#d97706", fontSize: 20, marginLeft: 8, alignSelf: "center" },
 
   cableDetails: { borderTop: "1px solid #2a1f15", background: "rgba(0,0,0,0.3)", padding: 18 },
+  connectorDetailVisual: {
+    marginBottom: 16,
+    padding: 10,
+    background: "linear-gradient(135deg, rgba(5,5,5,0.74), rgba(16,14,12,0.58))",
+    border: "1px solid rgba(168,162,158,0.16)",
+    borderRadius: 4,
+    boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
+  },
+  connectorDetailImage: {
+    width: "100%",
+    maxHeight: 250,
+    objectFit: "contain",
+    display: "block",
+    borderRadius: 3,
+    background: "#050302",
+  },
   actionRow: { display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" },
   actionBtn: { padding: "8px 14px", background: "#d97706", color: "#0a0705", border: "none", borderRadius: 2, fontFamily: "inherit", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600 },
   actionBtnSecondary: { background: "transparent", border: "1px solid #d97706", color: "#fbbf24" },
