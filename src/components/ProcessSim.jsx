@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Layers, Settings, AlertTriangle, CheckCircle2, Sparkles, RotateCcw,
   Save, Upload, Download, ChevronRight, Activity, Cable, Shield,
@@ -207,14 +207,14 @@ const PROCESS_BUILD_FILM = {
 }
 
 const PROCESS_BUILD_STEPS = [
-  { id: 'conductor', label: 'Conductor', detail: 'copper carrier', color: '#c97b3f' },
-  { id: 'insulation', label: 'Insulation', detail: 'FEP / foam layer', color: '#7dd3fc' },
-  { id: 'twist', label: '2-wire twist', detail: 'even pair lay', color: '#a78bfa' },
-  { id: 'ptfe', label: 'PTFE tape', detail: 'binder wrap', color: '#f4e8b8' },
-  { id: 'foil', label: 'Foil shield', detail: 'per-pair screen', color: '#cbd5e1' },
-  { id: 'bundle', label: '4-pair bundle', detail: 'blue / orange / green / brown', color: '#5eead4' },
-  { id: 'braid', label: 'Braid', detail: 'non-round coverage', color: '#e89357' },
-  { id: 'jacket', label: 'Jacket', detail: 'outer extrusion', color: '#1a2226' },
+  { id: 'conductor', label: 'Conductor', detail: 'copper carrier', color: '#c97b3f', time: 0.1 },
+  { id: 'insulation', label: 'Insulation', detail: 'FEP / foam layer', color: '#7dd3fc', time: 1.35 },
+  { id: 'twist', label: '2-wire twist', detail: 'even pair lay', color: '#a78bfa', time: 2.65 },
+  { id: 'ptfe', label: 'PTFE tape', detail: 'binder wrap', color: '#f4e8b8', time: 3.95 },
+  { id: 'foil', label: 'Foil shield', detail: 'per-pair screen', color: '#cbd5e1', time: 5.35 },
+  { id: 'bundle', label: '4-pair bundle', detail: 'blue / orange / green / brown', color: '#5eead4', time: 6.75 },
+  { id: 'braid', label: 'Braid', detail: 'non-round coverage', color: '#e89357', time: 8.25 },
+  { id: 'jacket', label: 'Jacket', detail: 'outer extrusion', color: '#1a2226', time: 10.0 },
 ]
 
 // ── Recipe templates (one-click factory presets) ────────
@@ -1538,12 +1538,32 @@ function RecipeCompareModal({ left, right, onClose, onLoad }) {
 }
 
 function ProcessBuildFilm({ sim, std }) {
+  const videoRef = useRef(null)
+  const [activeStepId, setActiveStepId] = useState(PROCESS_BUILD_STEPS[0].id)
+  const activeStep = PROCESS_BUILD_STEPS.find((step) => step.id === activeStepId) || PROCESS_BUILD_STEPS[0]
   const statRows = [
     ['Final OD', mmIn(sim.jacket.final_od_mm, 2)],
     ['Pair OD', mmIn(sim.pair_foil.shielded_pair_od_mm || sim.pair_wrap.wrapped_pair_od_mm, 3)],
     ['NEXT', std.min_next_db > 0 ? `${sim.jacket.next_db_estimate.toFixed(1)} dB` : 'n/a'],
     ['Braid K', `${sim.shield.coverage_pct.toFixed(1)}%`],
   ]
+
+  const seekToStep = (step) => {
+    setActiveStepId(step.id)
+    const video = videoRef.current
+    if (!video) return
+    video.currentTime = step.time
+    const playPromise = video.play?.()
+    if (playPromise?.catch) playPromise.catch(() => {})
+  }
+
+  const syncStepFromVideo = () => {
+    const time = videoRef.current?.currentTime || 0
+    const current = PROCESS_BUILD_STEPS.reduce((best, step) => (
+      time >= step.time ? step : best
+    ), PROCESS_BUILD_STEPS[0])
+    if (current.id !== activeStepId) setActiveStepId(current.id)
+  }
 
   return (
     <section
@@ -1554,6 +1574,7 @@ function ProcessBuildFilm({ sim, std }) {
         <div className="relative bg-[#0a0d0f] border-b xl:border-b-0 xl:border-r border-[#252e33]">
           <div className="aspect-video min-h-[300px]">
             <video
+              ref={videoRef}
               data-testid="process-build-video"
               className="w-full h-full object-cover"
               src={PROCESS_BUILD_FILM.video}
@@ -1564,6 +1585,7 @@ function ProcessBuildFilm({ sim, std }) {
               loop
               playsInline
               preload="metadata"
+              onTimeUpdate={syncStepFromVideo}
             />
           </div>
           <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em] flex items-center gap-1.5 text-[#5eead4]">
@@ -1586,7 +1608,7 @@ function ProcessBuildFilm({ sim, std }) {
                 Conductor to jacket
               </div>
               <p className="text-[12px] text-[#a7b0b6] leading-relaxed mt-1 max-w-xl">
-                The high-speed build follows the same order as the recipe: copper, insulation, pair twist, PTFE tape, foil, four color pairs, braid, then jacket.
+                Click a step to jump the Blender video to that exact layer build. Current focus: <span className="text-[#fbbf24]">{activeStep.label}</span>.
               </p>
             </div>
             <div className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border shrink-0 text-[#5eead4] border-[#2f7a6e]">
@@ -1596,10 +1618,16 @@ function ProcessBuildFilm({ sim, std }) {
 
           <div className="grid sm:grid-cols-2 gap-2">
             {PROCESS_BUILD_STEPS.map((step, index) => (
-              <div
+              <button
                 key={step.id}
                 data-testid={`process-build-step-${step.id}`}
-                className="bg-[#0a0d0f] border border-[#252e33] rounded p-2"
+                type="button"
+                onClick={() => seekToStep(step)}
+                className="text-left bg-[#0a0d0f] border rounded p-2 transition-colors hover:bg-[#101719]"
+                style={{
+                  borderColor: activeStepId === step.id ? step.color : C.border,
+                  boxShadow: activeStepId === step.id ? `0 0 0 1px ${step.color}33 inset` : 'none',
+                }}
               >
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-[10px] w-5 text-[#6b7479]">
@@ -1612,11 +1640,14 @@ function ProcessBuildFilm({ sim, std }) {
                   <span className="font-mono text-[10px] uppercase tracking-wider text-[#f0ebe2] truncate">
                     {step.label}
                   </span>
+                  <span className="ml-auto font-mono text-[9px] text-[#6b7479]">
+                    {step.time.toFixed(1)}s
+                  </span>
                 </div>
                 <div className="font-mono text-[9px] text-[#6b7479] mt-1 pl-7">
                   {step.detail}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
 
