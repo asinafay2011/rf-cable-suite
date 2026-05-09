@@ -14,6 +14,7 @@ RENDERS_DIR = ROOT / "public" / "cable-renders"
 
 BLEND_PATH = MODELS_DIR / "highspeed-cable-bundle-build.blend"
 GLB_PATH = MODELS_DIR / "highspeed-cable-bundle-build.glb"
+MP4_PATH = VIDEOS_DIR / "highspeed-cable-bundle-build.mp4"
 FRAMES_DIR = VIDEOS_DIR / "highspeed-cable-bundle-build-frames"
 PREVIEW_PATH = RENDERS_DIR / "highspeed-cable-bundle-build-preview.png"
 
@@ -174,6 +175,55 @@ def pair_wrap_path(pair_index: int, radius: float, turns: float, phase: float) -
         angle = start_phase + phase + turns * math.tau * t
         coords.append((x, cy + radius * math.cos(angle), cz + radius * math.sin(angle)))
     return coords
+
+
+def make_pair_ribbon(
+    name: str,
+    pair_index: int,
+    radius: float,
+    turns: float,
+    phase: float,
+    width_angle: float,
+    material: bpy.types.Material,
+    *,
+    edge_material: bpy.types.Material | None = None,
+    points: int = POINTS,
+) -> bpy.types.Object:
+    verts: list[tuple[float, float, float]] = []
+    faces: list[list[int]] = []
+    half = width_angle / 2
+    start_phase = PAIR_PHASES[pair_index]
+    for i in range(points):
+        t = i / (points - 1)
+        x, cy, cz = pair_center(pair_index, t)
+        theta = start_phase + phase + turns * math.tau * t
+        for edge in (-half, half):
+            a = theta + edge
+            verts.append((x, cy + radius * math.cos(a), cz + radius * math.sin(a)))
+    for i in range(points - 1):
+        faces.append([2 * i, 2 * i + 1, 2 * i + 3, 2 * i + 2])
+
+    mesh = bpy.data.meshes.new(f"{name}_Mesh")
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    obj.data.materials.append(material)
+    bpy.context.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.shade_smooth()
+    obj.select_set(False)
+
+    if edge_material:
+        for sign, label in ((-1, "A"), (1, "B")):
+            coords = []
+            for i in range(points):
+                t = i / (points - 1)
+                x, cy, cz = pair_center(pair_index, t)
+                theta = start_phase + phase + turns * math.tau * t + sign * half
+                coords.append((x, cy + radius * math.cos(theta), cz + radius * math.sin(theta)))
+            make_curve(f"{name}_Cut_Edge_{label}", coords, edge_material, 0.0038, bevel_resolution=1)
+    return obj
 
 
 def superellipse_point(
@@ -366,10 +416,10 @@ def build_scene() -> None:
 
     copper = make_material("Copper conductors", (0.84, 0.42, 0.16, 1), metallic=0.75, roughness=0.26)
     white = make_material("White insulation mates", (0.88, 0.86, 0.78, 1), roughness=0.42)
-    ptfe = make_material("PTFE tape sleeve", (0.92, 0.88, 0.74, 1), roughness=0.58, alpha=0.34)
-    ptfe_edge = make_material("PTFE tape lap seam", (1.0, 0.93, 0.68, 1), roughness=0.46, alpha=0.62)
-    foil = make_material("Foil shield sleeve", (0.74, 0.80, 0.84, 1), metallic=0.85, roughness=0.2, alpha=0.33)
-    foil_edge = make_material("Foil shield lap seam", (0.92, 0.96, 1.0, 1), metallic=0.86, roughness=0.2, alpha=0.72)
+    ptfe = make_material("PTFE tape ribbon", (0.92, 0.88, 0.74, 1), roughness=0.58, alpha=0.64)
+    ptfe_edge = make_material("PTFE tape cut edge", (1.0, 0.93, 0.68, 1), roughness=0.46, alpha=0.82)
+    foil = make_material("Foil shield ribbon", (0.74, 0.80, 0.84, 1), metallic=0.85, roughness=0.2, alpha=0.58)
+    foil_edge = make_material("Foil shield bright edge", (0.92, 0.96, 1.0, 1), metallic=0.86, roughness=0.2, alpha=0.86)
     braid_a = make_material("Braid copper strands", (0.94, 0.58, 0.25, 1), metallic=0.78, roughness=0.24)
     braid_b = make_material("Braid tinned strands", (0.70, 0.73, 0.72, 1), metallic=0.82, roughness=0.28)
     jacket = make_material("Matte black non-round jacket", (0.018, 0.026, 0.03, 1), roughness=0.78)
@@ -388,8 +438,8 @@ def build_scene() -> None:
     conductor_group = empty("Layer_01_Copper_Conductors")
     insulation_group = empty("Layer_02_Insulation_Blue_Orange_Green_Brown")
     twist_group = empty("Layer_03_Even_Two_Wire_Twist")
-    ptfe_group = empty("Layer_04_PTFE_Tape_Sleeves")
-    foil_group = empty("Layer_05_Foil_Shield_Sleeves")
+    ptfe_group = empty("Layer_04_PTFE_Tape_Ribbon_Wraps")
+    foil_group = empty("Layer_05_Foil_Shield_Ribbon_Wraps")
     bundle_group = empty("Layer_06_Neat_Four_Pair_Bundle")
     braid_group = empty("Layer_07_Non_Round_Outer_Braid")
     jacket_group = empty("Layer_08_Non_Round_Outer_Jacket")
@@ -415,18 +465,36 @@ def build_scene() -> None:
             0.004,
             bevel_resolution=2,
         ))
-        ptfe_parts.append(make_pair_sleeve(f"PTFE_Tube_Pair_{pair + 1}", pair, PAIR_WRAP_RADIUS, ptfe))
+        ptfe_parts.append(make_pair_ribbon(
+            f"PTFE_Tape_Ribbon_Pair_{pair + 1}",
+            pair,
+            PAIR_WRAP_RADIUS,
+            5.8,
+            math.radians(18),
+            0.72,
+            ptfe,
+            edge_material=ptfe_edge,
+        ))
         ptfe_parts.append(make_curve(
             f"PTFE_Lap_Seam_Pair_{pair + 1}",
-            pair_wrap_path(pair, PAIR_WRAP_RADIUS + 0.005, 5.8, math.radians(18)),
+            pair_wrap_path(pair, PAIR_WRAP_RADIUS + 0.007, 5.8, math.radians(42)),
             ptfe_edge,
             0.005,
             bevel_resolution=2,
         ))
-        foil_parts.append(make_pair_sleeve(f"Foil_Tube_Pair_{pair + 1}", pair, PAIR_WRAP_RADIUS + 0.035, foil))
+        foil_parts.append(make_pair_ribbon(
+            f"Foil_Shield_Ribbon_Pair_{pair + 1}",
+            pair,
+            PAIR_WRAP_RADIUS + 0.045,
+            4.8,
+            math.radians(150),
+            0.82,
+            foil,
+            edge_material=foil_edge,
+        ))
         foil_parts.append(make_curve(
             f"Foil_Lap_Seam_Pair_{pair + 1}",
-            pair_wrap_path(pair, PAIR_WRAP_RADIUS + 0.041, 4.8, math.radians(150)),
+            pair_wrap_path(pair, PAIR_WRAP_RADIUS + 0.052, 4.8, math.radians(178)),
             foil_edge,
             0.006,
             bevel_resolution=2,
@@ -550,6 +618,49 @@ def export_outputs() -> None:
         export_current_frame=False,
         export_yup=True,
     )
+
+    encode_mp4_from_frames()
+
+
+def encode_mp4_from_frames() -> None:
+    frames = sorted(FRAMES_DIR.glob("frame_*.png"))
+    if not frames:
+        return
+
+    scene = bpy.context.scene
+    scene.sequence_editor_clear()
+    sequence_editor = scene.sequence_editor_create()
+    strip = sequence_editor.strips.new_image(
+        name="Highspeed_Bundle_Frame_Sequence",
+        filepath=str(frames[0]),
+        channel=1,
+        frame_start=1,
+    )
+    for frame_path in frames[1:]:
+        strip.elements.append(frame_path.name)
+    strip.frame_final_duration = len(frames)
+
+    scene.frame_start = 1
+    scene.frame_end = len(frames)
+    scene.frame_set(1)
+    scene.render.fps = 24
+    scene.render.resolution_x = 1280
+    scene.render.resolution_y = 720
+    scene.render.filepath = str(MP4_PATH)
+    try:
+        scene.render.image_settings.file_format = "FFMPEG"
+    except TypeError:
+        print("Blender movie output is unavailable in this install; skipping MP4 encode.")
+        scene.sequence_editor_clear()
+        return
+    scene.render.ffmpeg.format = "MPEG4"
+    scene.render.ffmpeg.codec = "H264"
+    scene.render.ffmpeg.audio_codec = "NONE"
+    scene.render.ffmpeg.constant_rate_factor = "MEDIUM"
+    if hasattr(scene.render, "use_sequencer"):
+        scene.render.use_sequencer = True
+    bpy.ops.render.render(animation=True)
+    scene.sequence_editor_clear()
 
 
 if __name__ == "__main__":

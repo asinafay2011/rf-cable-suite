@@ -166,6 +166,56 @@ def wrap_helix(pair_offset: tuple[float, float], radius: float, turns: float, ph
     return coords
 
 
+def make_helix_ribbon(
+    name: str,
+    pair_offset: tuple[float, float],
+    radius: float,
+    turns: float,
+    phase: float,
+    width_angle: float,
+    material: bpy.types.Material,
+    *,
+    points: int = POINTS,
+    edge_material: bpy.types.Material | None = None,
+) -> bpy.types.Object:
+    """Wide tape/foil strip wrapped on the pair surface."""
+    y0, z0 = pair_offset
+    verts: list[tuple[float, float, float]] = []
+    faces: list[list[int]] = []
+    half = width_angle / 2
+    for i in range(points):
+        t = i / (points - 1)
+        x = -LENGTH / 2 + LENGTH * t
+        theta = phase + turns * math.tau * t
+        for edge in (-half, half):
+            a = theta + edge
+            verts.append((x, y0 + radius * math.cos(a), z0 + radius * math.sin(a)))
+    for i in range(points - 1):
+        faces.append([2 * i, 2 * i + 1, 2 * i + 3, 2 * i + 2])
+
+    mesh = bpy.data.meshes.new(f"{name}_Mesh")
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    obj.data.materials.append(material)
+    bpy.context.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.shade_smooth()
+    obj.select_set(False)
+
+    if edge_material:
+        for sign, label in ((-1, "A"), (1, "B")):
+            coords = []
+            for i in range(points):
+                t = i / (points - 1)
+                x = -LENGTH / 2 + LENGTH * t
+                theta = phase + turns * math.tau * t + sign * half
+                coords.append((x, y0 + radius * math.cos(theta), z0 + radius * math.sin(theta)))
+            make_curve(f"{name}_Edge_{label}", coords, edge_material, 0.0035, bevel_resolution=1)
+    return obj
+
+
 def superellipse_point(theta: float, a: float, b: float, power: float = 4.6) -> tuple[float, float]:
     c = math.cos(theta)
     s = math.sin(theta)
@@ -250,8 +300,10 @@ def build_materials() -> dict[str, bpy.types.Material]:
         "copper": make_material("Copper", (0.86, 0.42, 0.16, 1), metallic=0.72, roughness=0.24),
         "white": make_material("White insulation", (0.86, 0.85, 0.78, 1), roughness=0.42),
         "dielectric": make_material("Foamed dielectric", (0.62, 0.78, 0.92, 1), roughness=0.38),
-        "ptfe": make_material("PTFE tape", (0.92, 0.88, 0.70, 1), roughness=0.58, alpha=0.52),
-        "foil": make_material("Foil", (0.78, 0.84, 0.88, 1), metallic=0.75, roughness=0.2, alpha=0.40),
+        "ptfe": make_material("PTFE tape ribbon", (0.92, 0.88, 0.70, 1), roughness=0.58, alpha=0.72),
+        "ptfe_edge": make_material("PTFE tape cut edge", (1.0, 0.95, 0.76, 1), roughness=0.48, alpha=0.88),
+        "foil": make_material("Foil ribbon", (0.78, 0.84, 0.88, 1), metallic=0.75, roughness=0.2, alpha=0.62),
+        "foil_edge": make_material("Foil ribbon bright edge", (0.96, 0.98, 1.0, 1), metallic=0.82, roughness=0.18, alpha=0.82),
         "braid_a": make_material("Copper braid", (0.93, 0.56, 0.24, 1), metallic=0.72, roughness=0.25),
         "braid_b": make_material("Tinned braid", (0.70, 0.73, 0.72, 1), metallic=0.8, roughness=0.28),
         "jacket": make_material("Black jacket", (0.018, 0.026, 0.03, 1), roughness=0.8),
@@ -287,14 +339,14 @@ def draw_pair(mats: dict[str, bpy.types.Material], pair_offset: tuple[float, flo
 
 def draw_pair_wrap(mats: dict[str, bpy.types.Material]) -> None:
     draw_pair(mats)
-    for phase in (0, math.tau / 3, 2 * math.tau / 3):
-        make_curve(f"PTFE_Tape_{phase:.1f}", wrap_helix((0, 0), 0.165, 7.2, phase), mats["ptfe"], 0.008, bevel_resolution=2)
+    make_helix_ribbon("PTFE_Tape_Ribbon", (0, 0), 0.168, 7.2, math.radians(18), 0.74, mats["ptfe"], edge_material=mats["ptfe_edge"])
+    make_curve("PTFE_Lap_Ridge", wrap_helix((0, 0), 0.172, 7.2, math.radians(45)), mats["ptfe_edge"], 0.004, bevel_resolution=1)
 
 
 def draw_pair_foil(mats: dict[str, bpy.types.Material]) -> None:
     draw_pair_wrap(mats)
-    for phase in (math.radians(20), math.radians(200)):
-        make_curve(f"Foil_Lap_{phase:.1f}", wrap_helix((0, 0), 0.205, 5.6, phase), mats["foil"], 0.011, bevel_resolution=2)
+    make_helix_ribbon("Foil_Shield_Ribbon", (0, 0), 0.214, 5.6, math.radians(138), 0.82, mats["foil"], edge_material=mats["foil_edge"])
+    make_curve("Foil_Lap_Ridge", wrap_helix((0, 0), 0.220, 5.6, math.radians(166)), mats["foil_edge"], 0.005, bevel_resolution=1)
     make_curve("Drain_Wire", line_path(-0.19, -0.11), mats["copper"], 0.010, bevel_resolution=2)
 
 

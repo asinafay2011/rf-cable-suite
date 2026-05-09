@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  Film,
   History,
   RotateCcw,
   Save,
@@ -68,11 +69,87 @@ const STAGE_LABELS = {
   pair_wrap: 'Pair wrap',
   pair_foil: 'Per-pair foil',
   bundle: 'Bundle',
+  outer_foil: 'Outer foil',
   shield: 'Outer shield',
   jacket: 'Jacket',
 }
 
-const STAGE_FLOW = ['conductor', 'stranding', 'insulation', 'pair', 'pair_wrap', 'pair_foil', 'bundle', 'shield', 'jacket']
+const STAGE_FLOW = ['conductor', 'stranding', 'insulation', 'pair', 'pair_wrap', 'pair_foil', 'bundle', 'outer_foil', 'shield', 'jacket']
+
+const BUILDER_BLENDER_ASSETS = {
+  video: '/videos/highspeed-cable-bundle-build.mp4',
+  poster: '/cable-renders/highspeed-cable-bundle-build-preview.png',
+  glb: '/models/highspeed-cable-bundle-build.glb',
+}
+
+const BUILDER_STAGE_VISUALS = {
+  empty: {
+    label: 'Ready to build',
+    image: '/cable-renders/highspeed-cable-bundle-build-preview.png',
+    cue: 'Start at conductor, then build each cable layer in order.',
+    step: '00',
+  },
+  conductor: {
+    label: 'Conductor',
+    image: '/cable-renders/process-stage-01-conductor.png',
+    cue: 'Copper or plated copper is the signal carrier before any polymer is added.',
+    step: '01',
+  },
+  stranding: {
+    label: 'Stranding',
+    image: '/cable-renders/process-stage-02-stranding.png',
+    cue: 'Optional bunching improves flex before the dielectric extrusion step.',
+    step: '02',
+  },
+  insulation: {
+    label: 'Insulation',
+    image: '/cable-renders/process-stage-03-insulation.png',
+    cue: 'Dielectric wall and material set impedance, capacitance, and velocity.',
+    step: '03',
+  },
+  pair: {
+    label: '2-wire twist',
+    image: '/cable-renders/process-stage-04-pair-twist.png',
+    cue: 'Two insulated wires twist evenly; lay length drives skew and NEXT.',
+    step: '04',
+  },
+  pair_wrap: {
+    label: 'PTFE tape',
+    image: '/cable-renders/process-stage-05-pair-wrap.png',
+    cue: 'Binder tape locks pair geometry before foil is applied.',
+    step: '05',
+  },
+  pair_foil: {
+    label: 'Foil shield',
+    image: '/cable-renders/process-stage-06-pair-foil.png',
+    cue: 'Per-pair foil adds local shielding and a drain path.',
+    step: '06',
+  },
+  bundle: {
+    label: '4-pair bundle',
+    image: '/cable-renders/process-stage-07-bundle.png',
+    cue: 'Blue, orange, green, and brown pairs gather around the spline.',
+    step: '07',
+  },
+  outer_foil: {
+    label: 'Outer foil',
+    image: '/cable-renders/process-stage-08-outer-shield.png',
+    cue: 'Bundle-level foil closes the high-frequency shield before braid.',
+    step: '08',
+  },
+  shield: {
+    label: 'Braid',
+    image: '/cable-renders/process-stage-08-outer-shield.png',
+    cue: 'The braid follows the non-round bundle and adds LF shielding.',
+    step: '09',
+  },
+  jacket: {
+    label: 'Jacket',
+    image: '/cable-renders/process-stage-09-jacket.png',
+    cue: 'The outer extrusion locks the shield stack and sets final OD.',
+    step: '10',
+  },
+}
 
 function loadState() {
   try {
@@ -298,6 +375,20 @@ function buildLayersFromRecipe(recipe, appliedStages) {
     layers[i].to = (i + 1) / N
   }
   return layers
+}
+
+function latestAppliedStageId(appliedStages) {
+  for (let i = STAGES.length - 1; i >= 0; i--) {
+    if (appliedStages.has(STAGES[i].id)) return STAGES[i].id
+  }
+  return null
+}
+
+function builderVisualFor(currentStage, appliedStages) {
+  const currentId = STAGES[currentStage]?.id
+  const latestId = latestAppliedStageId(appliedStages)
+  const visualId = appliedStages.has(currentId) ? currentId : latestId || 'empty'
+  return BUILDER_STAGE_VISUALS[visualId] || BUILDER_STAGE_VISUALS.empty
 }
 
 // ─── Spec verdict against active target ───
@@ -570,8 +661,8 @@ export default function CableBuilder() {
             return (
               <button
                 key={s.id}
-                onClick={() => i <= currentStage && setCurrentStage(i)}
-                disabled={i > currentStage}
+                onClick={() => (i <= currentStage || applied) && setCurrentStage(i)}
+                disabled={i > currentStage && !applied}
                 className="flex items-center gap-1 px-2 py-1.5 rounded text-[10px] font-mono uppercase tracking-wider whitespace-nowrap disabled:opacity-40 transition-colors"
                 style={{
                   background: active ? C.copper + '20' : applied ? '#0d1f1d' : 'transparent',
@@ -606,29 +697,14 @@ export default function CableBuilder() {
 
       {/* Main two-column layout */}
       <div className="grid lg:grid-cols-[1fr_420px] gap-4">
-        {/* LEFT: 3D preview + live specs */}
+        {/* LEFT: Blender preview + live specs */}
         <div className="space-y-3">
-          {/* 3D cable */}
-          <div className="bg-[#0a0d0f] border border-[#252e33] rounded relative" style={{ minHeight: 360 }}>
-            <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: C.copperBright }}>
-              ◆ {totalApplied === 0 ? 'Empty stage — apply Stage 1 to start' : `${totalApplied} layer${totalApplied === 1 ? '' : 's'} applied`}
-            </div>
-            <div className="absolute top-2 right-2 font-mono text-[10px]" style={{ color: C.textMuted }}>
-              ϕ {sim?.jacket?.final_od_mm?.toFixed(2) || '—'} mm
-            </div>
-            <CableBuildSvg
-              recipe={recipe}
-              appliedStages={appliedStages}
-            />
-            {totalApplied === 0 && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="text-center" style={{ color: C.textMuted }}>
-                  <Sparkles size={24} className="mx-auto mb-2 opacity-50" />
-                  <div className="font-mono text-[11px] uppercase tracking-wider">Pick a copper wire to start</div>
-                </div>
-              </div>
-            )}
-          </div>
+          <BuilderBlenderPreview
+            currentStage={currentStage}
+            appliedStages={appliedStages}
+            sim={sim}
+            totalApplied={totalApplied}
+          />
 
           {/* Live specs */}
           <SpecsPanel sim={sim} std={std} mode={mode} appliedStages={appliedStages} recipe={recipe} setRecipe={setRecipe} />
@@ -666,6 +742,95 @@ export default function CableBuilder() {
         </div>
       </div>
     </div>
+  )
+}
+
+function BuilderBlenderPreview({ currentStage, appliedStages, sim, totalApplied }) {
+  const visual = builderVisualFor(currentStage, appliedStages)
+  const latestId = latestAppliedStageId(appliedStages)
+  const currentLabel = STAGES[currentStage]?.label || visual.label
+  const isEmpty = totalApplied === 0
+  const isFinal = appliedStages.has('jacket')
+  const progressPct = Math.round((totalApplied / STAGES.length) * 100)
+
+  return (
+    <section
+      data-testid="builder-blender-preview-panel"
+      className="bg-[#0a0d0f] border border-[#252e33] rounded overflow-hidden"
+    >
+      <div className="relative">
+        <div className="aspect-video min-h-[340px] bg-[#0a0d0f]">
+          <img
+            data-testid="builder-blender-preview"
+            src={visual.image}
+            alt={`${visual.label} Blender build preview`}
+            className="w-full h-full object-cover"
+          />
+        </div>
+
+        <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em] flex items-center gap-1.5 text-[#5eead4]">
+          <Film size={12} /> Blender builder preview
+        </div>
+        <div className="absolute top-2 right-2 font-mono text-[10px] px-2 py-1 rounded border bg-[#0a0d0f]/85 border-[#252e33] text-[#a7b0b6]">
+          {progressPct}% built
+        </div>
+
+        {isEmpty && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="text-center bg-[#0a0d0f]/75 border border-[#252e33] rounded px-4 py-3">
+              <Sparkles size={24} className="mx-auto mb-2 opacity-60" style={{ color: C.copperBright }} />
+              <div className="font-mono text-[11px] uppercase tracking-wider text-[#a7b0b6]">Pick a copper wire to start</div>
+            </div>
+          </div>
+        )}
+
+        <div className="absolute bottom-2 left-2 right-2 grid sm:grid-cols-4 gap-2">
+          <div className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+            <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">Visual stage</div>
+            <div className="font-mono text-[11px] text-[#f0ebe2]">{visual.step} · {visual.label}</div>
+          </div>
+          <div className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+            <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">Builder focus</div>
+            <div className="font-mono text-[11px] text-[#fbbf24]">{currentLabel}</div>
+          </div>
+          <div className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+            <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">Latest layer</div>
+            <div className="font-mono text-[11px] text-[#5eead4]">{latestId ? (STAGE_LABELS[latestId] || latestId) : 'none'}</div>
+          </div>
+          <div className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+            <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">Final OD</div>
+            <div className="font-mono text-[11px] text-[#e89357]">{sim?.jacket?.final_od_mm?.toFixed(2) || '—'} mm</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-3 border-t border-[#252e33] flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-[12px] text-[#a7b0b6] leading-relaxed max-w-2xl">
+          {visual.cue}
+        </p>
+        <div className="flex gap-2">
+          <a
+            href={BUILDER_BLENDER_ASSETS.video}
+            className="inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-mono uppercase tracking-wider rounded border bg-transparent text-[#a7b0b6] hover:text-[#fbbf24]"
+            style={{ borderColor: C.borderHi }}
+          >
+            <Download size={11} /> MP4
+          </a>
+          <a
+            href={BUILDER_BLENDER_ASSETS.glb}
+            className="inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-mono uppercase tracking-wider rounded border bg-transparent text-[#a7b0b6] hover:text-[#fbbf24]"
+            style={{ borderColor: C.borderHi }}
+          >
+            <Download size={11} /> GLB
+          </a>
+          {isFinal && (
+            <span className="inline-flex items-center justify-center px-2 py-1.5 text-[10px] font-mono uppercase tracking-wider rounded border text-[#5eead4] border-[#2f7a6e]">
+              Complete
+            </span>
+          )}
+        </div>
+      </div>
+    </section>
   )
 }
 
