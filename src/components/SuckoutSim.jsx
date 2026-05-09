@@ -102,6 +102,61 @@ const PRESETS = {
   },
 }
 
+const SUCKOUT_BLENDER_VISUALS = {
+  ptfe: {
+    id: 'ptfe',
+    label: 'PTFE tape stack',
+    image: '/cable-renders/suckout-ptfe-stack.png',
+    tone: C.teal,
+    note: 'Identical tape pitch stacks energy into the same Bragg notch.',
+  },
+  staggered: {
+    id: 'staggered',
+    label: 'Staggered PTFE stack',
+    image: '/cable-renders/suckout-staggered-stack.png',
+    tone: C.amber,
+    note: 'Different widths spread notches so one deep suckout becomes several shallower dips.',
+  },
+  foil: {
+    id: 'foil',
+    label: 'Foil seam / overlap',
+    image: '/cable-renders/suckout-foil-seam.png',
+    tone: '#7dd3fc',
+    note: 'The foil seam is a periodic impedance perturbation; overlap and gap control depth.',
+  },
+  spiral: {
+    id: 'spiral',
+    label: 'Spiral flatwire shield',
+    image: '/cable-renders/suckout-spiral-shield.png',
+    tone: C.copperBright,
+    note: 'Multiple bobbins reduce the axial period, pushing the notch higher in frequency.',
+  },
+  full: {
+    id: 'full',
+    label: 'Foil + braid shield stack',
+    image: '/cable-renders/suckout-full-shield-stack.png',
+    tone: '#a78bfa',
+    note: 'Composite shields have multiple periodic signatures; each layer adds its own marker.',
+  },
+}
+
+function suckoutVisualFor(stack) {
+  if (stack.some((layer) => layer.kind === 'braid')) return SUCKOUT_BLENDER_VISUALS.full
+  if (stack.some((layer) => layer.kind === 'spiral')) return SUCKOUT_BLENDER_VISUALS.spiral
+  if (stack.some((layer) => layer.kind === 'foil')) return SUCKOUT_BLENDER_VISUALS.foil
+  const tapeWidths = stack
+    .filter((layer) => layer.kind === 'ptfe')
+    .map((layer) => Number(layer.width || 0).toFixed(1))
+  if (new Set(tapeWidths).size >= 3) return SUCKOUT_BLENDER_VISUALS.staggered
+  return SUCKOUT_BLENDER_VISUALS.ptfe
+}
+
+function primaryNotchFor(allNotches, bandLo, bandHi) {
+  const inBand = allNotches.find((notch) => notch.order === 1 && notch.f_mhz >= bandLo && notch.f_mhz <= bandHi)
+  if (inBand) return inBand
+  return allNotches.find((notch) => notch.order === 1) || allNotches[0] || null
+}
+
 // ─────────── Helpers ───────────
 function newLayer(kind = 'ptfe') {
   if (kind === 'braid') return { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1 }
@@ -226,6 +281,8 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
   // Total layer wrap count (sum of count fields), used in summary
   const totalWraps = stack.reduce((sum, l) => sum + Math.max(1, l.count), 0)
   const inBand = allNotches.filter((n) => n.f_mhz >= bandLo && n.f_mhz <= bandHi)
+  const suckoutVisual = useMemo(() => suckoutVisualFor(stack), [stack])
+  const primaryNotch = useMemo(() => primaryNotchFor(allNotches, bandLo, bandHi), [allNotches, bandLo, bandHi])
   const verdict =
     inBand.length === 0
       ? { state: 'CLEAR', color: C.teal, glyph: '✓', detail: 'No layer puts a notch inside the operating band.' }
@@ -401,6 +458,18 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
       {/* CROSS-SECTION VISUALIZATION */}
       <CableCrossSectionPanel stack={stack} cableOD={cableOD} units={units} accent={accent} />
 
+      {/* BLENDER PITCH VISUALIZATION */}
+      <SuckoutBlenderPanel
+        visual={suckoutVisual}
+        stack={stack}
+        cableOD={cableOD}
+        vf={vf}
+        bandLo={bandLo}
+        bandHi={bandHi}
+        totalWraps={totalWraps}
+        primaryNotch={primaryNotch}
+      />
+
       {/* VERDICT */}
       <div
         className="border rounded p-4 flex items-center gap-4 flex-wrap"
@@ -537,6 +606,174 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
 
 let _id = 1
 function nextId() { return ++_id }
+
+function SuckoutBlenderPanel({ visual, stack, cableOD, vf, bandLo, bandHi, totalWraps, primaryNotch }) {
+  const primaryLayer = primaryNotch ? stack[primaryNotch.layerIdx] : null
+  const primaryPitch = primaryLayer ? pitchOf(primaryLayer, cableOD) : null
+  const primaryAngle = primaryLayer ? helixAngleOf(primaryLayer, cableOD) : null
+  const inBand = primaryNotch && primaryNotch.f_mhz >= bandLo && primaryNotch.f_mhz <= bandHi
+  const layerKinds = Array.from(new Set(stack.map((layer) => layerLabel(layer.kind))))
+
+  return (
+    <div className="grid lg:grid-cols-[1.08fr_0.92fr] gap-4">
+      <div className="bg-[#12171a] border border-[#252e33] rounded overflow-hidden">
+        <div className="relative aspect-video min-h-[280px] bg-[#0a0d0f]">
+          <img
+            data-testid="suckout-blender-preview"
+            src={visual.image}
+            alt={`${visual.label} Blender pitch preview`}
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em] bg-[#0a0d0f]/75 border border-[#252e33] px-2 py-1" style={{ color: visual.tone }}>
+            Blender pitch visual
+          </div>
+          <div className="absolute top-2 right-2 font-mono text-[10px] uppercase tracking-wider bg-[#0a0d0f]/75 border px-2 py-1" style={{ color: inBand ? C.red : C.teal, borderColor: (inBand ? C.red : C.teal) + '66' }}>
+            {inBand ? 'notch in band' : 'primary clear'}
+          </div>
+          <div className="absolute bottom-2 left-2 right-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+            {[
+              ['visual', visual.label],
+              ['pitch P', primaryPitch ? `${primaryPitch.toFixed(2)} mm` : '—'],
+              ['f1', primaryNotch ? `${(primaryNotch.f_mhz / 1000).toFixed(2)} GHz` : '—'],
+              ['wraps', `${totalWraps}`],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+                <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+                <div className="font-mono text-[11px]" style={{ color: label === 'f1' && inBand ? C.red : C.amber }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="p-3 border-t border-[#252e33]">
+          <div className="grid sm:grid-cols-2 gap-2 mb-3">
+            {Object.values(SUCKOUT_BLENDER_VISUALS).map((item) => {
+              const selected = item.id === visual.id
+              return (
+                <div
+                  key={item.id}
+                  data-testid={`suckout-visual-band-${item.id}`}
+                  className={`border rounded px-2 py-1.5 ${selected ? 'bg-[#10201f]' : 'bg-[#0a0d0f]'}`}
+                  style={{ borderColor: selected ? item.tone : C.border }}
+                >
+                  <div className="font-mono text-[10px] uppercase tracking-wider" style={{ color: selected ? item.tone : C.textDim }}>
+                    {item.label}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-[11px] leading-relaxed" style={{ color: C.textDim }}>
+            {visual.note} Active stack: <span className="font-mono" style={{ color: C.amber }}>{layerKinds.join(' + ') || 'none'}</span>.
+            {primaryAngle != null && <span> Primary helix angle is <span className="font-mono" style={{ color: C.teal }}>{primaryAngle.toFixed(1)}°</span>.</span>}
+          </p>
+        </div>
+      </div>
+
+      <SuckoutPitchMap
+        stack={stack}
+        cableOD={cableOD}
+        vf={vf}
+        bandLo={bandLo}
+        bandHi={bandHi}
+        primaryNotch={primaryNotch}
+      />
+    </div>
+  )
+}
+
+function SuckoutPitchMap({ stack, cableOD, vf, bandLo, bandHi, primaryNotch }) {
+  const rows = stack.map((layer, index) => {
+    const pitch = pitchOf(layer, cableOD)
+    const f1 = (150000 * vf) / Math.max(0.01, pitch)
+    return {
+      id: layer.id,
+      index,
+      kind: layer.kind,
+      label: `L${index + 1} ${layerLabel(layer.kind)}`,
+      pitch,
+      f1,
+      color: colorFor(index),
+      selected: primaryNotch?.layerId === layer.id,
+    }
+  })
+  const w = 420
+  const rowH = 34
+  const h = Math.max(150, 46 + rows.length * rowH)
+  const maxPitch = Math.max(1, ...rows.map((row) => row.pitch))
+  const rangeMm = Math.min(72, Math.max(18, maxPitch * 8))
+  const xFor = (mm) => 96 + (mm / rangeMm) * (w - 116)
+
+  return (
+    <div className="bg-[#12171a] border border-[#252e33] rounded p-3">
+      <div className="flex items-baseline justify-between gap-2 mb-2">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: C.copperBright }}>
+          Pitch map · P to notch
+        </div>
+        <div className="font-mono text-[10px]" style={{ color: C.textMuted }}>
+          axial repeat → f1
+        </div>
+      </div>
+      <svg data-testid="suckout-pitch-map" viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: h }}>
+        <rect width={w} height={h} fill="#06090b" />
+        <line x1="96" y1="30" x2={w - 20} y2="30" stroke={C.borderHi} strokeWidth="1" />
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+          const mm = rangeMm * t
+          const x = xFor(mm)
+          return (
+            <g key={t}>
+              <line x1={x} y1="25" x2={x} y2={h - 12} stroke={C.border} strokeDasharray="2 4" />
+              <text x={x} y="18" textAnchor="middle" fontSize="8" fill={C.textMuted} fontFamily="JetBrains Mono">{mm.toFixed(0)}mm</text>
+            </g>
+          )
+        })}
+
+        {rows.length === 0 && (
+          <text x={w / 2} y={h / 2} textAnchor="middle" fontSize="11" fill={C.textMuted} fontFamily="JetBrains Mono">
+            add a layer to see pitch repeats
+          </text>
+        )}
+
+        {rows.map((row, r) => {
+          const y = 52 + r * rowH
+          const repeats = []
+          for (let mm = 0; mm <= rangeMm; mm += Math.max(0.2, row.pitch)) repeats.push(mm)
+          const inBand = row.f1 >= bandLo && row.f1 <= bandHi
+          return (
+            <g key={row.id}>
+              <text x="8" y={y + 4} fontSize="9" fill={row.selected ? C.amber : C.textDim} fontFamily="JetBrains Mono">{row.label}</text>
+              <line x1="96" y1={y} x2={w - 20} y2={y} stroke={row.color} strokeOpacity="0.25" strokeWidth="8" strokeLinecap="round" />
+              {repeats.slice(0, 40).map((mm, i) => (
+                <line
+                  key={i}
+                  x1={xFor(mm)}
+                  y1={y - 10}
+                  x2={xFor(mm)}
+                  y2={y + 10}
+                  stroke={row.selected ? C.amber : row.color}
+                  strokeWidth={i === 0 ? 2 : 1}
+                  strokeOpacity={row.selected ? 0.95 : 0.65}
+                />
+              ))}
+              <text x={w - 16} y={y + 4} textAnchor="end" fontSize="9" fill={inBand ? C.red : C.teal} fontFamily="JetBrains Mono">
+                {(row.f1 / 1000).toFixed(2)}GHz
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <div className="border border-[#252e33] bg-[#0a0d0f] rounded p-2">
+          <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: C.textMuted }}>display window</div>
+          <div className="font-mono text-[11px]" style={{ color: C.amber }}>0-{rangeMm.toFixed(0)} mm</div>
+        </div>
+        <div className="border border-[#252e33] bg-[#0a0d0f] rounded p-2">
+          <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: C.textMuted }}>band</div>
+          <div className="font-mono text-[11px]" style={{ color: C.teal }}>{(bandLo / 1000).toFixed(1)}-{(bandHi / 1000).toFixed(1)} GHz</div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ─────────── Cable cross-section visualization ───────────
 // Shows the cable's concentric rings as each tape layer is added.
