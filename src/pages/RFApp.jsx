@@ -362,6 +362,7 @@ const CABLES = {
   fsj1: { name: "FSJ1-50A", cat: "heliax", alias: "SuperFlex 1/4\"",
     z: 50, vp: 84, cap: 76, mass: 60, fMax: 20.4, vMax: 2200,
     d: 1.80, D: 4.83, shield: 5.71, OD: 6.40, flex: "medium", outdoor: true, power: "high", complexity: "high",
+    render: "/cable-renders/rf-fsj1-superflex.png",
     atten: [[150, 5.2], [450, 9.3], [900, 13.5], [1800, 19.5], [2400, 22.7], [5800, 37.4]],
     cons: { conductor: "Solid copper, 1.80mm", dielectric: "Foam PE spacer", shield: "Corrugated solid copper tube", jacket: "Black PE, FR options" },
     proc: ["Solid Cu inner", "Foam PE dielectric extrusion", "Cu tape seam-weld longitudinal", "Corrugate via rotary rollers", "PE jacket, >120dB shielding"],
@@ -2182,7 +2183,7 @@ export default function RFCableSuite() {
             <>
               <CompanyDefaultsPanel accentColor="#d97706" />
               <CustomCablesPanel side="rf" accentColor="#d97706" />
-              <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} onPrint={(id) => setPrintSetup({ type: "cable", id })} />
+              <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} onPrint={(id) => setPrintSetup({ type: "cable", id })} isMobile={isMobile} />
             </>
           )}
           {tab === "connectors" && <ConnectorView />}
@@ -5650,7 +5651,7 @@ function DesignView({ activeCable, clearCable, openLibrary }) {
 // ═══════════════════════════════════════════════════════════════
 // LIBRARY VIEW
 // ═══════════════════════════════════════════════════════════════
-function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCable, comparedCables, toggleCompare, onPrint }) {
+function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCable, comparedCables, toggleCompare, onPrint, isMobile = false }) {
   const [search, setSearch] = useState("");
   const [filterZ, setFilterZ] = useState("all");
   const [filterCat, setFilterCat] = useState("all");
@@ -5864,6 +5865,7 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
             cable={c}
             onOpen={() => openDetail(id)}
             compared={comparedCables?.includes(id)}
+            isMobile={isMobile}
           />
         ))}
         {filtered.length === 0 && (
@@ -5887,7 +5889,7 @@ function LibraryStat({ value, label }) {
 }
 
 // Slim list-item card: just the head row, taps open the detail page.
-function CableCard({ id, cable: c, onOpen, compared }) {
+function CableCard({ id, cable: c, onOpen, compared, isMobile = false }) {
   const { units } = useContext(SettingsContext);
   const cat = CATEGORIES[c.cat];
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity];
@@ -5908,7 +5910,7 @@ function CableCard({ id, cable: c, onOpen, compared }) {
     >
       <div style={S.cableHead}>
         <div style={S.cableIdentity}>
-          <MiniCrossSection c={c} />
+          <CablePreviewThumb c={c} isMobile={isMobile} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={S.cableNameRow}>
               <span style={S.cableName}>{c.name}</span>
@@ -5939,6 +5941,30 @@ function CableCard({ id, cable: c, onOpen, compared }) {
         <span style={S.cableCardOpenIcon}>›</span>
       </div>
     </button>
+  );
+}
+
+function CablePreviewThumb({ c, isMobile = false }) {
+  const size = isMobile ? S.cableThumbMobile : S.cableThumbDesktop;
+
+  if (c.render) {
+    return (
+      <span style={{ ...S.cableThumb, ...size }} aria-hidden="true">
+        <img
+          src={c.render}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          style={S.cableThumbImage}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span style={{ ...S.cableThumb, ...S.cableThumbFallback, ...size }} aria-hidden="true">
+      <MiniCrossSection c={c} />
+    </span>
   );
 }
 
@@ -9691,6 +9717,32 @@ const S = {
   cableCardExpanded: { borderColor: "rgba(217,119,6,0.72)", background: "linear-gradient(135deg, rgba(20,14,9,0.92), rgba(9,8,7,0.94))", boxShadow: "0 18px 52px rgba(0,0,0,0.34)" },
   cableHead: { padding: "13px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, cursor: "pointer", flexWrap: "wrap" },
   cableIdentity: { display: "flex", alignItems: "center", gap: 14, flex: "1 1 460px", minWidth: 0 },
+  cableThumbDesktop: { width: 88, height: 56 },
+  cableThumbMobile: { width: 66, height: 46 },
+  cableThumb: {
+    flex: "0 0 auto",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    borderRadius: 5,
+    border: "1px solid rgba(168,162,158,0.18)",
+    background: "linear-gradient(135deg, rgba(3,3,3,0.92), rgba(22,18,14,0.74))",
+    boxShadow: "inset 0 0 0 1px rgba(251,191,36,0.04), 0 8px 18px rgba(0,0,0,0.26)",
+  },
+  cableThumbFallback: {
+    borderRadius: 999,
+    width: 50,
+    height: 50,
+  },
+  cableThumbImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    objectPosition: "center",
+    display: "block",
+    filter: "contrast(1.05) saturate(1.05)",
+  },
   cableNameRow: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 },
   cableName: { fontFamily: "'Fraunces', serif", fontSize: 17, color: "#fef3c7", fontWeight: 650, lineHeight: 1.05 },
   catBadge: { fontSize: 8, padding: "3px 8px", border: "1px solid", borderRadius: 999, letterSpacing: "0.12em", textTransform: "uppercase", background: "rgba(0,0,0,0.25)" },
