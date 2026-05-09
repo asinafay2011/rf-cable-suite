@@ -293,6 +293,7 @@ const CABLES = {
     z: 75, vp: 66, cap: 68, mass: 42, fMax: 1.0, vMax: 2300,
     d: 0.58, D: 3.71, shield: 4.35, OD: 6.15, flex: "medium", outdoor: false, power: "medium", complexity: "low",
     render: "/cable-renders/rf-rg59-video.png",
+    model: "/models/rf-rg59.glb",
     atten: [[50, 7.5], [100, 11.2], [400, 22.6], [900, 35.1]],
     cons: { conductor: "Solid CCS or Cu, 0.58mm", dielectric: "Solid PE", shield: "Bare/tinned Cu braid 95%", jacket: "Black PVC, 1.22mm" },
     proc: ["CCS or pure Cu prep", "PE extrusion at 3.71mm", "Single Cu braid 95%", "Thick PVC jacket", "Capacitance test 68 pF/m ±2%"],
@@ -301,6 +302,7 @@ const CABLES = {
     z: 75, vp: 82, cap: 55, mass: 42, fMax: 3.0, vMax: 2700,
     d: 1.02, D: 4.57, shield: 5.38, OD: 6.86, flex: "medium", outdoor: true, power: "medium", complexity: "medium",
     render: "/cable-renders/rf-rg6-broadband.png",
+    model: "/models/rf-rg6.glb",
     atten: [[100, 6.0], [400, 13.2], [900, 19.7], [1500, 26.2], [3000, 38.4]],
     cons: { conductor: "Solid CCS or Cu, 1.02mm", dielectric: "Foam PE, εr ~1.5", shield: "Al foil + tinned Cu braid", jacket: "Black UV-resistant PE" },
     proc: ["Precise CCS or Cu draw", "Gas-foam PE at ~0.30 g/cc", "Al-polyester foil tape 100%", "Tinned Cu braid 60-80%", "PE jacket for outdoor"],
@@ -309,6 +311,7 @@ const CABLES = {
     z: 75, vp: 82, cap: 55, mass: 56, fMax: 3.0, vMax: 2700,
     d: 1.02, D: 4.57, shield: 5.97, OD: 7.75, flex: "medium", outdoor: true, power: "medium", complexity: "medium",
     render: "/cable-renders/rf-quad-shield.png",
+    model: "/models/rf-rg6quad.glb",
     atten: [[100, 6.0], [400, 13.2], [900, 19.7], [1500, 26.2], [3000, 38.4]],
     cons: { conductor: "Solid CCS, 1.02mm", dielectric: "Foam PE", shield: "Foil+braid+foil+braid (4 layers)", jacket: "Black UV PE" },
     proc: ["RG-6 inner construction", "Inner Al-Mylar foil 100%", "First tinned Cu braid 60%", "Second Al-Mylar foil", "Second Cu braid 40%, >100dB EMI"],
@@ -317,6 +320,7 @@ const CABLES = {
     z: 75, vp: 78, cap: 54, mass: 120, fMax: 3.0, vMax: 4000,
     d: 1.63, D: 7.24, shield: 8.13, OD: 10.30, flex: "medium", outdoor: true, power: "high", complexity: "medium",
     render: "/cable-renders/rf-rg11-longrun.png",
+    model: "/models/rf-rg11.glb",
     atten: [[100, 4.6], [400, 9.8], [900, 14.8], [1500, 19.7]],
     cons: { conductor: "Solid CCS or Cu, 1.63mm", dielectric: "Foam or semi-foam PE", shield: "Duofoil + tinned Cu braid", jacket: "Black UV-stable PE" },
     proc: ["Large conductor for long-run loss", "Foam PE at 7.24mm", "Foil-braid composite shield", "PE jacket for burial", "For runs >150m"],
@@ -325,6 +329,7 @@ const CABLES = {
     z: 50, vp: 66, cap: 101, mass: 13, fMax: 5.8, vMax: 300,
     d: 0.46, D: 1.52, shield: 1.85, OD: 2.79, flex: "high", outdoor: true, power: "low", complexity: "medium",
     render: "/cable-renders/rf-lmr100-micro-pigtail.png",
+    model: "/models/rf-lmr100.glb",
     atten: [[100, 26.2], [450, 55.8], [900, 82.0], [2400, 137.8], [5800, 226.4]],
     cons: { conductor: "Solid bare Cu, 0.46mm", dielectric: "Foam PE with PE skin", shield: "Al-polymer foil + tinned Cu braid", jacket: "Flexible black PE" },
     proc: ["Cu wire to 0.46mm ±1%", "Foam PE with PE skin co-extrude", "Longitudinal Al-polymer tape", "Tinned Cu braid", "Foam density tuned for VP"],
@@ -333,6 +338,7 @@ const CABLES = {
     z: 50, vp: 80, cap: 82, mass: 23, fMax: 5.8, vMax: 600,
     d: 0.94, D: 2.79, shield: 3.40, OD: 4.95, flex: "high", outdoor: true, power: "low", complexity: "medium",
     render: "/cable-renders/rf-lmr195-low-loss.png",
+    model: "/models/rf-lmr195.glb",
     atten: [[100, 16.7], [450, 35.8], [900, 51.2], [2400, 85.3], [5800, 137.8]],
     cons: { conductor: "Solid bare Cu, 0.94mm", dielectric: "Foam PE ~30% density", shield: "Al-polymer foil + tinned Cu braid", jacket: "Black UV PE" },
     proc: ["Solid Cu for low DC R", "Gas-foam PE for VP 80%", "Bonded foil-braid composite", "UV PE jacket", "TDR 50Ω ±2%"],
@@ -341,6 +347,7 @@ const CABLES = {
     z: 50, vp: 84, cap: 78, mass: 40, fMax: 5.8, vMax: 1400,
     d: 1.42, D: 3.81, shield: 4.50, OD: 6.10, flex: "high", outdoor: true, power: "medium", complexity: "medium",
     render: "/cable-renders/rf-lmr240-outdoor.png",
+    model: "/models/rf-lmr240.glb",
     atten: [[100, 12.8], [450, 27.9], [900, 39.4], [2400, 65.3], [5800, 105.0]],
     cons: { conductor: "Solid bare Cu, 1.42mm", dielectric: "Gas-injection foam PE", shield: "Al-polymer foil 100% + tinned Cu braid 85%", jacket: "UV-stabilized PE, 1.15mm" },
     proc: ["Cu wire ±0.01mm", "Gas-foam PE, VP 84%", "Bonded Al-polymer 100%", "Tinned Cu braid 85%", "Multi-f sweep test"],
@@ -349,6 +356,7 @@ const CABLES = {
     z: 50, vp: 85, cap: 78, mass: 68, fMax: 5.8, vMax: 2500,
     d: 2.74, D: 7.24, shield: 8.13, OD: 10.29, flex: "medium", outdoor: true, power: "high", complexity: "medium",
     render: "/cable-renders/rf-lmr-flex.png",
+    model: "/models/rf-lmr400.glb",
     atten: [[30, 2.2], [150, 5.1], [450, 8.9], [900, 12.8], [1800, 18.5], [2400, 21.6], [5800, 35.1]],
     cons: { conductor: "Solid bare Cu, 2.74mm", dielectric: "Foam PE with PE skin, gas-foamed", shield: "Al foil 100% + tinned Cu braid 92%", jacket: "Black UV PE, 1.45mm" },
     proc: ["Cu to 2.74mm ±0.01mm", "Co-extrude foam PE + skin, ~0.30 g/cc", "Al-polymer foil 100%", "Tinned Cu braid 92%", "Sweep to 6GHz VSWR <1.15"],
@@ -357,6 +365,7 @@ const CABLES = {
     z: 50, vp: 87, cap: 76, mass: 130, fMax: 5.8, vMax: 4000,
     d: 4.47, D: 11.4, shield: 12.3, OD: 14.99, flex: "low", outdoor: true, power: "high", complexity: "medium",
     render: "/cable-renders/rf-lmr600-foam-trunk.png",
+    model: "/models/rf-lmr600.glb",
     atten: [[30, 1.5], [150, 3.5], [450, 6.2], [900, 8.9], [1800, 12.8], [2400, 14.8], [5800, 24.0]],
     cons: { conductor: "Solid bare Cu, 4.47mm", dielectric: "Low-density foam PE", shield: "Al foil + tinned Cu braid", jacket: "Black UV PE, 1.8mm" },
     proc: ["Large Cu for lowest R", "Foam PE 11.4mm, VP 87%", "Foil-braid shield", "Thick PE jacket", "<24 dB/100m at 5.8 GHz"],
@@ -365,6 +374,7 @@ const CABLES = {
     z: 50, vp: 87, cap: 76, mass: 260, fMax: 3.0, vMax: 4500,
     d: 6.65, D: 17.3, shield: 18.4, OD: 22.1, flex: "low", outdoor: true, power: "high", complexity: "high",
     render: "/cable-renders/rf-lmr900-large.png",
+    model: "/models/rf-lmr900.glb",
     atten: [[30, 1.0], [150, 2.4], [450, 4.3], [900, 6.2], [1800, 9.0], [2400, 10.5]],
     cons: { conductor: "Solid bare Cu, 6.65mm (heavy)", dielectric: "Foam PE, gas-injection", shield: "Al foil + tinned Cu braid", jacket: "Black UV PE, 2.4mm" },
     proc: ["Large Cu core", "Foam PE shrink control", "Reinforced shield/jacket", "Large bend radius"],
@@ -6209,7 +6219,10 @@ function CableGlbViewer({ cable: c }) {
             const size = box.getSize(new THREE.Vector3());
             root.position.sub(center);
             const rect = mount.getBoundingClientRect();
-            const targetSize = rect.width < 560 ? 2.45 : 4.55;
+            const od = Number(c.OD) || 0;
+            const targetSize = rect.width < 560
+              ? (od >= 20 ? 1.75 : od >= 14 ? 2.1 : 2.45)
+              : (od >= 20 ? 3.15 : od >= 14 ? 3.7 : 4.55);
             const scale = targetSize / Math.max(size.x, size.y, size.z, 0.001);
             root.scale.setScalar(scale);
             modelGroup.add(root);
@@ -6244,7 +6257,7 @@ function CableGlbViewer({ cable: c }) {
         renderer.domElement?.remove?.();
       }
     };
-  }, [c.model]);
+  }, [c.model, c.OD]);
 
   return (
     <div style={S.glbViewerStage} data-testid="rf-glb-viewer-stage">
