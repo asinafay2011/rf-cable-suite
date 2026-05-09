@@ -3,6 +3,7 @@ import {
   Layers, Settings, AlertTriangle, CheckCircle2, Sparkles, RotateCcw,
   Save, Upload, Download, ChevronRight, Activity, Cable, Shield,
   Zap, Box, GitMerge, Atom, Beaker, ScrollText, Waves, Wand2, History,
+  Film,
 } from 'lucide-react'
 import { useToast } from './Toaster.jsx'
 
@@ -196,6 +197,24 @@ const PROCESS_STAGE_VISUALS = [
       ['mass', `${sim.jacket.mass_g_per_m.toFixed(0)} g/m`],
     ],
   },
+]
+
+const PROCESS_BUILD_FILM = {
+  video: '/videos/highspeed-cable-bundle-build.mp4',
+  poster: '/cable-renders/highspeed-cable-bundle-build-preview.png',
+  glb: '/models/highspeed-cable-bundle-build.glb',
+  blend: '/models/highspeed-cable-bundle-build.blend',
+}
+
+const PROCESS_BUILD_STEPS = [
+  { id: 'conductor', label: 'Conductor', detail: 'copper carrier', color: '#c97b3f' },
+  { id: 'insulation', label: 'Insulation', detail: 'FEP / foam layer', color: '#7dd3fc' },
+  { id: 'twist', label: '2-wire twist', detail: 'even pair lay', color: '#a78bfa' },
+  { id: 'ptfe', label: 'PTFE tape', detail: 'binder wrap', color: '#f4e8b8' },
+  { id: 'foil', label: 'Foil shield', detail: 'per-pair screen', color: '#cbd5e1' },
+  { id: 'bundle', label: '4-pair bundle', detail: 'blue / orange / green / brown', color: '#5eead4' },
+  { id: 'braid', label: 'Braid', detail: 'non-round coverage', color: '#e89357' },
+  { id: 'jacket', label: 'Jacket', detail: 'outer extrusion', color: '#1a2226' },
 ]
 
 // ── Recipe templates (one-click factory presets) ────────
@@ -1176,6 +1195,8 @@ export default function ProcessSim() {
         </ul>
       </div>
 
+      <ProcessBuildFilm sim={sim} std={std} />
+
       {baseline && anyDiff && (
         <div className="bg-[#12171a] border border-[#252e33] rounded p-3">
           <div className="flex items-center justify-between mb-2">
@@ -1513,6 +1534,112 @@ function RecipeCompareModal({ left, right, onClose, onLoad }) {
         </div>
       </div>
     </div>
+  )
+}
+
+function ProcessBuildFilm({ sim, std }) {
+  const statRows = [
+    ['Final OD', mmIn(sim.jacket.final_od_mm, 2)],
+    ['Pair OD', mmIn(sim.pair_foil.shielded_pair_od_mm || sim.pair_wrap.wrapped_pair_od_mm, 3)],
+    ['NEXT', std.min_next_db > 0 ? `${sim.jacket.next_db_estimate.toFixed(1)} dB` : 'n/a'],
+    ['Braid K', `${sim.shield.coverage_pct.toFixed(1)}%`],
+  ]
+
+  return (
+    <section
+      data-testid="process-build-film"
+      className="bg-[#12171a] border border-[#252e33] rounded-md overflow-hidden"
+    >
+      <div className="grid xl:grid-cols-[1.08fr_0.92fr]">
+        <div className="relative bg-[#0a0d0f] border-b xl:border-b-0 xl:border-r border-[#252e33]">
+          <div className="aspect-video min-h-[300px]">
+            <video
+              data-testid="process-build-video"
+              className="w-full h-full object-cover"
+              src={PROCESS_BUILD_FILM.video}
+              poster={PROCESS_BUILD_FILM.poster}
+              controls
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="metadata"
+            />
+          </div>
+          <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em] flex items-center gap-1.5 text-[#5eead4]">
+            <Film size={12} /> Blender build sequence
+          </div>
+          <div className="absolute bottom-2 left-2 right-2 grid sm:grid-cols-4 gap-2">
+            {statRows.map(([label, value]) => (
+              <div key={label} className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+                <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+                <div className="font-mono text-[11px] text-[#fbbf24]">{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-4">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#c97b3f]">
+                Conductor to jacket
+              </div>
+              <p className="text-[12px] text-[#a7b0b6] leading-relaxed mt-1 max-w-xl">
+                The high-speed build follows the same order as the recipe: copper, insulation, pair twist, PTFE tape, foil, four color pairs, braid, then jacket.
+              </p>
+            </div>
+            <div className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border shrink-0 text-[#5eead4] border-[#2f7a6e]">
+              {sim.total_yield_pct.toFixed(1)}%
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-2">
+            {PROCESS_BUILD_STEPS.map((step, index) => (
+              <div
+                key={step.id}
+                data-testid={`process-build-step-${step.id}`}
+                className="bg-[#0a0d0f] border border-[#252e33] rounded p-2"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[10px] w-5 text-[#6b7479]">
+                    {String(index + 1).padStart(2, '0')}
+                  </span>
+                  <span
+                    className="w-3 h-3 rounded-sm border"
+                    style={{ background: step.color, borderColor: step.color === '#1a2226' ? C.borderHi : step.color }}
+                  />
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-[#f0ebe2] truncate">
+                    {step.label}
+                  </span>
+                </div>
+                <div className="font-mono text-[9px] text-[#6b7479] mt-1 pl-7">
+                  {step.detail}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 mt-3">
+            <AssetButton href={PROCESS_BUILD_FILM.glb} label="GLB" />
+            <AssetButton href={PROCESS_BUILD_FILM.video} label="MP4" />
+            <AssetButton href={PROCESS_BUILD_FILM.blend} label="BLEND" />
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function AssetButton({ href, label }) {
+  return (
+    <a
+      href={href}
+      className="inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-mono uppercase tracking-wider rounded border bg-transparent text-[#a7b0b6] hover:text-[#fbbf24]"
+      style={{ borderColor: C.borderHi }}
+    >
+      <Download size={11} /> {label}
+    </a>
   )
 }
 

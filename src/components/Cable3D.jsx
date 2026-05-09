@@ -47,14 +47,14 @@ const BUILDS = [
     accent: C.teal,
     stats: ['Even pair twist', 'Compact 4-pair bundle', 'Non-round braid/jacket'],
     stages: [
-      { label: 'Copper conductors', color: '#c97b3f' },
+      { label: 'Conductor', color: '#c97b3f' },
       { label: 'Insulation', color: '#7dd3fc' },
       { label: '2-wire twist', color: '#a78bfa' },
       { label: 'PTFE tape', color: '#f4e8b8' },
       { label: 'Foil shield', color: '#cbd5e1' },
-      { label: '4-pair color bundle', color: '#fbbf24' },
-      { label: 'Non-round outer braid', color: '#e89357' },
-      { label: 'Non-round jacket', color: '#1a2226' },
+      { label: '4-pair bundle', color: '#fbbf24' },
+      { label: 'Braid', color: '#e89357' },
+      { label: 'Jacket', color: '#1a2226' },
     ],
   },
 ]
