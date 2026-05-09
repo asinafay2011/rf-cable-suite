@@ -4809,6 +4809,194 @@ function NEXTBundleVis({ activePair, onSelect, couplings, lays }) {
   );
 }
 
+const NEXT_LAY_VISUALS = {
+  identical: {
+    id: 'identical',
+    label: 'Identical lay risk',
+    image: '/cable-renders/lay-next-identical.png',
+    tone: '#f87171',
+    note: 'All pairs repeat in phase, so coupled energy accumulates instead of averaging out.',
+  },
+  slight: {
+    id: 'slight',
+    label: 'Slight variation',
+    image: '/cable-renders/lay-next-slight.png',
+    tone: '#fbbf24',
+    note: 'Small lay offsets help, but close pitches still line up often enough to leave NEXT margin thin.',
+  },
+  varied: {
+    id: 'varied',
+    label: 'Staggered Cat 6A lay',
+    image: '/cable-renders/lay-next-varied.png',
+    tone: '#5eead4',
+    note: 'Different lay lengths decorrelate the pair fields, raising worst-pair NEXT and PSNEXT.',
+  },
+  tight: {
+    id: 'tight',
+    label: 'Tight bundle / crush',
+    image: '/cable-renders/lay-next-tight-bundle.png',
+    tone: '#f87171',
+    note: 'Bundle lay is too short or core is too compact, so pair spacing collapses and coupling rises.',
+  },
+};
+
+function nextVisualForMode(mode) {
+  if (mode === 'identical') return NEXT_LAY_VISUALS.identical;
+  if (mode === 'slight') return NEXT_LAY_VISUALS.slight;
+  return NEXT_LAY_VISUALS.varied;
+}
+
+function nextVisualForDesign(pairLays, bundleRatio, cov) {
+  const minDelta = Math.min(...pairLays.flatMap((a, i) => pairLays.slice(i + 1).map((b) => Math.abs(a - b))));
+  if (bundleRatio < 3.2) return NEXT_LAY_VISUALS.tight;
+  if (minDelta === 0) return NEXT_LAY_VISUALS.identical;
+  if (cov < 8 || minDelta <= 1) return NEXT_LAY_VISUALS.slight;
+  return NEXT_LAY_VISUALS.varied;
+}
+
+function psnextFromCouplings(couplings) {
+  const vals = couplings.filter((v) => typeof v === 'number');
+  if (!vals.length) return null;
+  return -10 * Math.log10(vals.reduce((a, b) => a + Math.pow(10, -b / 10), 0));
+}
+
+function LayNextBlenderPanel({ visual, lays, activePair = 0, couplings = [], contextLabel = 'NEXT lay visual' }) {
+  const numericCouplings = couplings.filter((v) => typeof v === 'number');
+  const worst = numericCouplings.length ? Math.min(...numericCouplings) : null;
+  const psn = psnextFromCouplings(couplings);
+  const deltas = lays.flatMap((a, i) => lays.slice(i + 1).map((b) => Math.abs(a - b)));
+  const minDelta = deltas.length ? Math.min(...deltas) : 0;
+
+  return (
+    <div className="grid lg:grid-cols-[1.08fr_0.92fr] gap-6 mb-6">
+      <div className="bg-[#12171a] border border-[#252e33] rounded overflow-hidden">
+        <div className="relative aspect-video min-h-[280px] bg-[#0a0d0f]">
+          <img
+            data-testid="lay-next-blender-preview"
+            src={visual.image}
+            alt={`${visual.label} Blender NEXT preview`}
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute top-2 left-2 font-mono text-[10px] uppercase tracking-[0.2em] bg-[#0a0d0f]/75 border border-[#252e33] px-2 py-1" style={{ color: visual.tone }}>
+            Blender lay / NEXT visual
+          </div>
+          <div className="absolute top-2 right-2 font-mono text-[10px] uppercase tracking-wider bg-[#0a0d0f]/75 border px-2 py-1" style={{ color: visual.tone, borderColor: visual.tone + '66' }}>
+            {visual.label}
+          </div>
+          <div className="absolute bottom-2 left-2 right-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+            {[
+              ['lay set', lays.join('/') + ' mm'],
+              ['min dL', `${minDelta} mm`],
+              ['worst NEXT', worst == null ? '—' : `${worst.toFixed(1)} dB`],
+              ['PSNEXT', psn == null ? '—' : `${psn.toFixed(1)} dB`],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-[#0a0d0f]/85 border border-[#252e33] rounded p-2">
+                <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+                <div className="font-mono text-[11px]" style={{ color: label === 'worst NEXT' && worst != null && worst < 38 ? '#fbbf24' : '#5eead4' }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="p-3 border-t border-[#252e33]">
+          <div className="grid sm:grid-cols-4 gap-2 mb-3">
+            {Object.values(NEXT_LAY_VISUALS).map((item) => {
+              const selected = item.id === visual.id;
+              return (
+                <div
+                  key={item.id}
+                  data-testid={`lay-next-visual-band-${item.id}`}
+                  className={`border rounded px-2 py-1.5 ${selected ? 'bg-[#10201f]' : 'bg-[#0a0d0f]'}`}
+                  style={{ borderColor: selected ? item.tone : C.border }}
+                >
+                  <div className="font-mono text-[10px] uppercase tracking-wider" style={{ color: selected ? item.tone : C.textDim }}>
+                    {item.label}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[11px] leading-relaxed" style={{ color: C.textDim }}>
+            {visual.note} <span className="font-mono" style={{ color: C.amber }}>{contextLabel}</span>.
+          </p>
+        </div>
+      </div>
+      <LayPhaseMap lays={lays} activePair={activePair} couplings={couplings} />
+    </div>
+  );
+}
+
+function LayPhaseMap({ lays, activePair = 0, couplings = [] }) {
+  const w = 420;
+  const h = 220;
+  const x0 = 68;
+  const x1 = w - 26;
+  const span = x1 - x0;
+  const maxLay = Math.max(...lays, 1);
+  const mmWindow = Math.max(56, maxLay * 4.4);
+  const colorForPair = ['#3b82f6', '#f97316', '#16a34a', '#a16207'];
+
+  return (
+    <div className="bg-[#12171a] border border-[#252e33] rounded p-3">
+      <div className="flex items-baseline justify-between gap-2 mb-2">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: '#a78bfa' }}>
+          Lay phase map
+        </div>
+        <div className="font-mono text-[10px]" style={{ color: C.textMuted }}>
+          same vertical ticks = in phase
+        </div>
+      </div>
+      <svg data-testid="lay-phase-map" viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: h }}>
+        <rect width={w} height={h} fill="#06090b" />
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+          const x = x0 + span * t;
+          return (
+            <g key={t}>
+              <line x1={x} y1="22" x2={x} y2={h - 18} stroke={C.border} strokeDasharray="2 4" />
+              <text x={x} y="15" textAnchor="middle" fontSize="8" fill={C.textMuted} fontFamily="JetBrains Mono">{(mmWindow * t).toFixed(0)}mm</text>
+            </g>
+          );
+        })}
+        {lays.map((lay, i) => {
+          const y = 44 + i * 38;
+          const tickCount = Math.floor(mmWindow / lay) + 1;
+          const isActive = i === activePair;
+          const coupling = couplings[i];
+          const color = isActive ? C.copperBright : colorForPair[i];
+          return (
+            <g key={i}>
+              <text x="10" y={y + 4} fontSize="9" fill={isActive ? C.copperBright : C.textDim} fontFamily="JetBrains Mono">P{i + 1}</text>
+              <line x1={x0} y1={y} x2={x1} y2={y} stroke={color} strokeOpacity="0.24" strokeWidth="8" strokeLinecap="round" />
+              {Array.from({ length: tickCount }).map((_, tick) => {
+                const x = x0 + (tick * lay / mmWindow) * span;
+                return (
+                  <line
+                    key={tick}
+                    x1={x}
+                    y1={y - 11}
+                    x2={x}
+                    y2={y + 11}
+                    stroke={color}
+                    strokeWidth={isActive ? 2 : 1.2}
+                    strokeOpacity={isActive ? 0.95 : 0.68}
+                  />
+                );
+              })}
+              <text x={x1} y={y + 4} textAnchor="end" fontSize="9" fill={typeof coupling === 'number' ? (coupling < 38 ? '#fbbf24' : '#5eead4') : C.textMuted} fontFamily="JetBrains Mono">
+                {typeof coupling === 'number' ? `${coupling.toFixed(0)}dB` : `${lay}mm`}
+              </text>
+            </g>
+          );
+        })}
+        <text x={x0} y={h - 6} fontSize="9" fill={C.textMuted} fontFamily="JetBrains Mono">window = {mmWindow.toFixed(0)} mm</text>
+        <text x={x1} y={h - 6} textAnchor="end" fontSize="9" fill={C.textMuted} fontFamily="JetBrains Mono">active P{activePair + 1}</text>
+      </svg>
+      <div className="mt-2 text-[11px] leading-relaxed" style={{ color: C.textDim }}>
+        Matching tick columns mean two pairs repeat their twist phase together. More stagger means fewer aligned columns, so pair-to-pair NEXT rises.
+      </div>
+    </div>
+  );
+}
+
 function NEXTViz() {
   const [activePair, setActivePair] = useState(0);
   const [layMode, setLayMode] = useState('varied');
@@ -4858,6 +5046,7 @@ function NEXTViz() {
 
   const at100 = sweep.find((p) => Math.abs(p.f - 100) < 8);
   const at500 = sweep.find((p) => Math.abs(p.f - 500) < 25);
+  const nextVisual = nextVisualForMode(layMode);
 
   return (
     <section className="mb-20">
@@ -4884,6 +5073,14 @@ function NEXTViz() {
           </button>
         ))}
       </div>
+
+      <LayNextBlenderPanel
+        visual={nextVisual}
+        lays={lays}
+        activePair={activePair}
+        couplings={couplingsAt100}
+        contextLabel={layTables[layMode].name}
+      />
 
       <div className="grid md:grid-cols-2 gap-6 mb-6">
         <div className="p-6 border border-[#252e33] bg-[#12171a]">
@@ -6569,6 +6766,13 @@ function LayDesigner() {
     if (warnings.length) return { color: '#fbbf24', label: 'CAUTION', errors, warnings };
     return { color: '#5eead4', label: 'PASS', errors, warnings };
   }, [checkSync, layDiversity, bundleRatio, crushMargin, skew]);
+  const layDesignerCouplingsAt100 = useMemo(() => (
+    pairLays.map((lay, i) => {
+      if (i === 0) return null;
+      return Math.min(58, 30 + Math.abs(lay - pairLays[0]) * 4);
+    })
+  ), [pairLays]);
+  const layDesignerVisual = nextVisualForDesign(pairLays, bundleRatio, layDiversity.cov);
 
   // ============= VISUAL CROSS SECTION =============
   const renderCrossSection = () => {
@@ -6700,6 +6904,14 @@ function LayDesigner() {
           )}
         </div>
       </div>
+
+      <LayNextBlenderPanel
+        visual={layDesignerVisual}
+        lays={pairLays}
+        activePair={0}
+        couplings={layDesignerCouplingsAt100}
+        contextLabel={`${presets[presetName]?.name || 'Custom lay set'} · bundle ${bundleLay} mm`}
+      />
 
       {/* Lay sliders */}
       <div className="p-6 border border-[#252e33] bg-[#12171a] mb-6">
