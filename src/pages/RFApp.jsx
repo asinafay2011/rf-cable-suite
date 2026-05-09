@@ -411,6 +411,7 @@ const CABLES = {
     z: 75, vp: 83, cap: 54, mass: 63, fMax: 3.0, vMax: 300,
     d: 1.02, D: 4.60, shield: 5.46, OD: 6.99, flex: "medium", outdoor: false, power: "low", complexity: "medium",
     render: "/cable-renders/rf-belden1694a-broadcast.png",
+    model: "/models/rf-belden1694a.glb",
     atten: [[135, 4.6], [540, 9.5], [1485, 16.4], [2970, 23.6]],
     cons: { conductor: "Solid bare Cu, 18 AWG", dielectric: "Gas-injected foam HDPE", shield: "Duobond II foil 100% + tinned Cu braid 95%", jacket: "Matte black PVC, 0.76mm" },
     proc: ["Annealed solid Cu", "Gas-foam HDPE with tight VP", "Duobond II foil 100%", "Tinned Cu braid 95%", "Matte PVC, sweep 3GHz"],
@@ -418,6 +419,8 @@ const CABLES = {
   belden9913: { name: "Belden 9913", cat: "lmr", alias: "9913F7, like LMR-400",
     z: 50, vp: 84, cap: 78, mass: 67, fMax: 4.0, vMax: 2700,
     d: 2.74, D: 7.24, shield: 8.13, OD: 10.29, flex: "medium", outdoor: true, power: "high", complexity: "medium",
+    render: "/cable-renders/rf-belden9913-airspace.png",
+    model: "/models/rf-belden9913.glb",
     atten: [[30, 2.5], [150, 5.6], [450, 9.8], [900, 14.1], [1800, 20.3], [2400, 23.6]],
     cons: { conductor: "Solid bare Cu, 10 AWG", dielectric: "Air-spaced PE / foam (F7)", shield: "Duofoil + tinned Cu braid", jacket: "Black UV-stable PE" },
     proc: ["10 AWG solid Cu", "Air-spaced or foam PE dielectric", "Duofoil 100% bonded", "Tinned Cu braid", "9913F7 truly flexible"],
@@ -523,6 +526,7 @@ const CABLES = {
     z: 50, vp: 91, cap: 70, mass: 400, fMax: 5.9, vMax: 4500,
     d: 9.40, D: 23.5, shield: 25.4, OD: 28.0, flex: "low", outdoor: true, power: "high", complexity: "high",
     render: "/cable-renders/ava5-50-cutaway.png",
+    model: "/models/rf-ava5-50.glb",
     description: "AVA5-50 is a 7/8 inch low-PIM air-dielectric coaxial feeder for LTE/5G, macro-cell, and high-power broadcast-style RF runs. The annular corrugated copper tube gives continuous shielding and stable impedance, while the low-loss PE spacer keeps velocity factor high without giving up rugged outdoor construction.",
     benefits: ["Low-PIM construction for shared TX/RX cellular sites", "91% velocity factor from air + low-loss PE spacer", "Annular corrugated copper tube with continuous shield coverage", "Dry-gas pressurization path for moisture control", "High-power 7/8 inch feeder class", "Low-halogen black PE jacket for outdoor infrastructure"],
     atten: [[100, 0.79], [450, 1.73], [900, 2.55], [2000, 3.97], [2400, 4.40], [5000, 6.80]],
@@ -581,6 +585,7 @@ const CABLES = {
     z: 75, vp: 82, cap: 54, mass: 28, fMax: 3.0, vMax: 300,
     d: 0.47, D: 2.32, shield: 2.80, OD: 3.70, flex: "high", outdoor: false, power: "low", complexity: "medium",
     render: "/cable-renders/rf-belden1855a-mini-sdi.png",
+    model: "/models/rf-belden1855a.glb",
     atten: [[100, 8.2], [400, 15.5], [1000, 24.9], [3000, 44.0]],
     cons: { conductor: "Solid bare Cu, 0.47mm (25 AWG)", dielectric: "Gas-injected foam HDPE", shield: "Duobond foil 100% + tinned Cu braid 95%", jacket: "Matte black PVC, 0.5mm" },
     proc: ["Fine Cu wire ±0.01mm", "Gas-foam HDPE with skin co-extrusion", "Duobond foil + 95% braid", "Thin matte PVC jacket", "Sweep test to 3 GHz HD-SDI"],
@@ -589,6 +594,7 @@ const CABLES = {
     z: 75, vp: 85, cap: 53, mass: 74, fMax: 12.0, vMax: 500,
     d: 1.02, D: 4.80, shield: 5.60, OD: 7.70, flex: "medium", outdoor: false, power: "low", complexity: "high",
     render: "/cable-renders/rf-belden4694r-12g.png",
+    model: "/models/rf-belden4694r.glb",
     atten: [[100, 4.4], [400, 8.6], [1000, 13.9], [3000, 24.8], [6000, 36.8], [12000, 55.0]],
     cons: { conductor: "Solid bare Cu, 1.02mm (18 AWG)", dielectric: "Gas-injected foam HDPE", shield: "Duobond foil + tinned Cu braid, 95%", jacket: "Matte black PVC, non-contaminating" },
     proc: ["18 AWG Cu precision draw", "Gas-foam HDPE for VP 85%", "Dual-shield for 12 GHz performance", "PVC jacket non-contaminating", "Full 12 GHz qualification (4K 12G-SDI)"],
@@ -678,6 +684,7 @@ const CABLES = {
     z: 75, vp: 83, cap: 53, mass: 75, fMax: 6.0, vMax: 500,
     d: 1.02, D: 4.80, shield: 5.60, OD: 6.15, flex: "medium", outdoor: false, power: "low", complexity: "high",
     render: "/cable-renders/rf-belden1505a-sdi.png",
+    model: "/models/rf-belden1505a.glb",
     atten: [[100, 5.5], [400, 10.2], [1000, 17.5], [3000, 31.0], [6000, 46.0]],
     cons: { conductor: "Solid bare Cu, 1.02mm (18 AWG)", dielectric: "Gas-injected foam HDPE", shield: "Duobond foil + tinned Cu braid, 95%", jacket: "Matte black PVC, non-contaminating" },
     proc: ["18 AWG Cu precision draw", "Gas-foam HDPE skin-foam co-extrude", "Duobond foil + 95% braid", "PVC non-contaminating", "Sweep to 6 GHz (6G-SDI)"],
@@ -686,6 +693,7 @@ const CABLES = {
     z: 50, vp: 84, cap: 81, mass: 140, fMax: 2.0, vMax: 3500,
     d: 2.84, D: 7.24, shield: 8.13, OD: 10.29, flex: "high", outdoor: true, power: "high", complexity: "medium",
     render: "/cable-renders/rf-belden9913f-flex.png",
+    model: "/models/rf-belden9913f.glb",
     atten: [[100, 3.3], [450, 7.5], [900, 9.6], [1000, 10.1], [2000, 14.7]],
     cons: { conductor: "7-strand bare Cu, 1.02mm", dielectric: "Semi-solid foam PE", shield: "Al foil + tinned Cu braid", jacket: "Black UV PE" },
     proc: ["Stranded Cu for flexibility", "Semi-foam PE", "Al foil 100% + tinned Cu braid", "UV PE jacket", "Flexible variant of 9913 for jumper use"],
@@ -694,6 +702,7 @@ const CABLES = {
     z: 75, vp: 83, cap: 53, mass: 75, fMax: 3.0, vMax: 450,
     d: 1.02, D: 4.80, shield: 5.60, OD: 7.70, flex: "medium", outdoor: false, power: "low", complexity: "high",
     render: "/cable-renders/rf-canare-l5cfb-studio.png",
+    model: "/models/rf-canare-l5cfb.glb",
     atten: [[100, 5.0], [400, 9.5], [1000, 15.5], [3000, 28.0]],
     cons: { conductor: "Solid bare Cu, 1.02mm", dielectric: "Foam PE", shield: "Al foil + tinned Cu braid, 95%", jacket: "Black PVC" },
     proc: ["Cu precision draw", "Foam PE extrusion", "Foil + braid for HD-SDI", "PVC jacket", "Japanese studio broadcast standard"],
@@ -726,6 +735,7 @@ const CABLES = {
     z: 50, vp: 92, cap: 70, mass: 950, fMax: 2.9, vMax: 10000,
     d: 17.5, D: 44.0, shield: 47.5, OD: 52.0, flex: "low", outdoor: true, power: "high", complexity: "high",
     render: "/cable-renders/rf-ava7-low-pim.png",
+    model: "/models/rf-ava7-50.glb",
     atten: [[100, 0.52], [450, 1.15], [900, 1.66], [2000, 2.58], [2900, 3.14]],
     cons: { conductor: "Large solid Cu + PE spacer", dielectric: "Air + low-loss PE spacer", shield: "Annular corrugated Cu tube", jacket: "Low-halogen PE, black" },
     proc: ["Low-PIM assembly", "Annular Cu tube + centered spacer", "Dry-gas pressurized", "Halogen-free PE jacket", "PIM < -160 dBc at 2 x 43 dBm"],
@@ -831,6 +841,7 @@ const CABLES = {
     z: 75, vp: 83, cap: 54, mass: 30, fMax: 3.0, vMax: 300,
     d: 0.65, D: 2.80, shield: 3.30, OD: 4.50, flex: "high", outdoor: false, power: "low", complexity: "medium",
     render: "/cable-renders/rf-canare-l4cfb-studio.png",
+    model: "/models/rf-canare-l4cfb.glb",
     atten: [[100, 7.5], [400, 14.2], [1000, 22.0], [3000, 38.0]],
     cons: { conductor: "Solid bare Cu, 0.65mm", dielectric: "Gas-injected foam HDPE", shield: "Al foil + tinned Cu braid, 95%", jacket: "Matte black PVC" },
     proc: ["Fine Cu draw", "Gas-foam HDPE", "Foil + braid dual-shield", "Thin matte PVC", "Japanese studio thin jumper standard"],
@@ -2206,7 +2217,7 @@ export default function RFCableSuite() {
         )}
 
         <main style={S.main}>
-          {tab === "home" && <HomeView setTab={setTab} comparedCables={comparedCables} />}
+          {tab === "home" && <HomeView setTab={setTab} setActiveCable={setActiveCable} comparedCables={comparedCables} />}
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
           {tab === "library" && (
             <>
@@ -2800,7 +2811,7 @@ Use the database tools where helpful. Keep under 200 words.`;
 // HOME — main landing view for the RF workbench. Replaces the AskView
 // since chat is always available via the bottom-left FloatingAgent.
 // ═══════════════════════════════════════════════════════════════
-function HomeView({ setTab, comparedCables }) {
+function HomeView({ setTab, setActiveCable, comparedCables }) {
   const cableCount = Object.keys(CABLES).length;
   const connectorCount = Object.keys(CONNECTORS).length;
 
@@ -2949,7 +2960,7 @@ function HomeView({ setTab, comparedCables }) {
               return (
                 <button
                   key={id}
-                  onClick={() => { setTab('library'); }}
+                  onClick={() => { setActiveCable?.(id); setTab('library'); }}
                   className="rf-card"
                   style={{
                     background: '#0d1416',
@@ -2961,9 +2972,14 @@ function HomeView({ setTab, comparedCables }) {
                     color: '#f0ebe2',
                   }}
                 >
-                  <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>{c.makers || 'cable'}</div>
-                  <div style={{ fontFamily: 'Fraunces, serif', fontSize: 16, fontWeight: 500, color: '#fbbf24' }}>{c.name}</div>
-                  <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <CablePreviewThumb c={c} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>{c.makers || 'cable'}</div>
+                      <div style={{ fontFamily: 'Fraunces, serif', fontSize: 16, fontWeight: 500, color: '#fbbf24' }}>{c.name}</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
                     <Stat label="Z" value={`${c.z} Ω`} accent="#5eead4" />
                     <Stat label="VF" value={c.vp != null ? `${c.vp}%` : '—'} accent="#c97b3f" />
                     <Stat label="OD" value={c.OD != null ? `${c.OD.toFixed(1)} mm` : '—'} accent="#a7b0b6" />
@@ -5686,7 +5702,9 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
   const [filterCat, setFilterCat] = useState("all");
   const [filterFreq, setFilterFreq] = useState(0);
   const [sortBy, setSortBy] = useState("name");
+  const [visualOnly, setVisualOnly] = useState(false);
   const [detailId, setDetailId] = useState(activeCable || null);
+  const [renderModalId, setRenderModalId] = useState(null);
   const savedScrollY = useRef(0);
 
   // Auto-open detail when activeCable changes from outside the library
@@ -5715,6 +5733,7 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
       if (filterZ !== "all" && c.z !== Number(filterZ)) return false;
       if (filterCat !== "all" && c.cat !== filterCat) return false;
       if (c.fMax < filterFreq) return false;
+      if (visualOnly && !c.render) return false;
       if (search) { const q = search.toLowerCase(); if (!(c.name + " " + c.alias + " " + c.apps).toLowerCase().includes(q)) return false; }
       return true;
     });
@@ -5727,41 +5746,59 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
       return 0;
     });
     return list;
-  }, [search, filterZ, filterCat, filterFreq, sortBy]);
+  }, [search, filterZ, filterCat, filterFreq, sortBy, visualOnly]);
 
   const total = Object.keys(CABLES).length;
   const categoryCount = Object.values(CABLES).filter(c => filterCat === "all" || c.cat === filterCat).length;
   const highFreqCount = Object.values(CABLES).filter(c => c.fMax >= 6).length;
   const lowPimCount = Object.values(CABLES).filter(c => /PIM|cellular|LTE|5G/i.test(`${c.name} ${c.alias} ${c.apps}`)).length;
+  const renderedCableCount = Object.values(CABLES).filter(c => Boolean(c.render)).length;
+  const renderedFilteredCount = filtered.filter(([, c]) => Boolean(c.render)).length;
+  const renderCoveragePct = total ? Math.round((renderedCableCount / total) * 100) : 0;
+  const renderedFamilyCount = new Set(Object.values(CABLES).filter(c => c.render).map(c => c.cat)).size;
+  const coverageShowcaseIds = ["lmr400", "ava5", "ut141", "sucoflex550s", "belden4694r", "hca158"].filter(id => CABLES[id]?.render);
   const activeFilterText = [
     filterZ !== "all" ? `${filterZ} ohm` : null,
     filterCat !== "all" ? CATEGORIES[filterCat]?.label : null,
     filterFreq > 0 ? `${filterFreq} GHz+` : null,
+    visualOnly ? "3D render" : null,
   ].filter(Boolean).join(" / ") || "All families";
 
-  const hasActiveFilter = search || filterZ !== "all" || filterCat !== "all" || filterFreq > 0;
-  const clearFilters = () => { setSearch(""); setFilterZ("all"); setFilterCat("all"); setFilterFreq(0); };
+  const hasActiveFilter = search || filterZ !== "all" || filterCat !== "all" || filterFreq > 0 || visualOnly;
+  const clearFilters = () => { setSearch(""); setFilterZ("all"); setFilterCat("all"); setFilterFreq(0); setVisualOnly(false); };
+  const renderModal = renderModalId && CABLES[renderModalId]?.model ? (
+    <CableRenderModal
+      id={renderModalId}
+      cable={CABLES[renderModalId]}
+      onClose={() => setRenderModalId(null)}
+    />
+  ) : null;
 
   // ── Detail view: take over the page when a cable is selected ──
   if (detailId && CABLES[detailId]) {
     return (
-      <CableDetailView
-        id={detailId}
-        cable={CABLES[detailId]}
-        onBack={closeDetail}
-        onDesign={() => loadIntoDesign(detailId)}
-        onAsk={() => askAboutCable(detailId)}
-        compared={comparedCables?.includes(detailId)}
-        toggleCompare={toggleCompare}
-        onPrint={onPrint ? () => onPrint(detailId) : undefined}
-      />
+      <>
+        <CableDetailView
+          id={detailId}
+          cable={CABLES[detailId]}
+          onBack={closeDetail}
+          onDesign={() => loadIntoDesign(detailId)}
+          onAsk={() => askAboutCable(detailId)}
+          compared={comparedCables?.includes(detailId)}
+          toggleCompare={toggleCompare}
+          onPrint={onPrint ? () => onPrint(detailId) : undefined}
+          onViewRender={CABLES[detailId].model ? () => setRenderModalId(detailId) : undefined}
+        />
+        {renderModal}
+      </>
     );
   }
 
   return (
-    <div style={S.viewInner}>
-      {/* Compact header */}
-      <div style={S.libHeader}>
+    <>
+      <div style={S.viewInner}>
+        {/* Compact header */}
+        <div style={S.libHeader}>
         <div style={S.libHeaderMain}>
           <div style={S.libEyebrow}>◆ RF Reference Database</div>
           <div style={S.libTitleRow}>
@@ -5786,11 +5823,15 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
             <span style={S.libQuickStatValue}>{lowPimCount}</span>
             <span style={S.libQuickStatLabel}>Low-PIM</span>
           </div>
+          <div style={S.libQuickStat}>
+            <span style={S.libQuickStatValue}>{renderCoveragePct}%</span>
+            <span style={S.libQuickStatLabel}>3D coverage</span>
+          </div>
         </div>
-      </div>
+        </div>
 
-      {/* Toolbar: single row with search + filters */}
-      <div style={S.libToolbar}>
+        {/* Toolbar: single row with search + filters */}
+        <div style={S.libToolbar}>
         <div style={S.libToolbarSearchWrap}>
           <span style={S.libToolbarSearchIcon}>⌕</span>
           <input
@@ -5847,15 +5888,23 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
             <span style={S.libToolbarRangeValue}>{filterFreq}&nbsp;GHz</span>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setVisualOnly(v => !v)}
+          data-testid="rf-library-visual-filter"
+          style={{ ...S.libToolbarToggle, ...(visualOnly ? S.libToolbarToggleActive : {}) }}
+        >
+          3D only
+        </button>
         {hasActiveFilter && (
           <button onClick={clearFilters} style={S.libToolbarReset} title="Clear all filters">
             Reset
           </button>
         )}
-      </div>
+        </div>
 
-      {/* Category strip */}
-      <div style={S.libCatStrip}>
+        {/* Category strip */}
+        <div style={S.libCatStrip}>
         <span style={S.libCatStripLabel}>Family</span>
         <div style={S.libCatStripPills}>
           <button
@@ -5883,28 +5932,45 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
             );
           })}
         </div>
-      </div>
+        </div>
 
-      {/* Cable list */}
-      <div style={S.cableList}>
-        {filtered.map(([id, c]) => (
-          <CableCard
-            key={id}
-            id={id}
-            cable={c}
-            onOpen={() => openDetail(id)}
-            compared={comparedCables?.includes(id)}
-            isMobile={isMobile}
-          />
-        ))}
-        {filtered.length === 0 && (
-          <div style={S.emptyState}>
-            No cables match filters.{' '}
-            {hasActiveFilter && <button onClick={clearFilters} style={S.emptyStateBtn}>Clear filters</button>}
-          </div>
-        )}
+        <LibraryRenderCoveragePanel
+          total={total}
+          rendered={renderedCableCount}
+          coveragePct={renderCoveragePct}
+          familyCount={renderedFamilyCount}
+          filteredRendered={renderedFilteredCount}
+          filteredTotal={filtered.length}
+          filterLabel={activeFilterText}
+          categoryCount={categoryCount}
+          showcaseIds={coverageShowcaseIds}
+          onOpen={openDetail}
+          onShowRendered={() => setVisualOnly(true)}
+        />
+
+        {/* Cable list */}
+        <div style={S.cableList}>
+          {filtered.map(([id, c]) => (
+            <CableCard
+              key={id}
+              id={id}
+              cable={c}
+              onOpen={() => openDetail(id)}
+              onViewRender={c.model ? () => setRenderModalId(id) : undefined}
+              compared={comparedCables?.includes(id)}
+              isMobile={isMobile}
+            />
+          ))}
+          {filtered.length === 0 && (
+            <div style={S.emptyState}>
+              No cables match filters.{' '}
+              {hasActiveFilter && <button onClick={clearFilters} style={S.emptyStateBtn}>Clear filters</button>}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+      {renderModal}
+    </>
   );
 }
 
@@ -5917,8 +5983,269 @@ function LibraryStat({ value, label }) {
   );
 }
 
+function LibraryRenderCoveragePanel({ total, rendered, coveragePct, familyCount, filteredRendered, filteredTotal, filterLabel, categoryCount, showcaseIds, onOpen, onShowRendered }) {
+  const showcase = showcaseIds.map(id => [id, CABLES[id]]).filter(([, c]) => c?.render);
+
+  return (
+    <section style={S.renderCoveragePanel} data-testid="rf-library-render-coverage">
+      <div style={S.renderCoverageSummary}>
+        <div style={S.renderCoverageEyebrow}>◆ Blender visual coverage</div>
+        <div style={S.renderCoverageHeadline}>
+          <span style={S.renderCoverageBig}>{rendered}</span>
+          <span style={S.renderCoverageSlash}>/</span>
+          <span style={S.renderCoverageTotal}>{total}</span>
+          <span style={S.renderCoverageUnit}>profiles</span>
+        </div>
+        <div style={S.renderCoverageCopy}>
+          {coveragePct}% of RF cable entries have dedicated 3D cutaway renders across {familyCount} families.
+        </div>
+      </div>
+
+      <div style={S.renderCoverageMetrics}>
+        <div style={S.renderCoverageMetric}>
+          <span style={S.renderCoverageMetricLabel}>Current view</span>
+          <span style={S.renderCoverageMetricValue}>{filteredRendered}/{filteredTotal}</span>
+          <span style={S.renderCoverageMetricSub}>{filterLabel}</span>
+        </div>
+        <div style={S.renderCoverageMiniStat}>
+          <span>{categoryCount}</span>
+          <small style={S.renderCoverageMiniStatLabel}>in scope</small>
+        </div>
+        <button type="button" onClick={onShowRendered} style={S.renderCoverageButton}>
+          Show 3D set
+        </button>
+      </div>
+
+      <div style={S.renderCoverageReel}>
+        {showcase.map(([id, c]) => (
+          <button key={id} type="button" onClick={() => onOpen(id)} style={S.renderCoverageTile} title={c.name}>
+            <img src={c.render} alt={`${c.name} 3D cutaway`} loading="lazy" decoding="async" style={S.renderCoverageTileImg} />
+            <span style={S.renderCoverageTileName}>{c.name}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CableRenderModal({ id, cable: c, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div style={S.renderModalOverlay} onClick={onClose}>
+      <div style={S.renderModalCard} onClick={(e) => e.stopPropagation()} data-testid="rf-glb-render-modal">
+        <div style={S.renderModalHeader}>
+          <div>
+            <div style={S.renderModalEyebrow}>◆ GLB / Three.js render</div>
+            <div style={S.renderModalTitle}>{c.name}</div>
+          </div>
+          <button type="button" onClick={onClose} style={S.renderModalClose} title="Close">
+            <XIcon size={18} />
+          </button>
+        </div>
+        <CableGlbViewer cable={c} />
+        <div style={S.renderModalStats}>
+          <RfFailureMetric label="Model" value={id} sub="runtime GLB" accent="#5eead4" />
+          <RfFailureMetric label="OD" value={`${fmt(c.OD, 1)} mm`} sub={`${fmt(c.OD / MM_PER_IN, 2)} in`} accent="#fbbf24" />
+          <RfFailureMetric label="VP" value={`${c.vp}%`} sub={`${c.z} Ω`} accent="#38bdf8" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CableGlbViewer({ cable: c }) {
+  const mountRef = useRef(null);
+  const [status, setStatus] = useState("Loading GLB");
+
+  useEffect(() => {
+    let alive = true;
+    let frameId = 0;
+    let renderer = null;
+    let scene = null;
+    let camera = null;
+    let modelGroup = null;
+    let resizeObserver = null;
+    const disposables = [];
+    const pointer = { down: false, x: 0, y: 0 };
+
+    const disposeMaterial = (material) => {
+      if (!material) return;
+      for (const value of Object.values(material)) {
+        if (value && typeof value === "object" && value.isTexture) value.dispose();
+      }
+      if (material.dispose) material.dispose();
+    };
+
+    const disposeObject = (object) => {
+      object?.traverse?.((node) => {
+        if (node.geometry) node.geometry.dispose();
+        if (Array.isArray(node.material)) node.material.forEach(disposeMaterial);
+        else disposeMaterial(node.material);
+      });
+    };
+
+    const run = async () => {
+      try {
+        const [THREE, { GLTFLoader }] = await Promise.all([
+          import("three"),
+          import("three/examples/jsm/loaders/GLTFLoader.js"),
+        ]);
+        if (!alive || !mountRef.current) return;
+
+        const mount = mountRef.current;
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.domElement.dataset.testid = "rf-glb-viewer-canvas";
+        renderer.domElement.style.width = "100%";
+        renderer.domElement.style.height = "100%";
+        renderer.domElement.style.display = "block";
+        mount.appendChild(renderer.domElement);
+
+        scene = new THREE.Scene();
+        modelGroup = new THREE.Group();
+        modelGroup.rotation.set(-0.12, 0.22, 0.02);
+        scene.add(modelGroup);
+
+        camera = new THREE.PerspectiveCamera(36, 1, 0.01, 100);
+        camera.position.set(0, 0.15, 5.2);
+        scene.add(camera);
+
+        const ambient = new THREE.HemisphereLight(0xf5efe4, 0x15191c, 1.7);
+        const key = new THREE.DirectionalLight(0xffffff, 3.0);
+        key.position.set(-2.8, 4.2, 5.0);
+        const rim = new THREE.DirectionalLight(0xf59e0b, 1.4);
+        rim.position.set(4.0, -1.6, 2.4);
+        scene.add(ambient, key, rim);
+        disposables.push(ambient, key, rim);
+
+        const resize = () => {
+          if (!mount || !renderer || !camera) return;
+          const rect = mount.getBoundingClientRect();
+          const width = Math.max(320, Math.floor(rect.width || 720));
+          const height = Math.max(260, Math.floor(rect.height || 420));
+          renderer.setSize(width, height, false);
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+        };
+        resizeObserver = new ResizeObserver(resize);
+        resizeObserver.observe(mount);
+        resize();
+
+        const onPointerDown = (e) => {
+          pointer.down = true;
+          pointer.x = e.clientX;
+          pointer.y = e.clientY;
+          renderer.domElement.setPointerCapture?.(e.pointerId);
+        };
+        const onPointerMove = (e) => {
+          if (!pointer.down || !modelGroup) return;
+          const dx = e.clientX - pointer.x;
+          const dy = e.clientY - pointer.y;
+          pointer.x = e.clientX;
+          pointer.y = e.clientY;
+          modelGroup.rotation.y += dx * 0.008;
+          modelGroup.rotation.x = Math.max(-0.72, Math.min(0.42, modelGroup.rotation.x + dy * 0.005));
+        };
+        const onPointerUp = () => { pointer.down = false; };
+        renderer.domElement.addEventListener("pointerdown", onPointerDown);
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+        disposables.push({
+          dispose: () => {
+            renderer?.domElement?.removeEventListener("pointerdown", onPointerDown);
+            window.removeEventListener("pointermove", onPointerMove);
+            window.removeEventListener("pointerup", onPointerUp);
+          },
+        });
+
+        const loader = new GLTFLoader();
+        loader.load(
+          c.model,
+          (gltf) => {
+            if (!alive) return;
+            const root = gltf.scene;
+            root.traverse((node) => {
+              if (node.isMesh) {
+                node.castShadow = true;
+                node.receiveShadow = true;
+                if (node.material) {
+                  const materials = Array.isArray(node.material) ? node.material : [node.material];
+                  materials.forEach((mat) => {
+                    const isFoil = /foil|duobond/i.test(mat.name || "");
+                    if (isFoil) {
+                      mat.side = THREE.DoubleSide;
+                      mat.transparent = false;
+                      mat.opacity = 1;
+                      mat.depthWrite = true;
+                      mat.roughness = Math.max(mat.roughness ?? 0.34, 0.32);
+                      mat.metalness = Math.min(mat.metalness ?? 0.38, 0.42);
+                    } else if (mat.transparent || mat.opacity < 1) {
+                      mat.side = THREE.DoubleSide;
+                      mat.depthWrite = false;
+                    }
+                    mat.needsUpdate = true;
+                  });
+                }
+              }
+            });
+            const box = new THREE.Box3().setFromObject(root);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            root.position.sub(center);
+            const rect = mount.getBoundingClientRect();
+            const targetSize = rect.width < 560 ? 2.45 : 4.55;
+            const scale = targetSize / Math.max(size.x, size.y, size.z, 0.001);
+            root.scale.setScalar(scale);
+            modelGroup.add(root);
+            setStatus("");
+          },
+          undefined,
+          () => alive && setStatus("GLB failed to load")
+        );
+
+        const animate = () => {
+          if (!alive || !renderer || !scene || !camera) return;
+          if (modelGroup && !pointer.down) modelGroup.rotation.y += 0.0018;
+          renderer.render(scene, camera);
+          frameId = requestAnimationFrame(animate);
+        };
+        animate();
+      } catch {
+        if (alive) setStatus("WebGL unavailable");
+      }
+    };
+
+    run();
+
+    return () => {
+      alive = false;
+      cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect?.();
+      disposables.forEach((item) => item.dispose?.());
+      if (modelGroup) disposeObject(modelGroup);
+      if (renderer) {
+        renderer.dispose();
+        renderer.domElement?.remove?.();
+      }
+    };
+  }, [c.model]);
+
+  return (
+    <div style={S.glbViewerStage} data-testid="rf-glb-viewer-stage">
+      <div ref={mountRef} style={S.glbCanvasMount} />
+      {status && <div style={S.glbViewerStatus}>{status}</div>}
+    </div>
+  );
+}
+
 // Slim list-item card: just the head row, taps open the detail page.
-function CableCard({ id, cable: c, onOpen, compared, isMobile = false }) {
+function CableCard({ id, cable: c, onOpen, onViewRender, compared, isMobile = false }) {
   const { units } = useContext(SettingsContext);
   const cat = CATEGORIES[c.cat];
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity];
@@ -5927,9 +6254,16 @@ function CableCard({ id, cable: c, onOpen, compared, isMobile = false }) {
   const lossLabel = Number.isFinite(loss900) ? `${fmt(loss900, 2)} dB/100m` : "n/a";
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
       className="hover-card"
       style={{
         ...S.cableCard,
@@ -5946,6 +6280,17 @@ function CableCard({ id, cable: c, onOpen, compared, isMobile = false }) {
               <span style={{ ...S.catBadge, color: cat.color, borderColor: cat.color }}>{cat.label}</span>
               <span style={{ ...S.cxBadge, background: `${cxColor}22`, color: cxColor, borderColor: cxColor }}>{cxLabel}</span>
               {compared && <span style={S.compareDot} title="In compare list">●</span>}
+              {onViewRender && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onViewRender(); }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  style={S.cableRenderBtn}
+                >
+                  <Sparkles size={12} />
+                  <span>View Render</span>
+                </button>
+              )}
             </div>
             {(c.alias || c.apps) && (
               <div style={S.cableMeta}>
@@ -5967,9 +6312,11 @@ function CableCard({ id, cable: c, onOpen, compared, isMobile = false }) {
             </div>
           </div>
         </div>
-        <span style={S.cableCardOpenIcon}>›</span>
+        <div style={S.cableCardActions}>
+          <span style={S.cableCardOpenIcon}>›</span>
+        </div>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -5986,6 +6333,7 @@ function CablePreviewThumb({ c, isMobile = false }) {
           decoding="async"
           style={S.cableThumbImage}
         />
+        <span style={S.cableThumbFlag}>3D</span>
       </span>
     );
   }
@@ -6003,7 +6351,7 @@ function CablePreviewThumb({ c, isMobile = false }) {
 // Tabs: Overview · Construction · Performance · Engineering. Each tab
 // owns one focused job — no more atten/material lists duplicated across
 // the poster and the Full Cable Data accordion.
-function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, toggleCompare, onPrint }) {
+function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, toggleCompare, onPrint, onViewRender }) {
   const { units } = useContext(SettingsContext);
   const cat = CATEGORIES[c.cat] || { label: c.cat, color: "#d97706" };
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity] || "#fbbf24";
@@ -6062,6 +6410,11 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
           <span style={{ ...S.cxBadge, background: `${cxColor}22`, color: cxColor, borderColor: cxColor, fontSize: 9 }}>{cxLabel}</span>
         </div>
         <div style={S.cableDetailActions}>
+          {onViewRender && (
+            <button onClick={onViewRender} style={{ ...S.actionBtn, ...S.actionBtn3d }}>
+              <Sparkles size={12} /> View Render
+            </button>
+          )}
           <button onClick={onDesign} style={S.actionBtn}>→ Load into Designer</button>
           <button onClick={onAsk} style={{ ...S.actionBtn, ...S.actionBtnSecondary }}>Ask Agent about this</button>
           {toggleCompare && (
@@ -6103,7 +6456,7 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
             <>
               <img src={c.render} alt={`${c.name} cutaway render`} style={S.cdHeroImage} />
               <div style={S.cdHeroVisualMeta}>
-                <span>Layer render</span>
+                <span>Blender cutaway</span>
                 <span>{fmtLen(bendMm, units, 0)} bend guide</span>
               </div>
             </>
@@ -9702,6 +10055,24 @@ const S = {
     cursor: "pointer",
     marginLeft: "auto",
   },
+  libToolbarToggle: {
+    padding: "6px 11px",
+    background: "#0a0705",
+    border: "1px solid rgba(94,234,212,0.28)",
+    borderRadius: 3,
+    color: "#a8a29e",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+    transition: "all 0.12s",
+  },
+  libToolbarToggleActive: {
+    background: "rgba(94,234,212,0.12)",
+    color: "#5eead4",
+    borderColor: "rgba(94,234,212,0.58)",
+  },
 
   // ── Category strip ──
   libCatStrip: {
@@ -9736,6 +10107,252 @@ const S = {
   },
   libCatPillActive: {
     background: "rgba(217,119,6,0.12)",
+  },
+
+  renderCoveragePanel: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 12,
+    alignItems: "stretch",
+    marginBottom: 14,
+    padding: 12,
+    background: "linear-gradient(135deg, rgba(6,12,13,0.72), rgba(16,11,6,0.68))",
+    border: "1px solid rgba(94,234,212,0.18)",
+    borderRadius: 5,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.22)",
+  },
+  renderCoverageSummary: {
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    padding: "2px 4px",
+  },
+  renderCoverageEyebrow: {
+    color: "#5eead4",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    letterSpacing: "0.22em",
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  renderCoverageHeadline: {
+    display: "flex",
+    alignItems: "baseline",
+    gap: 5,
+    fontFamily: "'JetBrains Mono', monospace",
+    marginBottom: 4,
+  },
+  renderCoverageBig: { color: "#fef3c7", fontSize: 25, fontWeight: 800, lineHeight: 1 },
+  renderCoverageSlash: { color: "#48615f", fontSize: 16 },
+  renderCoverageTotal: { color: "#a8a29e", fontSize: 16, fontWeight: 700 },
+  renderCoverageUnit: {
+    color: "#78716c",
+    fontSize: 9,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    marginLeft: 4,
+  },
+  renderCoverageCopy: { color: "#a8a29e", fontSize: 11.5, lineHeight: 1.45, maxWidth: 410 },
+  renderCoverageMetrics: {
+    display: "grid",
+    gridTemplateRows: "1fr auto auto",
+    gap: 8,
+    minWidth: 0,
+  },
+  renderCoverageMetric: {
+    minHeight: 76,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    padding: "10px 12px",
+    background: "rgba(3,7,8,0.58)",
+    border: "1px solid rgba(168,162,158,0.12)",
+    borderRadius: 4,
+  },
+  renderCoverageMetricLabel: {
+    color: "#78716c",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 8.5,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    marginBottom: 5,
+  },
+  renderCoverageMetricValue: {
+    color: "#5eead4",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 18,
+    fontWeight: 800,
+    lineHeight: 1.1,
+  },
+  renderCoverageMetricSub: {
+    color: "#a8a29e",
+    fontSize: 10,
+    lineHeight: 1.35,
+    marginTop: 4,
+  },
+  renderCoverageMiniStat: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 8,
+    padding: "6px 9px",
+    background: "rgba(0,0,0,0.22)",
+    border: "1px solid rgba(168,162,158,0.1)",
+    borderRadius: 3,
+    color: "#fbbf24",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 12,
+    fontWeight: 800,
+  },
+  renderCoverageMiniStatLabel: {
+    color: "#78716c",
+    fontSize: 8,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    fontWeight: 700,
+  },
+  renderCoverageButton: {
+    width: "100%",
+    padding: "7px 10px",
+    background: "rgba(94,234,212,0.08)",
+    border: "1px solid rgba(94,234,212,0.42)",
+    borderRadius: 3,
+    color: "#5eead4",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+  },
+  renderCoverageReel: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(86px, 1fr))",
+    gap: 8,
+    minWidth: 0,
+  },
+  renderCoverageTile: {
+    position: "relative",
+    minHeight: 82,
+    overflow: "hidden",
+    border: "1px solid rgba(168,162,158,0.14)",
+    borderRadius: 4,
+    background: "rgba(0,0,0,0.35)",
+    padding: 0,
+    cursor: "pointer",
+  },
+  renderCoverageTileImg: {
+    width: "100%",
+    height: "100%",
+    minHeight: 82,
+    objectFit: "cover",
+    display: "block",
+    filter: "contrast(1.06) saturate(1.04)",
+  },
+  renderCoverageTileName: {
+    position: "absolute",
+    left: 6,
+    right: 6,
+    bottom: 5,
+    color: "#fef3c7",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 8.5,
+    lineHeight: 1.2,
+    textShadow: "0 1px 7px #000",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+
+  renderModalOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 1200,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+    background: "rgba(0,0,0,0.78)",
+    backdropFilter: "blur(8px)",
+  },
+  renderModalCard: {
+    width: "min(1040px, 96vw)",
+    maxHeight: "92vh",
+    display: "grid",
+    gridTemplateRows: "auto minmax(300px, 1fr) auto",
+    overflow: "hidden",
+    background: "linear-gradient(135deg, rgba(7,10,11,0.98), rgba(20,12,5,0.96))",
+    border: "1px solid rgba(94,234,212,0.28)",
+    borderRadius: 6,
+    boxShadow: "0 30px 90px rgba(0,0,0,0.58)",
+  },
+  renderModalHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 14,
+    padding: "14px 16px",
+    borderBottom: "1px solid rgba(168,162,158,0.14)",
+  },
+  renderModalEyebrow: {
+    color: "#5eead4",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    letterSpacing: "0.2em",
+    textTransform: "uppercase",
+    marginBottom: 5,
+  },
+  renderModalTitle: {
+    color: "#fef3c7",
+    fontFamily: "'Fraunces', serif",
+    fontSize: 26,
+    lineHeight: 1.08,
+    fontWeight: 700,
+  },
+  renderModalClose: {
+    width: 34,
+    height: 34,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(8,8,8,0.68)",
+    border: "1px solid rgba(168,162,158,0.18)",
+    borderRadius: 4,
+    color: "#fef3c7",
+    cursor: "pointer",
+    flex: "0 0 auto",
+  },
+  renderModalStats: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+    gap: 10,
+    padding: 14,
+    borderTop: "1px solid rgba(168,162,158,0.14)",
+    background: "rgba(0,0,0,0.16)",
+  },
+  glbViewerStage: {
+    position: "relative",
+    minHeight: 420,
+    width: "100%",
+    overflow: "hidden",
+    background: "radial-gradient(circle at 54% 42%, rgba(94,234,212,0.14), transparent 34%), linear-gradient(135deg, #030506, #11181b 58%, #070403)",
+  },
+  glbCanvasMount: {
+    position: "absolute",
+    inset: 0,
+  },
+  glbViewerStatus: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#5eead4",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+    letterSpacing: "0.16em",
+    textTransform: "uppercase",
+    pointerEvents: "none",
   },
 
   emptyStateBtn: {
@@ -9780,6 +10397,7 @@ const S = {
   cableThumbDesktop: { width: 88, height: 56 },
   cableThumbMobile: { width: 66, height: 46 },
   cableThumb: {
+    position: "relative",
     flex: "0 0 auto",
     display: "inline-flex",
     alignItems: "center",
@@ -9802,6 +10420,21 @@ const S = {
     objectPosition: "center",
     display: "block",
     filter: "contrast(1.05) saturate(1.05)",
+  },
+  cableThumbFlag: {
+    position: "absolute",
+    right: 4,
+    bottom: 4,
+    padding: "2px 4px",
+    borderRadius: 2,
+    background: "rgba(2,6,7,0.78)",
+    border: "1px solid rgba(94,234,212,0.38)",
+    color: "#5eead4",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 8,
+    fontWeight: 800,
+    letterSpacing: "0.08em",
+    lineHeight: 1,
   },
   connectorThumb: {
     flex: "0 0 auto",
@@ -9891,6 +10524,33 @@ const S = {
     alignSelf: "center",
     opacity: 0.7,
     transition: "transform 0.15s, opacity 0.15s",
+  },
+  cableCardActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    marginLeft: 8,
+    alignSelf: "center",
+  },
+  cableRenderBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    minHeight: 26,
+    padding: "6px 9px",
+    background: "linear-gradient(135deg, rgba(94,234,212,0.18), rgba(217,119,6,0.10))",
+    border: "1px solid rgba(94,234,212,0.7)",
+    borderRadius: 4,
+    color: "#d9fff8",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    fontWeight: 800,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    boxShadow: "0 0 0 1px rgba(94,234,212,0.08), 0 8px 20px rgba(0,0,0,0.26)",
   },
   compareDot: {
     color: "#34d399",
@@ -10395,7 +11055,8 @@ const S = {
     background: "#050302",
   },
   actionRow: { display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" },
-  actionBtn: { padding: "8px 14px", background: "#d97706", color: "#0a0705", border: "none", borderRadius: 2, fontFamily: "inherit", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600 },
+  actionBtn: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 14px", background: "#d97706", color: "#0a0705", border: "none", borderRadius: 2, fontFamily: "inherit", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600 },
+  actionBtn3d: { background: "linear-gradient(135deg, #5eead4, #f59e0b)", color: "#050505", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 12px 24px rgba(0,0,0,0.28)" },
   actionBtnSecondary: { background: "transparent", border: "1px solid #d97706", color: "#fbbf24" },
   sectionFrame: { padding: "14px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 },
   libraryDisclosure: { borderTop: "1px solid rgba(168,162,158,0.14)" },
