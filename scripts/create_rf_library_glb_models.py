@@ -36,6 +36,180 @@ MODELS = [
         "jacket_color": (0.006, 0.008, 0.008, 1),
     },
     {
+        "name": "RG-58/U",
+        "slug": "rf-rg58",
+        "family": "video_coax",
+        "d_mm": 0.91,
+        "dielectric_mm": 2.95,
+        "shield_mm": 3.60,
+        "od_mm": 4.95,
+        "braid_carriers": 16,
+        "braid_turns": 5.85,
+        "foil": False,
+        "conductor_strands": 19,
+        "conductor_material": "tinned_copper",
+        "dielectric_material": "solid_pe",
+        "braid_material": "tinned_copper",
+        "jacket_color": (0.010, 0.010, 0.010, 1),
+    },
+    {
+        "name": "RG-174/U",
+        "slug": "rf-rg174",
+        "family": "video_coax",
+        "d_mm": 0.48,
+        "dielectric_mm": 1.52,
+        "shield_mm": 1.90,
+        "od_mm": 2.79,
+        "braid_carriers": 12,
+        "braid_turns": 6.40,
+        "foil": False,
+        "conductor_strands": 7,
+        "conductor_material": "tinned_copper",
+        "dielectric_material": "solid_pe",
+        "braid_material": "tinned_copper",
+        "jacket_color": (0.010, 0.010, 0.010, 1),
+    },
+    {
+        "name": "RG-178B/U",
+        "slug": "rf-rg178",
+        "family": "video_coax",
+        "d_mm": 0.31,
+        "dielectric_mm": 0.84,
+        "shield_mm": 1.22,
+        "od_mm": 1.83,
+        "braid_carriers": 12,
+        "braid_turns": 6.75,
+        "foil": False,
+        "conductor_strands": 7,
+        "conductor_material": "silver",
+        "dielectric_material": "ptfe",
+        "braid_material": "silver",
+        "jacket_color": (0.34, 0.20, 0.12, 1),
+    },
+    {
+        "name": "RG-213/U",
+        "slug": "rf-rg213",
+        "family": "video_coax",
+        "d_mm": 2.26,
+        "dielectric_mm": 7.24,
+        "shield_mm": 8.23,
+        "od_mm": 10.29,
+        "braid_carriers": 20,
+        "braid_turns": 4.45,
+        "foil": False,
+        "conductor_strands": 7,
+        "conductor_material": "bare_copper",
+        "dielectric_material": "solid_pe",
+        "braid_material": "bare_copper",
+        "jacket_color": (0.010, 0.010, 0.010, 1),
+    },
+    {
+        "name": "RG-214/U",
+        "slug": "rf-rg214",
+        "family": "video_coax",
+        "d_mm": 2.26,
+        "dielectric_mm": 7.24,
+        "shield_mm": 9.14,
+        "od_mm": 10.80,
+        "braid_carriers": 20,
+        "braid_turns": 4.35,
+        "foil": False,
+        "double_braid": True,
+        "conductor_strands": 7,
+        "conductor_material": "silver",
+        "dielectric_material": "solid_pe",
+        "braid_material": "silver",
+        "jacket_color": (0.010, 0.010, 0.010, 1),
+    },
+    {
+        "name": "RG-223/U",
+        "slug": "rf-rg223",
+        "family": "video_coax",
+        "d_mm": 0.89,
+        "dielectric_mm": 2.95,
+        "shield_mm": 4.00,
+        "od_mm": 5.38,
+        "braid_carriers": 18,
+        "braid_turns": 5.70,
+        "foil": False,
+        "double_braid": True,
+        "conductor_strands": 1,
+        "conductor_material": "silver",
+        "dielectric_material": "solid_pe",
+        "braid_material": "silver",
+        "jacket_color": (0.010, 0.010, 0.010, 1),
+    },
+    {
+        "name": "RG-316/U",
+        "slug": "rf-rg316",
+        "family": "video_coax",
+        "d_mm": 0.51,
+        "dielectric_mm": 1.52,
+        "shield_mm": 1.94,
+        "od_mm": 2.49,
+        "braid_carriers": 14,
+        "braid_turns": 6.20,
+        "foil": False,
+        "conductor_strands": 7,
+        "conductor_material": "silver",
+        "dielectric_material": "ptfe",
+        "braid_material": "silver",
+        "jacket_color": (0.36, 0.22, 0.13, 1),
+    },
+    {
+        "name": "RG-400/U",
+        "slug": "rf-rg400",
+        "family": "video_coax",
+        "d_mm": 0.94,
+        "dielectric_mm": 2.95,
+        "shield_mm": 3.56,
+        "od_mm": 4.95,
+        "braid_carriers": 18,
+        "braid_turns": 5.65,
+        "foil": False,
+        "double_braid": True,
+        "conductor_strands": 19,
+        "conductor_material": "silver",
+        "dielectric_material": "ptfe",
+        "braid_material": "silver",
+        "jacket_color": (0.52, 0.40, 0.27, 1),
+    },
+    {
+        "name": "RG-8X (Mini-8)",
+        "slug": "rf-rg8x",
+        "family": "video_coax",
+        "d_mm": 1.02,
+        "dielectric_mm": 2.95,
+        "shield_mm": 3.56,
+        "od_mm": 6.10,
+        "braid_carriers": 16,
+        "braid_turns": 5.45,
+        "foil": False,
+        "conductor_strands": 19,
+        "conductor_material": "bare_copper",
+        "dielectric_material": "foam_pe",
+        "braid_material": "tinned_copper",
+        "jacket_color": (0.010, 0.010, 0.010, 1),
+    },
+    {
+        "name": "RG-142B/U",
+        "slug": "rf-rg142",
+        "family": "video_coax",
+        "d_mm": 0.94,
+        "dielectric_mm": 2.95,
+        "shield_mm": 3.30,
+        "od_mm": 4.95,
+        "braid_carriers": 18,
+        "braid_turns": 5.70,
+        "foil": False,
+        "double_braid": True,
+        "conductor_strands": 19,
+        "conductor_material": "silver",
+        "dielectric_material": "ptfe",
+        "braid_material": "silver",
+        "jacket_color": (0.52, 0.40, 0.27, 1),
+    },
+    {
         "name": "Belden 1505A",
         "slug": "rf-belden1505a",
         "family": "video_coax",
@@ -310,17 +484,92 @@ def helical_ribbon(
     return obj
 
 
-def add_center_conductor(x0: float, x1: float, radius: float, copper: bpy.types.Material) -> list[bpy.types.Object]:
-    return [
-        cylinder_x(
-            "solid center conductor continuous",
-            (x0 + x1) / 2,
-            x1 - x0,
-            radius,
-            copper,
-            vertices=96,
+def conductor_offsets(strands: int, radius: float) -> tuple[float, list[tuple[float, float]]]:
+    if strands >= 19:
+        strand_r = radius * 0.155
+        offsets = [(0, 0)]
+        offsets.extend(
+            (radius * 0.34 * math.cos(i * math.tau / 6), radius * 0.34 * math.sin(i * math.tau / 6))
+            for i in range(6)
         )
-    ]
+        offsets.extend(
+            (radius * 0.67 * math.cos(i * math.tau / 12), radius * 0.67 * math.sin(i * math.tau / 12))
+            for i in range(12)
+        )
+        return strand_r, offsets
+    if strands >= 7:
+        strand_r = radius * 0.24
+        offsets = [(0, 0)]
+        offsets.extend(
+            (radius * 0.50 * math.cos(i * math.tau / 6), radius * 0.50 * math.sin(i * math.tau / 6))
+            for i in range(6)
+        )
+        return strand_r, offsets
+    return radius, [(0, 0)]
+
+
+def add_center_conductor(
+    x0: float,
+    x1: float,
+    radius: float,
+    copper: bpy.types.Material,
+    *,
+    strands: int = 1,
+) -> list[bpy.types.Object]:
+    if strands <= 1:
+        return [
+            cylinder_x(
+                "solid center conductor continuous",
+                (x0 + x1) / 2,
+                x1 - x0,
+                radius,
+                copper,
+                vertices=96,
+            )
+        ]
+
+    strand_r, offsets = conductor_offsets(strands, radius)
+    objects: list[bpy.types.Object] = []
+    for idx, (y, z) in enumerate(offsets, start=1):
+        objects.append(
+            cylinder_x(
+                f"{strands} strand center conductor {idx:02d}",
+                (x0 + x1) / 2,
+                x1 - x0,
+                strand_r,
+                copper,
+                vertices=32,
+                loc_y=y,
+                loc_z=z,
+            )
+        )
+    return objects
+
+
+def conductor_material_color(kind: str) -> tuple[float, float, float, float]:
+    return {
+        "bare_copper": (0.92, 0.42, 0.15, 1),
+        "tinned_copper": (0.78, 0.74, 0.66, 1),
+        "silver": (0.95, 0.94, 0.88, 1),
+    }.get(kind, (0.92, 0.42, 0.15, 1))
+
+
+def braid_material_color(kind: str) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
+    palettes = {
+        "bare_copper": ((0.82, 0.42, 0.16, 1), (0.30, 0.14, 0.07, 1)),
+        "silver": ((0.86, 0.86, 0.80, 1), (0.34, 0.34, 0.31, 1)),
+        "tinned_copper": ((0.76, 0.77, 0.72, 1), (0.24, 0.25, 0.24, 1)),
+    }
+    return palettes.get(kind, palettes["tinned_copper"])
+
+
+def dielectric_material_color(kind: str) -> tuple[str, tuple[float, float, float, float], float]:
+    palettes = {
+        "foam_pe": ("gas injected foam pe", (0.88, 0.86, 0.76, 1), 0.78),
+        "solid_pe": ("solid polyethylene dielectric", (0.86, 0.84, 0.72, 1), 0.86),
+        "ptfe": ("solid ptfe dielectric", (0.96, 0.94, 0.86, 1), 0.90),
+    }
+    return palettes.get(kind, palettes["foam_pe"])
 
 
 def add_label_empty(name: str) -> bpy.types.Object:
@@ -431,80 +680,96 @@ def build_video_coax_model(spec: dict) -> None:
     dielectric_r = spec["dielectric_mm"] * 0.5 * scale
     conductor_r = spec["d_mm"] * 0.5 * scale
 
-    copper = make_material("solid bare copper conductor", (0.92, 0.42, 0.15, 1), metallic=0.78, roughness=0.2)
-    foam = make_material("gas injected foam hdpe", (0.88, 0.86, 0.76, 1), roughness=0.42, alpha=0.78)
+    conductor_kind = spec.get("conductor_material", "bare_copper")
+    dielectric_kind = spec.get("dielectric_material", "foam_pe")
+    braid_kind = spec.get("braid_material", "tinned_copper")
+    dielectric_name, dielectric_color, dielectric_alpha = dielectric_material_color(dielectric_kind)
+    braid_color, braid_shadow_color = braid_material_color(braid_kind)
+
+    copper = make_material(f"{conductor_kind.replace('_', ' ')} center conductor", conductor_material_color(conductor_kind), metallic=0.78, roughness=0.2)
+    foam = make_material(dielectric_name, dielectric_color, roughness=0.42, alpha=dielectric_alpha)
     foam_skin = make_material("foam skin highlight", (0.98, 0.95, 0.82, 1), roughness=0.34, alpha=0.34)
     foil = make_material("duobond aluminum foil", (0.88, 0.89, 0.84, 1), metallic=0.38, roughness=0.34)
     foil_edge = make_material("foil lap edge", (0.98, 0.98, 0.92, 1), metallic=0.32, roughness=0.28)
-    braid = make_material("tinned copper braid", (0.76, 0.77, 0.72, 1), metallic=0.84, roughness=0.22)
-    braid_shadow = make_material("braid shadow pass", (0.24, 0.25, 0.24, 1), metallic=0.55, roughness=0.4, alpha=0.46)
+    braid = make_material(f"{braid_kind.replace('_', ' ')} braid", braid_color, metallic=0.84, roughness=0.22)
+    braid_shadow = make_material("braid shadow pass", braid_shadow_color, metallic=0.55, roughness=0.4, alpha=0.46)
+    inner_braid = make_material(f"inner {braid_kind.replace('_', ' ')} braid", tuple(min(c * 1.08, 1) for c in braid_color[:3]) + (1,), metallic=0.78, roughness=0.27)
     jacket = make_material("matte black pvc jacket", spec["jacket_color"], roughness=0.86)
     jacket_edge = make_material("fresh jacket cut edge", (0.018, 0.017, 0.015, 1), roughness=0.74)
 
     objects: list[bpy.types.Object] = []
+    has_foil = spec.get("foil", True)
+    double_braid = spec.get("double_braid", False)
     braid_start = -0.28
-    braid_end = spec.get("braid_end", 1.34)
+    braid_end = spec.get("braid_end", 1.34 if has_foil else (1.22 if double_braid else 1.52))
+    inner_braid_end = spec.get("inner_braid_end", 1.62 if double_braid else braid_end)
     foil_end = spec.get("foil_end", 1.86)
     objects.append(cylinder_x("matte black pvc jacket body", -1.70, 3.04, outer_r, jacket, vertices=128))
     objects.append(cylinder_x("jacket cut lip", -0.16, 0.16, outer_r * 1.01, jacket_edge, vertices=128))
-    objects.append(
-        tube_surface(
-            "duobond foil sleeve",
-            braid_start,
-            foil_end,
-            foil_r,
-            foil,
-            radial_segments=112,
-            length_segments=64,
+    if has_foil:
+        objects.append(
+            tube_surface(
+                "duobond foil sleeve",
+                braid_start,
+                foil_end,
+                foil_r,
+                foil,
+                radial_segments=112,
+                length_segments=64,
+            )
         )
-    )
-    objects.append(
-        helical_ribbon(
-            "subtle foil wrap lap",
-            braid_start + 0.1,
-            foil_end,
-            foil_r * 1.012,
-            1.34,
-            math.radians(18),
-            math.radians(72),
-            foil_edge,
-            segments=140,
+        objects.append(
+            helical_ribbon(
+                "subtle foil wrap lap",
+                braid_start + 0.1,
+                foil_end,
+                foil_r * 1.012,
+                1.34,
+                math.radians(18),
+                math.radians(72),
+                foil_edge,
+                segments=140,
+            )
         )
-    )
 
     carriers = spec["braid_carriers"]
     turns = spec["braid_turns"]
     braid_depth = max(0.0045, outer_r * 0.0065)
-    for i in range(carriers):
-        phase = math.tau * i / carriers
-        objects.append(
-            helical_rib(
-                f"braid right hand carrier {i + 1:02d}",
-                braid_start,
-                braid_end,
-                braid_r,
-                turns,
-                phase,
-                braid,
-                bevel_depth=braid_depth,
-                handedness=1,
-                points=118,
+    def add_braid_layer(label: str, radius: float, x_end: float, turns_value: float, material: bpy.types.Material, shadow: bpy.types.Material, phase_offset: float = 0) -> None:
+        for i in range(carriers):
+            phase = phase_offset + math.tau * i / carriers
+            objects.append(
+                helical_rib(
+                    f"{label} right hand carrier {i + 1:02d}",
+                    braid_start,
+                    x_end,
+                    radius,
+                    turns_value,
+                    phase,
+                    material,
+                    bevel_depth=braid_depth,
+                    handedness=1,
+                    points=118,
+                )
             )
-        )
-        objects.append(
-            helical_rib(
-                f"braid left hand carrier {i + 1:02d}",
-                braid_start,
-                braid_end,
-                braid_r * 1.006,
-                turns,
-                phase + math.tau / (carriers * 2),
-                braid_shadow if i % 3 == 0 else braid,
-                bevel_depth=braid_depth * (0.85 if i % 3 == 0 else 1.0),
-                handedness=-1,
-                points=118,
+            objects.append(
+                helical_rib(
+                    f"{label} left hand carrier {i + 1:02d}",
+                    braid_start,
+                    x_end,
+                    radius * 1.006,
+                    turns_value,
+                    phase + math.tau / (carriers * 2),
+                    shadow if i % 3 == 0 else material,
+                    bevel_depth=braid_depth * (0.85 if i % 3 == 0 else 1.0),
+                    handedness=-1,
+                    points=118,
+                )
             )
-        )
+
+    if double_braid:
+        add_braid_layer("inner braid", braid_r * 0.93, inner_braid_end, turns * 0.92, inner_braid, braid_shadow, phase_offset=math.tau / (carriers * 4))
+    add_braid_layer("braid", braid_r, braid_end, turns, braid, braid_shadow)
 
     objects.append(cylinder_x("gas injected foam dielectric", 1.95, 1.58, dielectric_r, foam, vertices=128))
     objects.append(
@@ -518,7 +783,7 @@ def build_video_coax_model(spec: dict) -> None:
             length_segments=36,
         )
     )
-    objects.extend(add_center_conductor(0.18, 3.28, conductor_r, copper))
+    objects.extend(add_center_conductor(0.18, 3.28, conductor_r, copper, strands=spec.get("conductor_strands", 1)))
 
     for obj in objects:
         obj.parent = root
