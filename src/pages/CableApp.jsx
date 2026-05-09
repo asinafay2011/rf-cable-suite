@@ -5422,6 +5422,8 @@ const EYE_TDR_DEFECTS = [
     label: 'Nominal cable',
     sub: 'clean baseline',
     color: '#5eead4',
+    image: '/cable-renders/hs-eye-tdr-nominal.png',
+    scene: 'Clean twisted pair under stable PTFE and foil wrap.',
     distanceM: 8.8,
     widthM: 1.1,
     zStepOhm: 1.2,
@@ -5440,6 +5442,8 @@ const EYE_TDR_DEFECTS = [
     label: 'Pair skew',
     sub: 'one conductor electrically late',
     color: '#7dd3fc',
+    image: '/cable-renders/hs-eye-tdr-skew.png',
+    scene: 'One conductor path drifts late, so timing closes before loss looks scary.',
     distanceM: 16.0,
     widthM: 1.6,
     zStepOhm: 2.5,
@@ -5458,6 +5462,8 @@ const EYE_TDR_DEFECTS = [
     label: 'Impedance bump',
     sub: 'dielectric OD / crush step',
     color: '#fbbf24',
+    image: '/cable-renders/hs-eye-tdr-impedance.png',
+    scene: 'A local dielectric/crush step creates the strongest TDR echo.',
     distanceM: 21.5,
     widthM: 0.55,
     zStepOhm: 17,
@@ -5476,6 +5482,8 @@ const EYE_TDR_DEFECTS = [
     label: 'Foil gap',
     sub: 'shield discontinuity + mode conversion',
     color: '#fb923c',
+    image: '/cable-renders/hs-eye-tdr-foil-gap.png',
+    scene: 'Foil overlap opens and injects noise even when the TDR echo is modest.',
     distanceM: 28.0,
     widthM: 0.72,
     zStepOhm: 6,
@@ -5494,6 +5502,8 @@ const EYE_TDR_DEFECTS = [
     label: 'Bad twist pitch',
     sub: 'lay wander / periodic coupling',
     color: '#f472b6',
+    image: '/cable-renders/hs-eye-tdr-bad-twist.png',
+    scene: 'Twist pitch wanders, causing periodic coupling and ripple.',
     distanceM: 13.0,
     widthM: 3.5,
     zStepOhm: -7,
@@ -5648,39 +5658,8 @@ function EyeTdrCorrelationLab() {
         icon={Activity}
       />
 
-      <div className="grid lg:grid-cols-[1fr_360px] gap-6 mb-6">
-        <div className="p-5 border border-[#252e33] bg-[#12171a]">
-          <div className="font-mono text-[10px] uppercase tracking-wider text-[#f472b6] mb-4">Defect director</div>
-          <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-2">
-            {EYE_TDR_DEFECTS.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => loadDefect(item)}
-                className="tappable text-left p-3 border rounded-sm min-h-[92px]"
-                style={{
-                  borderColor: defectId === item.id ? item.color : C.borderHi,
-                  background: defectId === item.id ? `${item.color}1f` : C.bg,
-                }}
-              >
-                <div className="flex justify-between gap-2 items-center font-mono text-[11px] text-[#f0ebe2] font-bold">
-                  <span>{item.label}</span>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: item.color, flexShrink: 0 }} />
-                </div>
-                <div className="text-[11px] text-[#6b7479] mt-2 leading-snug">{item.sub}</div>
-              </button>
-            ))}
-          </div>
-          <div className="mt-4 p-4 border border-[#252e33] bg-[#0a0d0f]">
-            <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f] mb-2">How to read it</div>
-            <div className="grid md:grid-cols-4 gap-3 text-xs text-[#a7b0b6] leading-relaxed">
-              <div><span className="text-[#fb923c] font-mono">Eye</span> tells whether the receiver still has timing and amplitude margin.</div>
-              <div><span className="text-[#7dd3fc] font-mono">TDR</span> tells where the impedance defect physically lives.</div>
-              <div><span className="text-[#84cc16] font-mono">IL</span> tells how much signal energy is lost with frequency.</div>
-              <div><span className="text-[#fbbf24] font-mono">RL</span> tells how much energy reflects from discontinuities.</div>
-            </div>
-          </div>
-        </div>
-
+      <div className="grid xl:grid-cols-[minmax(0,1fr)_370px] gap-6 mb-6">
+        <EyeTdrBlenderPanel defect={activeDefect} result={result} bitRateGbps={bitRateGbps} />
         <aside className="p-5 border border-[#252e33] bg-[#12171a]">
           <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f] mb-4">Channel setup</div>
           <EyeTdrSlider label="Bit rate" value={bitRateGbps} setValue={setBitRateGbps} min={2.5} max={40} step={0.5} unit="Gbps" accent="#fb923c" />
@@ -5692,6 +5671,36 @@ function EyeTdrCorrelationLab() {
             <Spec label="Defect location" value={Math.min(activeDefect.distanceM, lengthM * 0.88).toFixed(1)} unit="m" />
           </div>
         </aside>
+      </div>
+
+      <div className="p-5 border border-[#252e33] bg-[#12171a] mb-6">
+        <div className="font-mono text-[10px] uppercase tracking-wider text-[#f472b6] mb-4">Defect director</div>
+        <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-2">
+          {EYE_TDR_DEFECTS.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => loadDefect(item)}
+              className="tappable text-left p-3 border rounded-sm min-h-[92px]"
+              style={{
+                borderColor: defectId === item.id ? item.color : C.borderHi,
+                background: defectId === item.id ? `${item.color}1f` : C.bg,
+              }}
+            >
+              <div className="flex justify-between gap-2 items-center font-mono text-[11px] text-[#f0ebe2] font-bold">
+                <span>{item.label}</span>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: item.color, flexShrink: 0 }} />
+              </div>
+              <div className="text-[11px] text-[#6b7479] mt-2 leading-snug">{item.sub}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-4 gap-3 mb-6 text-xs text-[#a7b0b6] leading-relaxed">
+        <div className="border border-[#252e33] bg-[#0a0d0f] p-3"><span className="text-[#fb923c] font-mono">Eye</span> shows timing and amplitude margin at the receiver.</div>
+        <div className="border border-[#252e33] bg-[#0a0d0f] p-3"><span className="text-[#7dd3fc] font-mono">TDR</span> locates where the impedance defect lives in the cable.</div>
+        <div className="border border-[#252e33] bg-[#0a0d0f] p-3"><span className="text-[#84cc16] font-mono">IL</span> shows how signal energy is lost as frequency rises.</div>
+        <div className="border border-[#252e33] bg-[#0a0d0f] p-3"><span className="text-[#fbbf24] font-mono">RL</span> shows energy reflected by discontinuities.</div>
       </div>
 
       <div className="grid sm:grid-cols-2 xl:grid-cols-6 gap-2 mb-6">
@@ -5821,6 +5830,64 @@ function EyeTdrMetric({ label, value, sub, color }) {
       <div className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479]">{label}</div>
       <div className="font-mono text-xl mt-1 leading-tight" style={{ color }}>{value}</div>
       <div className="text-[10px] text-[#6b7479] mt-2 leading-snug">{sub}</div>
+    </div>
+  );
+}
+
+function EyeTdrBlenderPanel({ defect, result, bitRateGbps }) {
+  const eyeWidthPct = result.uiPs > 0 ? (result.eyeWidthPs / result.uiPs) * 100 : 0;
+  const status = result.verdict === 'PASS' ? 'healthy margin' : result.verdict === 'MARGINAL' ? 'watch zone' : 'closure risk';
+
+  return (
+    <div className="border border-[#252e33] bg-[#12171a] overflow-hidden rounded-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-[#252e33]">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#5eead4]">Blender defect scene</div>
+          <div className="text-xs text-[#a7b0b6] mt-1">{defect.scene}</div>
+        </div>
+        <div className="font-mono text-[10px] uppercase tracking-wider border px-2 py-1 bg-[#0a0d0f]" style={{ color: defect.color, borderColor: `${defect.color}66` }}>
+          {defect.label}
+        </div>
+      </div>
+
+      <div className="relative aspect-[21/9] min-h-[300px] bg-[#0a0d0f]">
+        <img
+          data-testid="eye-tdr-blender-preview"
+          src={defect.image}
+          alt={`${defect.label} Blender eye TDR defect scene`}
+          className="w-full h-full object-cover"
+        />
+        <div className="absolute top-3 left-3 font-mono text-[10px] uppercase tracking-[0.2em] bg-[#0a0d0f]/75 border border-[#252e33] px-2 py-1" style={{ color: defect.color }}>
+          Physical defect
+        </div>
+        <div className="absolute bottom-3 left-3 right-3 grid sm:grid-cols-3 gap-2">
+          {[
+            ['Verdict', result.verdict, result.verdictColor],
+            ['Eye width', `${eyeWidthPct.toFixed(0)}% UI`, eyeWidthPct >= 35 ? C.teal : '#f87171'],
+            ['Nyquist', `${(bitRateGbps / 2).toFixed(1)} GHz`, '#fbbf24'],
+          ].map(([label, value, color]) => (
+            <div key={label} className="bg-[#0a0d0f]/85 border border-[#252e33] rounded-sm p-2">
+              <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+              <div className="font-mono text-[11px]" style={{ color }}>{value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-px bg-[#252e33] border-t border-[#252e33]">
+        <div className="bg-[#0a0d0f] p-3">
+          <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">Scope read</div>
+          <div className="text-[11px] text-[#a7b0b6] mt-1 leading-relaxed">{defect.signature}</div>
+        </div>
+        <div className="bg-[#0a0d0f] p-3">
+          <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">Status</div>
+          <div className="font-mono text-[11px] mt-1" style={{ color: result.verdictColor }}>{status}</div>
+        </div>
+        <div className="bg-[#0a0d0f] p-3">
+          <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">First fix</div>
+          <div className="text-[11px] text-[#a7b0b6] mt-1 leading-relaxed">{defect.fix}</div>
+        </div>
+      </div>
     </div>
   );
 }
