@@ -3655,6 +3655,81 @@ const CONNECTOR_LAUNCH_PRESETS = [
   },
 ];
 
+const CONNECTOR_LAUNCH_SCENES = {
+  golden: {
+    label: "Golden launch",
+    sub: "flush dielectric · centered pin · round ferrule",
+    image: "/cable-renders/rf-launch-golden.png",
+    accent: "#5eead4",
+    note: "Use this as the visual reference for a clean connector launch.",
+    hotspots: [
+      { left: "66%", top: "47%", color: "#5eead4", label: "Reference planes", value: () => "flush stack" },
+      { left: "78%", top: "53%", color: "#38bdf8", label: "Pin plane", value: ({ pinMm, pinLabel }) => `${pinMm.toFixed(2)} mm · ${pinLabel}` },
+      { left: "57%", top: "71%", color: "#fbbf24", label: "Ferrule", value: () => "round seat" },
+    ],
+  },
+  "pin-plane": {
+    label: "Pin plane offset",
+    sub: "center contact too long / short",
+    image: "/cable-renders/rf-launch-pin-plane.png",
+    accent: "#38bdf8",
+    note: "Pin plane error moves the first discontinuity right at the connector face.",
+    hotspots: [
+      { left: "72%", top: "41%", color: "#38bdf8", label: "Target plane", value: () => "nominal" },
+      { left: "82%", top: "52%", color: "#7dd3fc", label: "Actual pin", value: ({ pinMm, pinLabel }) => `${pinMm.toFixed(2)} mm · ${pinLabel}` },
+      { left: "64%", top: "69%", color: "#fbbf24", label: "TDR echo", value: ({ launch }) => `${launch.deltaZ >= 0 ? "+" : ""}${launch.deltaZ.toFixed(1)} Ω` },
+    ],
+  },
+  "strip-length": {
+    label: "Strip length error",
+    sub: "exposed dielectric / shield transition",
+    image: "/cable-renders/rf-launch-strip-length.png",
+    accent: "#fbbf24",
+    note: "Bad strip length changes how much dielectric and shield transition the launch sees.",
+    hotspots: [
+      { left: "45%", top: "35%", color: "#fbbf24", label: "Strip window", value: ({ stripMm, stripLabel }) => `${stripMm.toFixed(2)} mm · ${stripLabel}` },
+      { left: "65%", top: "59%", color: "#fbbf24", label: "Dielectric edge", value: () => "support face" },
+      { left: "57%", top: "72%", color: "#fb923c", label: "Shield pickup", value: ({ launch }) => `${launch.resonance.toFixed(1)} GHz` },
+    ],
+  },
+  "dielectric-gap": {
+    label: "Dielectric gap",
+    sub: "air pocket at connector launch",
+    image: "/cable-renders/rf-launch-dielectric-gap.png",
+    accent: "#5eead4",
+    note: "Air at the launch raises local impedance and creates a compact S11 notch.",
+    hotspots: [
+      { left: "66%", top: "45%", color: "#5eead4", label: "Air gap", value: ({ gapMm }) => `${gapMm.toFixed(2)} mm` },
+      { left: "74%", top: "59%", color: "#67e8f9", label: "Fringe field", value: () => "mode step" },
+      { left: "55%", top: "70%", color: "#fbbf24", label: "RL notch", value: ({ launch }) => `${launch.worstReturnLoss.toFixed(1)} dB` },
+    ],
+  },
+  "ferrule-step": {
+    label: "Ferrule shoulder step",
+    sub: "shield OD step / seating error",
+    image: "/cable-renders/rf-launch-ferrule-step.png",
+    accent: "#fb923c",
+    note: "A ferrule shoulder step reflects current at the shield transition before the pin looks wrong.",
+    hotspots: [
+      { left: "57%", top: "56%", color: "#fb923c", label: "Shoulder step", value: ({ stepMm }) => `${stepMm.toFixed(2)} mm` },
+      { left: "48%", top: "72%", color: "#fbbf24", label: "Shield current", value: () => "interrupted" },
+      { left: "70%", top: "45%", color: "#38bdf8", label: "Pin still OK", value: ({ pinMm }) => `${pinMm.toFixed(2)} mm` },
+    ],
+  },
+  "crimp-ovality": {
+    label: "Crimp ovality",
+    sub: "ferrule no longer round",
+    image: "/cable-renders/rf-launch-crimp-ovality.png",
+    accent: "#fb7185",
+    note: "Oval crimp changes shield geometry and creates a broad near-end ripple.",
+    hotspots: [
+      { left: "48%", top: "35%", color: "#fb7185", label: "Crimp die", value: ({ ovalityPct }) => `${ovalityPct.toFixed(0)}% ovality` },
+      { left: "55%", top: "62%", color: "#f472b6", label: "Oval ferrule", value: () => "roundness loss" },
+      { left: "72%", top: "48%", color: "#fbbf24", label: "Ripple", value: ({ launch }) => `${launch.peakVswr.toFixed(2)} VSWR` },
+    ],
+  },
+};
+
 function rfLaunchClamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -3680,15 +3755,17 @@ function computeConnectorLaunch({ preset, pinMm, stripMm, gapMm, stepMm, ovality
   const mismatchLoss = -10 * Math.log10(Math.max(1 - gamma * gamma, 0.001));
   const grade = worstReturnLoss >= 20 ? "PASS" : worstReturnLoss >= 14 ? "REVIEW" : "REWORK";
   const gradeColor = worstReturnLoss >= 20 ? "#5eead4" : worstReturnLoss >= 14 ? "#fbbf24" : "#fb7185";
-  const dominant = [
-    { label: "Pin plane", value: pinRisk },
-    { label: "Strip length", value: stripRisk },
-    { label: "Dielectric gap", value: gapRisk },
-    { label: "Ferrule step", value: stepRisk },
-    { label: "Crimp ovality", value: ovalRisk },
-  ].sort((a, b) => b.value - a.value)[0].label;
+  const dominantItem = [
+    { id: "pin-plane", label: "Pin plane", value: pinRisk },
+    { id: "strip-length", label: "Strip length", value: stripRisk },
+    { id: "dielectric-gap", label: "Dielectric gap", value: gapRisk },
+    { id: "ferrule-step", label: "Ferrule step", value: stepRisk },
+    { id: "crimp-ovality", label: "Crimp ovality", value: ovalRisk },
+  ].sort((a, b) => b.value - a.value)[0];
+  const dominant = dominantItem.label;
+  const dominantId = dominantItem.id;
 
-  return { risk, deltaZ, resonance, worstReturnLoss, peakVswr, mismatchLoss, grade, gradeColor, dominant };
+  return { risk, deltaZ, resonance, worstReturnLoss, peakVswr, mismatchLoss, grade, gradeColor, dominant, dominantId };
 }
 
 function makeConnectorLaunchTdr({ pinMm, stripMm, gapMm, stepMm, ovalityPct }) {
@@ -3739,6 +3816,7 @@ function ConnectorLaunchLab() {
   );
   const tdrTrace = useMemo(() => makeConnectorLaunchTdr({ pinMm, stripMm, gapMm, stepMm, ovalityPct }), [pinMm, stripMm, gapMm, stepMm, ovalityPct]);
   const s11Trace = useMemo(() => makeConnectorLaunchS11({ preset: selectedPreset, band: activeBand, launch }), [selectedPreset, activeBand, launch]);
+  const launchScene = (launch.risk <= 6 ? CONNECTOR_LAUNCH_SCENES.golden : CONNECTOR_LAUNCH_SCENES[launch.dominantId]) || CONNECTOR_LAUNCH_SCENES.golden;
   const applyPreset = (preset) => {
     setPresetId(preset.id);
     setPinMm(preset.pinMm);
@@ -3751,6 +3829,7 @@ function ConnectorLaunchLab() {
 
   const pinLabel = pinMm >= 0 ? "pin long" : "pin short";
   const stripLabel = stripMm >= 0 ? "over-strip" : "under-strip";
+  const hotspotContext = { pinMm, pinLabel, stripMm, stripLabel, gapMm, stepMm, ovalityPct, launch };
 
   return (
     <div style={S.viewInner} data-testid="connector-launch-lab">
@@ -3771,20 +3850,35 @@ function ConnectorLaunchLab() {
         <section style={{ ...RF_FAILURE_UI.panel, overflow: "hidden" }}>
           <div style={{ position: "relative", height: "clamp(340px, 30vw, 470px)", background: "linear-gradient(135deg, #050808, #11181b)" }}>
             <img
-              src="/cable-renders/rf-failure-launch.png"
-              alt="RF connector launch Blender cutaway"
-              style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", opacity: 0.96 }}
+              data-testid="connector-launch-blender-preview"
+              src={launchScene.image}
+              alt={`${launchScene.label} Blender connector launch close-up`}
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", opacity: 0.97 }}
             />
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.06), rgba(0,0,0,0.48))" }} />
-            <div style={{ position: "absolute", top: 14, left: 14, ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>Blender launch cutaway</div>
-            <LaunchHotspot left="79%" top="50%" color="#38bdf8" label="Pin plane" value={`${pinMm.toFixed(2)} mm · ${pinLabel}`} />
-            <LaunchHotspot left="70%" top="33%" color="#fbbf24" label="Dielectric face" value={`${gapMm.toFixed(2)} mm gap`} />
-            <LaunchHotspot left="58%" top="70%" color="#fb923c" label="Ferrule step" value={`${stepMm.toFixed(2)} mm`} />
+            <div style={{ position: "absolute", top: 14, left: 14, ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>Blender launch close-up</div>
+            <div style={{ position: "absolute", top: 14, right: 14, border: `1px solid ${launchScene.accent}`, background: "rgba(5,9,11,0.72)", color: launchScene.accent, borderRadius: 4, padding: "7px 10px", fontFamily: '"JetBrains Mono", monospace', fontSize: 10, fontWeight: 900, letterSpacing: 1.5, textTransform: "uppercase" }}>
+              {launchScene.label}
+            </div>
+            {launchScene.hotspots.map((hotspot) => (
+              <LaunchHotspot
+                key={hotspot.label}
+                left={hotspot.left}
+                top={hotspot.top}
+                color={hotspot.color}
+                label={hotspot.label}
+                value={hotspot.value(hotspotContext)}
+              />
+            ))}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, padding: 12 }}>
             <RfFailureChip label="Launch grade" value={launch.grade} accent={launch.gradeColor} />
-            <RfFailureChip label="Dominant risk" value={launch.dominant} accent="#67e8f9" />
+            <RfFailureChip label="Dominant risk" value={launch.dominant} accent={launchScene.accent} />
             <RfFailureChip label="Resonance" value={`${launch.resonance.toFixed(1)} GHz`} accent="#fbbf24" />
+          </div>
+          <div style={{ padding: "0 12px 12px", color: "#9aa6ad", fontSize: 12, lineHeight: 1.55 }}>
+            <span style={{ color: launchScene.accent, fontFamily: '"JetBrains Mono", monospace', fontSize: 11 }}>{launchScene.sub}</span>
+            <span> — {launchScene.note}</span>
           </div>
         </section>
 
