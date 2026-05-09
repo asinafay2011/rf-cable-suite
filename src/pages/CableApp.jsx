@@ -175,6 +175,7 @@ const SECTION_LABELS = {
   '3d': '3D Cable Visualizer',
   next: 'NEXT Crosstalk',
   eye: 'Eye Diagram',
+  eyeTdr: 'Eye + TDR Correlation Lab',
   cost: 'Cost Calc',
   lay: 'Lay Designer',
   library: 'Vendor Library',
@@ -212,6 +213,12 @@ const SECTION_STARTERS = {
     'Why is my pair skew bad even though the wires look identical?',
     'What ΔVF tolerance is acceptable for Cat 6A vs USB4?',
     'Walk me through gating to isolate an in-cable reflection',
+  ],
+  eyeTdr: [
+    'Show how pair skew closes the eye and moves the TDR overlay',
+    'Compare impedance bump vs foil gap across eye, IL, RL, and TDR',
+    'What production knob fixes a bad twist pitch defect?',
+    'Why can return loss fail before insertion loss looks bad?',
   ],
   braid: [
     'Why does coverage K saturate above ~95%?',
@@ -798,6 +805,7 @@ function HomeView({ setSection }) {
     { id: 'suckout', icon: 'suckout', title: 'Tape Suckout', sub: 'Multi-layer Bragg-notch designer', accent: '#f87171' },
     { id: 'next',    icon: 'next',    title: 'NEXT',         sub: 'Pair-to-pair crosstalk vs lay diversity', accent: '#cbd5e1' },
     { id: 'eye',     icon: 'eye',     title: 'Eye Diagram',  sub: 'BW · jitter · noise → eye opening', accent: '#fb923c' },
+    { id: 'eyeTdr',  icon: 'correlation', title: 'Eye + TDR Lab', sub: 'Defect → eye · IL · RL · TDR together', accent: '#f472b6' },
     { id: 'cost',    icon: 'cost',    title: 'Cost Calc',    sub: 'Cu mass · jacket · labor · CPK', accent: '#facc15' },
     { id: 'library', icon: 'library', title: 'Library',      sub: `${cableCount} vendor presets + your custom cables`, accent: '#5eead4' },
   ];
@@ -1117,6 +1125,14 @@ function HsToolGlyph({ kind, color }) {
       <circle cx="12" cy="12" r="3" />
     </svg>
   );
+  if (kind === 'correlation') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7c3 0 3 10 6 10s3-10 6-10 3 10 6 10" />
+      <path d="M4 19h16M4 5h16" opacity="0.35" />
+      <path d="M8 12h8" opacity="0.65" />
+      <circle cx="12" cy="12" r="1.7" fill={color} stroke="none" />
+    </svg>
+  );
   if (kind === 'cost') return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
       <circle cx="12" cy="12" r="9" />
@@ -1264,6 +1280,13 @@ const TAB_INTROS = {
     desc: 'Overlay many bit transitions to visualise timing margin and amplitude noise. Closed eye = bit errors. Drag sliders to see what kills the link.',
     accent: '#fb923c',
     icon: Eye,
+  },
+  eyeTdr: {
+    eyebrow: 'Eye + TDR Correlation · High-speed failure lab',
+    title: 'One physical defect, four measurement signatures',
+    desc: 'Pick skew, impedance bump, foil gap, or bad twist pitch and see the eye, TDR, insertion loss, and return loss move together.',
+    accent: '#f472b6',
+    icon: Activity,
   },
   cost: {
     eyebrow: 'Cost Calc · 1 km bill of materials',
@@ -5391,6 +5414,437 @@ function EyeDiagram() {
 }
 
 /* ============================================================
+   Lab 05B — Eye + TDR Correlation Lab
+   ============================================================ */
+const EYE_TDR_DEFECTS = [
+  {
+    id: 'nominal',
+    label: 'Nominal cable',
+    sub: 'clean baseline',
+    color: '#5eead4',
+    distanceM: 8.8,
+    widthM: 1.1,
+    zStepOhm: 1.2,
+    skewPs: 4,
+    ilPenalty: 0,
+    rlPenalty: 0,
+    jitterPs: 1.5,
+    noiseMv: 12,
+    eyePenalty: 0,
+    ripple: 0.2,
+    signature: 'Open eye, flat TDR, smooth IL, return loss safely above target.',
+    fix: 'Use this as the golden trace before comparing defect samples.',
+  },
+  {
+    id: 'skew',
+    label: 'Pair skew',
+    sub: 'one conductor electrically late',
+    color: '#7dd3fc',
+    distanceM: 16.0,
+    widthM: 1.6,
+    zStepOhm: 2.5,
+    skewPs: 34,
+    ilPenalty: 0.8,
+    rlPenalty: 1.0,
+    jitterPs: 8,
+    noiseMv: 20,
+    eyePenalty: 35,
+    ripple: 0.4,
+    signature: 'Eye closes horizontally while IL/RL still look mostly acceptable.',
+    fix: 'Match insulation OD and foam density between the two conductors; tighten pair lay tension balance.',
+  },
+  {
+    id: 'impedance',
+    label: 'Impedance bump',
+    sub: 'dielectric OD / crush step',
+    color: '#fbbf24',
+    distanceM: 21.5,
+    widthM: 0.55,
+    zStepOhm: 17,
+    skewPs: 8,
+    ilPenalty: 2.4,
+    rlPenalty: 9.0,
+    jitterPs: 8,
+    noiseMv: 28,
+    eyePenalty: 90,
+    ripple: 1.3,
+    signature: 'TDR has a strong local echo; return loss fails before IL looks dramatic.',
+    fix: 'Check extrusion concentricity, cooling trough drag, capstan pressure, and connector launch prep.',
+  },
+  {
+    id: 'foil-gap',
+    label: 'Foil gap',
+    sub: 'shield discontinuity + mode conversion',
+    color: '#fb923c',
+    distanceM: 28.0,
+    widthM: 0.72,
+    zStepOhm: 6,
+    skewPs: 13,
+    ilPenalty: 3.2,
+    rlPenalty: 12.0,
+    jitterPs: 9,
+    noiseMv: 70,
+    eyePenalty: 145,
+    ripple: 2.2,
+    signature: 'Eye gets noisy, RL has a frequency notch, and TDR only shows a modest echo.',
+    fix: 'Increase foil overlap, stabilize tape-head tension, and inspect seam wander through bends.',
+  },
+  {
+    id: 'bad-twist',
+    label: 'Bad twist pitch',
+    sub: 'lay wander / periodic coupling',
+    color: '#f472b6',
+    distanceM: 13.0,
+    widthM: 3.5,
+    zStepOhm: -7,
+    skewPs: 20,
+    ilPenalty: 4.5,
+    rlPenalty: 5.5,
+    jitterPs: 16,
+    noiseMv: 62,
+    eyePenalty: 155,
+    ripple: 2.9,
+    signature: 'Broad TDR undulation plus periodic IL/RL ripple; eye closes from jitter and crosstalk.',
+    fix: 'Tune twinner tension, capstan synchronization, back-twist, and pair-lay servo stability.',
+  },
+];
+
+function hsClamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function hsGaussian(x, center, width) {
+  return Math.exp(-0.5 * ((x - center) / Math.max(width, 0.001)) ** 2);
+}
+
+function computeEyeTdrCorrelation({ defect, bitRateGbps, lengthM, equalizationDb }) {
+  const uiPs = 1000 / bitRateGbps;
+  const nyquistGHz = bitRateGbps / 2;
+  const rawIl = lengthM * (0.055 * Math.sqrt(nyquistGHz) + 0.0065 * nyquistGHz) + defect.ilPenalty;
+  const ilNyquist = hsClamp(rawIl - equalizationDb * 0.42, 0.6, 42);
+  const worstRl = hsClamp(31 - Math.abs(defect.zStepOhm) * 0.42 - defect.rlPenalty - bitRateGbps * 0.055 - lengthM * 0.015, 5.5, 34);
+  const pairSkewPs = defect.skewPs + lengthM * (defect.id === 'skew' ? 0.22 : 0.035);
+  const jitterPs = hsClamp(2.2 + defect.jitterPs + Math.max(0, 16 - worstRl) * 0.52 + Math.max(0, ilNyquist - 8) * 0.36, 2, uiPs * 0.42);
+  const noiseMv = 18 + defect.noiseMv + Math.max(0, equalizationDb - 5) * 3.5;
+  const eyeHeightMv = hsClamp(860 * Math.exp(-ilNyquist / 22) - noiseMv * 2.05 - defect.eyePenalty, 0, 860);
+  const eyeWidthPs = hsClamp(uiPs - 6 * jitterPs - Math.abs(pairSkewPs) * 0.45, 0, uiPs);
+  const tdrPeakRho = hsClamp(defect.zStepOhm / (200 + defect.zStepOhm), -0.22, 0.22);
+  const verdict = eyeHeightMv >= 220 && eyeWidthPs / uiPs >= 0.35 && worstRl >= 12 ? 'PASS' : eyeHeightMv >= 140 && worstRl >= 9 ? 'MARGINAL' : 'FAIL';
+  const verdictColor = verdict === 'PASS' ? C.teal : verdict === 'MARGINAL' ? C.amber : '#f87171';
+
+  return {
+    uiPs,
+    nyquistGHz,
+    ilNyquist,
+    worstRl,
+    pairSkewPs,
+    jitterPs,
+    noiseMv,
+    eyeHeightMv,
+    eyeWidthPs,
+    tdrPeakRho,
+    verdict,
+    verdictColor,
+  };
+}
+
+function makeEyeTdrTrace({ defect, lengthM }) {
+  return Array.from({ length: 140 }, (_, index) => {
+    const distance = (index / 139) * lengthM;
+    const local = hsGaussian(distance, Math.min(defect.distanceM, lengthM * 0.88), Math.max(0.18, defect.widthM));
+    const periodic = defect.id === 'bad-twist' ? Math.sin(distance * 2.7) * 2.1 * hsGaussian(distance, defect.distanceM, 6.5) : 0;
+    const launch = 1.4 * hsGaussian(distance, 0.45, 0.16);
+    const zA = 100 + defect.zStepOhm * local + periodic + launch;
+    const zB = 100 + defect.zStepOhm * hsGaussian(distance, Math.min(defect.distanceM + defect.skewPs * 0.012, lengthM * 0.94), Math.max(0.18, defect.widthM)) - periodic * 0.45 - launch * 0.65;
+    return {
+      distance: Number(distance.toFixed(2)),
+      zA: Number(zA.toFixed(2)),
+      zB: Number(zB.toFixed(2)),
+    };
+  });
+}
+
+function makeEyeTdrFrequencyTrace({ defect, bitRateGbps, lengthM, equalizationDb }) {
+  const fMax = Math.max(12, bitRateGbps * 0.78);
+  return Array.from({ length: 130 }, (_, index) => {
+    const frequency = 0.05 + (index / 129) * fMax;
+    const baseIl = lengthM * (0.055 * Math.sqrt(frequency) + 0.0065 * frequency) + defect.ilPenalty * (frequency / fMax) ** 0.75;
+    const ripple = Math.sin(frequency * (defect.id === 'bad-twist' ? 2.8 : 1.35)) * defect.ripple;
+    const foilNotch = defect.id === 'foil-gap' ? 2.8 * hsGaussian(frequency, 0.62 * fMax, fMax * 0.08) : 0;
+    const il = -hsClamp(baseIl + ripple + foilNotch - equalizationDb * 0.42, 0.15, 44);
+    const cleanRl = 30 - 0.18 * frequency - lengthM * 0.012;
+    const rlNotch = Math.abs(defect.zStepOhm) * 0.45 + defect.rlPenalty * hsGaussian(frequency, defect.id === 'bad-twist' ? fMax * 0.44 : fMax * 0.58, fMax * 0.16);
+    const rlRipple = Math.abs(Math.sin(frequency * 1.55)) * defect.ripple * 1.3;
+    const rl = hsClamp(cleanRl - rlNotch - rlRipple, 4.5, 34);
+    return {
+      frequency: Number(frequency.toFixed(2)),
+      il: Number(il.toFixed(2)),
+      rl: Number(rl.toFixed(2)),
+    };
+  });
+}
+
+function makeEyeSvgPaths({ result, defect, bitRateGbps }) {
+  const W = 520;
+  const H = 240;
+  const paths = [];
+  const ui = result.uiPs;
+  const tMax = ui * 2;
+  const rise = hsClamp(12 + result.ilNyquist * 2.5 + Math.max(0, bitRateGbps - 16) * 0.55, 9, ui * 0.55);
+  const verticalScale = result.eyeHeightMv / 860;
+  for (let trace = 0; trace < 56; trace++) {
+    const prev = trace % 4 < 2 ? 0 : 1;
+    const curr = trace % 3 === 0 ? 1 - prev : prev;
+    const next = trace % 5 < 2 ? 1 - curr : curr;
+    const jitter = Math.sin(trace * 1.91) * result.jitterPs * 0.52 + Math.cos(trace * 0.73) * defect.skewPs * 0.08;
+    const points = [];
+    for (let i = 0; i < 96; i++) {
+      const t = (i / 95) * tMax;
+      const s1 = 1 / (1 + Math.exp(-(t - ui * 0.50 - jitter) / Math.max(rise, 1)));
+      const s2 = 1 / (1 + Math.exp(-(t - ui * 1.50 + jitter * 0.55) / Math.max(rise, 1)));
+      let y = prev + (curr - prev) * s1 + (next - curr) * s2;
+      y = 0.5 + (y - 0.5) * (0.42 + verticalScale * 0.58);
+      y += Math.sin(i * 0.34 + trace * 0.71) * (result.noiseMv / 1100);
+      const px = (t / tMax) * W;
+      const py = H - ((y + 0.18) / 1.36) * H;
+      points.push(`${px.toFixed(1)},${py.toFixed(1)}`);
+    }
+    paths.push(`M ${points.join(' L ')}`);
+  }
+  return { paths, W, H };
+}
+
+function EyeTdrCorrelationLab() {
+  const [defectId, setDefectId] = useState('impedance');
+  const [bitRateGbps, setBitRateGbps] = useState(10);
+  const [lengthM, setLengthM] = useState(30);
+  const [equalizationDb, setEqualizationDb] = useState(3);
+  const activeDefect = EYE_TDR_DEFECTS.find((item) => item.id === defectId) || EYE_TDR_DEFECTS[0];
+  const result = useMemo(
+    () => computeEyeTdrCorrelation({ defect: activeDefect, bitRateGbps, lengthM, equalizationDb }),
+    [activeDefect, bitRateGbps, lengthM, equalizationDb],
+  );
+  const tdrTrace = useMemo(() => makeEyeTdrTrace({ defect: activeDefect, lengthM }), [activeDefect, lengthM]);
+  const freqTrace = useMemo(() => makeEyeTdrFrequencyTrace({ defect: activeDefect, bitRateGbps, lengthM, equalizationDb }), [activeDefect, bitRateGbps, lengthM, equalizationDb]);
+  const eye = useMemo(() => makeEyeSvgPaths({ result, defect: activeDefect, bitRateGbps }), [result, activeDefect, bitRateGbps]);
+
+  const loadDefect = (item) => {
+    setDefectId(item.id);
+    if (item.id === 'nominal') {
+      setEqualizationDb(2);
+    } else if (item.id === 'bad-twist') {
+      setEqualizationDb(4);
+    } else {
+      setEqualizationDb(3);
+    }
+  };
+
+  return (
+    <section className="mb-20">
+      <SectionTitle
+        tag="LAB 05B — EYE + TDR CORRELATION"
+        title="Physical defect → eye, IL, RL, and TDR"
+        subtitle="A single manufacturing defect rarely shows up in only one instrument. This lab shows the whole measurement story at once."
+        icon={Activity}
+      />
+
+      <div className="grid lg:grid-cols-[1fr_360px] gap-6 mb-6">
+        <div className="p-5 border border-[#252e33] bg-[#12171a]">
+          <div className="font-mono text-[10px] uppercase tracking-wider text-[#f472b6] mb-4">Defect director</div>
+          <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-2">
+            {EYE_TDR_DEFECTS.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => loadDefect(item)}
+                className="tappable text-left p-3 border rounded-sm min-h-[92px]"
+                style={{
+                  borderColor: defectId === item.id ? item.color : C.borderHi,
+                  background: defectId === item.id ? `${item.color}1f` : C.bg,
+                }}
+              >
+                <div className="flex justify-between gap-2 items-center font-mono text-[11px] text-[#f0ebe2] font-bold">
+                  <span>{item.label}</span>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: item.color, flexShrink: 0 }} />
+                </div>
+                <div className="text-[11px] text-[#6b7479] mt-2 leading-snug">{item.sub}</div>
+              </button>
+            ))}
+          </div>
+          <div className="mt-4 p-4 border border-[#252e33] bg-[#0a0d0f]">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f] mb-2">How to read it</div>
+            <div className="grid md:grid-cols-4 gap-3 text-xs text-[#a7b0b6] leading-relaxed">
+              <div><span className="text-[#fb923c] font-mono">Eye</span> tells whether the receiver still has timing and amplitude margin.</div>
+              <div><span className="text-[#7dd3fc] font-mono">TDR</span> tells where the impedance defect physically lives.</div>
+              <div><span className="text-[#84cc16] font-mono">IL</span> tells how much signal energy is lost with frequency.</div>
+              <div><span className="text-[#fbbf24] font-mono">RL</span> tells how much energy reflects from discontinuities.</div>
+            </div>
+          </div>
+        </div>
+
+        <aside className="p-5 border border-[#252e33] bg-[#12171a]">
+          <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f] mb-4">Channel setup</div>
+          <EyeTdrSlider label="Bit rate" value={bitRateGbps} setValue={setBitRateGbps} min={2.5} max={40} step={0.5} unit="Gbps" accent="#fb923c" />
+          <EyeTdrSlider label="Cable length" value={lengthM} setValue={setLengthM} min={2} max={60} step={1} unit="m" accent="#7dd3fc" />
+          <EyeTdrSlider label="Equalization" value={equalizationDb} setValue={setEqualizationDb} min={0} max={12} step={0.5} unit="dB" accent="#5eead4" />
+          <div className="mt-4 pt-4 border-t border-dashed border-[#252e33] space-y-1">
+            <Spec label="UI" value={result.uiPs.toFixed(1)} unit="ps" />
+            <Spec label="Nyquist" value={result.nyquistGHz.toFixed(2)} unit="GHz" />
+            <Spec label="Defect location" value={Math.min(activeDefect.distanceM, lengthM * 0.88).toFixed(1)} unit="m" />
+          </div>
+        </aside>
+      </div>
+
+      <div className="grid sm:grid-cols-2 xl:grid-cols-6 gap-2 mb-6">
+        <EyeTdrMetric label="Verdict" value={result.verdict} sub={activeDefect.signature} color={result.verdictColor} />
+        <EyeTdrMetric label="Eye height" value={`${result.eyeHeightMv.toFixed(0)} mV`} sub="target >= 220 mV" color={result.eyeHeightMv >= 220 ? C.teal : '#f87171'} />
+        <EyeTdrMetric label="Eye width" value={`${result.eyeWidthPs.toFixed(0)} ps`} sub={`${((result.eyeWidthPs / result.uiPs) * 100).toFixed(0)}% UI`} color={result.eyeWidthPs / result.uiPs >= 0.35 ? C.teal : '#f87171'} />
+        <EyeTdrMetric label="IL @ Nyquist" value={`${result.ilNyquist.toFixed(1)} dB`} sub={`${result.nyquistGHz.toFixed(2)} GHz`} color={result.ilNyquist < 14 ? C.teal : C.amber} />
+        <EyeTdrMetric label="Worst RL" value={`${result.worstRl.toFixed(1)} dB`} sub="target >= 12 dB" color={result.worstRl >= 12 ? C.teal : '#f87171'} />
+        <EyeTdrMetric label="Pair skew" value={`${result.pairSkewPs.toFixed(1)} ps`} sub="intra-pair delay" color={result.pairSkewPs < 25 ? C.teal : C.amber} />
+      </div>
+
+      <div className="grid xl:grid-cols-2 gap-6 mb-6">
+        <div className="p-5 border border-[#252e33] bg-[#12171a]">
+          <div className="flex justify-between items-baseline mb-3">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#fb923c]">Eye diagram · 2 UI</div>
+            <div className="font-mono text-xs" style={{ color: result.verdictColor }}>{result.verdict}</div>
+          </div>
+          <svg viewBox={`0 0 ${eye.W} ${eye.H}`} className="w-full bg-[#0a0d0f] border border-[#252e33]">
+            <defs>
+              <pattern id="eye-tdr-grid" width="42" height="24" patternUnits="userSpaceOnUse">
+                <path d="M 42 0 L 0 0 0 24" fill="none" stroke={C.border} strokeWidth="0.5" opacity="0.48" />
+              </pattern>
+              <clipPath id="eye-tdr-clip">
+                <rect width={eye.W} height={eye.H} />
+              </clipPath>
+            </defs>
+            <rect width={eye.W} height={eye.H} fill="url(#eye-tdr-grid)" />
+            <line x1={eye.W / 2} y1={0} x2={eye.W / 2} y2={eye.H} stroke={C.borderHi} strokeDasharray="3 5" />
+            <line x1={0} y1={eye.H / 2} x2={eye.W} y2={eye.H / 2} stroke={C.copperDim} strokeDasharray="3 5" opacity="0.7" />
+            <g clipPath="url(#eye-tdr-clip)">
+              {eye.paths.map((d, index) => (
+                <path key={index} d={d} stroke={result.verdict === 'FAIL' ? '#f87171' : activeDefect.color} strokeWidth="0.8" fill="none" opacity="0.30" />
+              ))}
+            </g>
+            <rect
+              x={(eye.W - Math.max(8, (result.eyeWidthPs / (result.uiPs * 2)) * eye.W)) / 2}
+              y={(eye.H - Math.max(12, (result.eyeHeightMv / 1000) * eye.H)) / 2}
+              width={Math.max(8, (result.eyeWidthPs / (result.uiPs * 2)) * eye.W)}
+              height={Math.max(12, (result.eyeHeightMv / 1000) * eye.H)}
+              fill="none"
+              stroke={result.verdictColor}
+              strokeDasharray="5 5"
+              opacity="0.85"
+            />
+            <text x={eye.W / 2} y={eye.H - 10} textAnchor="middle" fill={C.textMuted} fontSize="10" fontFamily="JetBrains Mono">sampling window</text>
+          </svg>
+        </div>
+
+        <EyeTdrChartPanel title="TDR overlay · differential impedance" accent="#7dd3fc">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={tdrTrace} margin={{ top: 12, right: 14, bottom: 4, left: -8 }}>
+              <CartesianGrid stroke="#252e33" strokeDasharray="4 4" />
+              <XAxis dataKey="distance" tick={{ fill: '#6b7479', fontSize: 11 }} unit="m" />
+              <YAxis domain={[78, 122]} tick={{ fill: '#6b7479', fontSize: 11 }} unit="Ω" />
+              <Tooltip contentStyle={{ background: C.bg, border: `1px solid ${C.borderHi}`, color: C.text }} formatter={(value, name) => [`${Number(value).toFixed(1)} Ω`, name === 'zA' ? 'Wire A' : 'Wire B']} />
+              <ReferenceLine y={100} stroke="#5eead4" strokeDasharray="3 3" />
+              <ReferenceLine x={Math.min(activeDefect.distanceM, lengthM * 0.88)} stroke={activeDefect.color} strokeDasharray="5 5" />
+              <Line type="monotone" dataKey="zA" stroke="#7dd3fc" strokeWidth={2.2} dot={false} />
+              <Line type="monotone" dataKey="zB" stroke="#f472b6" strokeWidth={1.8} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </EyeTdrChartPanel>
+
+        <EyeTdrChartPanel title="Insertion loss · SDD21" accent="#84cc16">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={freqTrace} margin={{ top: 12, right: 14, bottom: 4, left: -8 }}>
+              <CartesianGrid stroke="#252e33" strokeDasharray="4 4" />
+              <XAxis dataKey="frequency" tick={{ fill: '#6b7479', fontSize: 11 }} unit="GHz" />
+              <YAxis domain={[-42, 0]} tick={{ fill: '#6b7479', fontSize: 11 }} unit="dB" />
+              <Tooltip contentStyle={{ background: C.bg, border: `1px solid ${C.borderHi}`, color: C.text }} formatter={(value) => [`${Number(value).toFixed(1)} dB`, 'IL']} labelFormatter={(value) => `${Number(value).toFixed(2)} GHz`} />
+              <ReferenceLine x={result.nyquistGHz} stroke="#fb923c" strokeDasharray="5 5" />
+              <Line type="monotone" dataKey="il" stroke="#84cc16" strokeWidth={2.4} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </EyeTdrChartPanel>
+
+        <EyeTdrChartPanel title="Return loss · SDD11" accent="#fbbf24">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={freqTrace} margin={{ top: 12, right: 14, bottom: 4, left: -8 }}>
+              <CartesianGrid stroke="#252e33" strokeDasharray="4 4" />
+              <XAxis dataKey="frequency" tick={{ fill: '#6b7479', fontSize: 11 }} unit="GHz" />
+              <YAxis domain={[0, 34]} tick={{ fill: '#6b7479', fontSize: 11 }} unit="dB" />
+              <Tooltip contentStyle={{ background: C.bg, border: `1px solid ${C.borderHi}`, color: C.text }} formatter={(value) => [`${Number(value).toFixed(1)} dB`, 'RL']} labelFormatter={(value) => `${Number(value).toFixed(2)} GHz`} />
+              <ReferenceLine y={12} stroke="#f87171" strokeDasharray="3 3" label={{ value: '12 dB', fill: '#f87171', fontSize: 10 }} />
+              <ReferenceLine y={20} stroke="#5eead4" strokeDasharray="3 3" label={{ value: '20 dB', fill: '#5eead4', fontSize: 10 }} />
+              <ReferenceLine x={result.nyquistGHz} stroke="#fb923c" strokeDasharray="5 5" />
+              <Line type="monotone" dataKey="rl" stroke="#fbbf24" strokeWidth={2.4} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </EyeTdrChartPanel>
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-4">
+        <EyeTdrCauseCard label="Physical defect" value={activeDefect.label} body={activeDefect.signature} color={activeDefect.color} />
+        <EyeTdrCauseCard label="Most useful first instrument" value={activeDefect.id === 'skew' ? 'TDR pair overlay' : activeDefect.id === 'foil-gap' ? 'Return loss + eye noise' : activeDefect.id === 'bad-twist' ? 'IL/RL ripple' : 'TDR'} body={activeDefect.id === 'nominal' ? 'Keep the trace as a baseline.' : 'Start with the chart that changes most, then confirm with the others.'} color="#7dd3fc" />
+        <EyeTdrCauseCard label="Production action" value="Fix path" body={activeDefect.fix} color="#5eead4" />
+      </div>
+    </section>
+  );
+}
+
+function EyeTdrSlider({ label, value, setValue, min, max, step, unit, accent }) {
+  return (
+    <div className="mb-4">
+      <div className="flex justify-between items-baseline mb-1">
+        <label className="text-xs text-[#a7b0b6] font-mono uppercase tracking-wider">{label}</label>
+        <span className="font-mono" style={{ color: accent }}>{Number(value).toFixed(step < 1 ? 1 : 0)} {unit}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => setValue(Number(event.target.value))}
+        className="w-full"
+        style={{ accentColor: accent }}
+        aria-label={label}
+      />
+    </div>
+  );
+}
+
+function EyeTdrMetric({ label, value, sub, color }) {
+  return (
+    <div className="border border-[#252e33] bg-[#0a0d0f] p-3 min-h-[96px]">
+      <div className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+      <div className="font-mono text-xl mt-1 leading-tight" style={{ color }}>{value}</div>
+      <div className="text-[10px] text-[#6b7479] mt-2 leading-snug">{sub}</div>
+    </div>
+  );
+}
+
+function EyeTdrChartPanel({ title, accent, children }) {
+  return (
+    <div className="p-5 border border-[#252e33] bg-[#12171a] min-w-0">
+      <div className="font-mono text-[10px] uppercase tracking-wider mb-3" style={{ color: accent }}>{title}</div>
+      <div style={{ height: 286 }}>{children}</div>
+    </div>
+  );
+}
+
+function EyeTdrCauseCard({ label, value, body, color }) {
+  return (
+    <div className="border border-[#252e33] bg-[#12171a] p-4">
+      <div className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+      <div className="font-mono text-sm mt-2" style={{ color }}>{value}</div>
+      <div className="text-xs text-[#a7b0b6] mt-2 leading-relaxed">{body}</div>
+    </div>
+  );
+}
+
+/* ============================================================
    Lab 06 — Cost & Yield Calculator
    ============================================================ */
 function CostCalc() {
@@ -7651,6 +8105,7 @@ const NAV_TREE = [
       { id: 'suckout', label: 'Tape Suckout', icon: Activity },
       { id: 'next', label: 'NEXT crosstalk', icon: Radio },
       { id: 'eye', label: 'Eye Diagram', icon: Eye },
+      { id: 'eyeTdr', label: 'Eye + TDR Lab', icon: Activity },
     ],
   },
   {
@@ -8101,6 +8556,7 @@ export default function CableApp() {
         {section === 'suckout' && <SuckoutSim />}
         {section === 'next' && <NEXTViz />}
         {section === 'eye' && <EyeDiagram />}
+        {section === 'eyeTdr' && <EyeTdrCorrelationLab />}
         {section === 'cost' && <CostCalc />}
         {section === 'qc' && <QCStats />}
         {section === '3d' && <Cable3D />}
