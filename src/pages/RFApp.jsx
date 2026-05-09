@@ -902,6 +902,13 @@ const CABLES = {
 
 const CABLE_IDS = Object.keys(CABLES);
 
+const cableIdToModelSlug = (id) => `rf-${String(id)
+  .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+  .replace(/_/g, "-")
+  .toLowerCase()}`;
+const getCableModelPath = (id, cable = CABLES[id]) => cable?.model || `/models/${cableIdToModelSlug(id)}.glb`;
+const withCableModel = (id, cable = CABLES[id]) => cable ? { ...cable, model: getCableModelPath(id, cable) } : cable;
+
 // ═══════════════════════════════════════════════════════════════
 // RF CONNECTOR DATABASE
 // ═══════════════════════════════════════════════════════════════
@@ -5753,7 +5760,7 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
       if (filterZ !== "all" && c.z !== Number(filterZ)) return false;
       if (filterCat !== "all" && c.cat !== filterCat) return false;
       if (c.fMax < filterFreq) return false;
-      if (visualOnly && !c.render) return false;
+      if (visualOnly && !getCableModelPath(id, c)) return false;
       if (search) { const q = search.toLowerCase(); if (!(c.name + " " + c.alias + " " + c.apps).toLowerCase().includes(q)) return false; }
       return true;
     });
@@ -5772,11 +5779,11 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
   const categoryCount = Object.values(CABLES).filter(c => filterCat === "all" || c.cat === filterCat).length;
   const highFreqCount = Object.values(CABLES).filter(c => c.fMax >= 6).length;
   const lowPimCount = Object.values(CABLES).filter(c => /PIM|cellular|LTE|5G/i.test(`${c.name} ${c.alias} ${c.apps}`)).length;
-  const renderedCableCount = Object.values(CABLES).filter(c => Boolean(c.render)).length;
-  const renderedFilteredCount = filtered.filter(([, c]) => Boolean(c.render)).length;
+  const renderedCableCount = Object.entries(CABLES).filter(([id, c]) => Boolean(getCableModelPath(id, c))).length;
+  const renderedFilteredCount = filtered.filter(([id, c]) => Boolean(getCableModelPath(id, c))).length;
   const renderCoveragePct = total ? Math.round((renderedCableCount / total) * 100) : 0;
-  const renderedFamilyCount = new Set(Object.values(CABLES).filter(c => c.render).map(c => c.cat)).size;
-  const coverageShowcaseIds = ["lmr400", "ava5", "ut141", "sucoflex550s", "belden4694r", "hca158"].filter(id => CABLES[id]?.render);
+  const renderedFamilyCount = new Set(Object.entries(CABLES).filter(([id, c]) => getCableModelPath(id, c)).map(([, c]) => c.cat)).size;
+  const coverageShowcaseIds = ["lmr400", "ava5", "ut141", "sucoflex550s", "belden4694r", "hca158"].filter(id => CABLES[id]?.render && getCableModelPath(id, CABLES[id]));
   const activeFilterText = [
     filterZ !== "all" ? `${filterZ} ohm` : null,
     filterCat !== "all" ? CATEGORIES[filterCat]?.label : null,
@@ -5786,10 +5793,11 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
 
   const hasActiveFilter = search || filterZ !== "all" || filterCat !== "all" || filterFreq > 0 || visualOnly;
   const clearFilters = () => { setSearch(""); setFilterZ("all"); setFilterCat("all"); setFilterFreq(0); setVisualOnly(false); };
-  const renderModal = renderModalId && CABLES[renderModalId]?.model ? (
+  const renderModalCable = renderModalId && CABLES[renderModalId] ? withCableModel(renderModalId) : null;
+  const renderModal = renderModalCable ? (
     <CableRenderModal
       id={renderModalId}
-      cable={CABLES[renderModalId]}
+      cable={renderModalCable}
       onClose={() => setRenderModalId(null)}
     />
   ) : null;
@@ -5800,14 +5808,14 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
       <>
         <CableDetailView
           id={detailId}
-          cable={CABLES[detailId]}
+          cable={withCableModel(detailId)}
           onBack={closeDetail}
           onDesign={() => loadIntoDesign(detailId)}
           onAsk={() => askAboutCable(detailId)}
           compared={comparedCables?.includes(detailId)}
           toggleCompare={toggleCompare}
           onPrint={onPrint ? () => onPrint(detailId) : undefined}
-          onViewRender={CABLES[detailId].model ? () => setRenderModalId(detailId) : undefined}
+          onViewRender={getCableModelPath(detailId, CABLES[detailId]) ? () => setRenderModalId(detailId) : undefined}
         />
         {renderModal}
       </>
@@ -5976,7 +5984,7 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
               id={id}
               cable={c}
               onOpen={() => openDetail(id)}
-              onViewRender={c.model ? () => setRenderModalId(id) : undefined}
+              onViewRender={getCableModelPath(id, c) ? () => setRenderModalId(id) : undefined}
               compared={comparedCables?.includes(id)}
               isMobile={isMobile}
             />
@@ -6221,8 +6229,8 @@ function CableGlbViewer({ cable: c }) {
             const rect = mount.getBoundingClientRect();
             const od = Number(c.OD) || 0;
             const targetSize = rect.width < 560
-              ? (od >= 20 ? 1.75 : od >= 14 ? 2.1 : 2.45)
-              : (od >= 20 ? 3.15 : od >= 14 ? 3.7 : 4.55);
+              ? (od >= 40 ? 1.35 : od >= 20 ? 1.75 : od >= 14 ? 2.1 : 2.45)
+              : (od >= 40 ? 2.45 : od >= 20 ? 3.15 : od >= 14 ? 3.7 : 4.55);
             const scale = targetSize / Math.max(size.x, size.y, size.z, 0.001);
             root.scale.setScalar(scale);
             modelGroup.add(root);

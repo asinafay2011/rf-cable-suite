@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 
 import bpy
@@ -471,6 +472,198 @@ MODELS = [
 ]
 
 
+def cable_id_to_model_slug(cable_id: str) -> str:
+    kebab = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", cable_id).replace("_", "-").lower()
+    return f"rf-{kebab}"
+
+
+def extract_js_object(source: str, marker: str) -> str:
+    start = source.index(marker)
+    brace = source.index("{", start)
+    depth = 0
+    quote: str | None = None
+    escaped = False
+    for index in range(brace, len(source)):
+        char = source[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in ("'", '"', "`"):
+            quote = char
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[brace : index + 1]
+    raise ValueError(f"Could not extract {marker}")
+
+
+def iter_top_level_entries(block: str):
+    content = block[1:-1]
+    starts = list(re.finditer(r"^  ([A-Za-z0-9_]+):\s*\{", content, re.M))
+    for idx, match in enumerate(starts):
+        end = starts[idx + 1].start() if idx + 1 < len(starts) else len(content)
+        yield match.group(1), content[match.start() : end]
+
+
+def js_string(entry: str, key: str, default: str = "") -> str:
+    match = re.search(rf"\b{re.escape(key)}:\s*\"((?:\\.|[^\"])*)\"", entry)
+    if not match:
+        return default
+    return match.group(1).replace('\\"', '"')
+
+
+def js_number(entry: str, key: str, default: float = 0) -> float:
+    match = re.search(rf"\b{re.escape(key)}:\s*([0-9]+(?:\.[0-9]+)?)", entry)
+    return float(match.group(1)) if match else default
+
+
+def js_model_slug(entry: str, cable_id: str) -> str:
+    match = re.search(r'model:\s*"/models/([^"]+)\.glb"', entry)
+    return match.group(1) if match else cable_id_to_model_slug(cable_id)
+
+
+def jacket_color_from_text(name: str, jacket: str) -> tuple[float, float, float, float]:
+    text = f"{name} {jacket}".lower()
+    if "white" in text:
+        return (0.86, 0.84, 0.76, 1)
+    if "brown" in text:
+        return (0.34, 0.20, 0.11, 1)
+    if "tan" in text:
+        return (0.52, 0.40, 0.27, 1)
+    if "blue" in text:
+        return (0.03, 0.12, 0.28, 1)
+    if "orange" in text:
+        return (0.50, 0.18, 0.04, 1)
+    return (0.010, 0.010, 0.010, 1)
+
+
+def conductor_kind_from_text(text: str) -> str:
+    lower = text.lower()
+    if "silver" in lower or "spc" in lower:
+        return "silver"
+    if "tinned" in lower or "ccs" in lower:
+        return "tinned_copper"
+    return "bare_copper"
+
+
+def braid_kind_from_text(text: str) -> str:
+    lower = text.lower()
+    if "silver" in lower or "spc" in lower:
+        return "silver"
+    if "bare" in lower and "copper" in lower:
+        return "bare_copper"
+    return "tinned_copper"
+
+
+def dielectric_kind_from_text(text: str) -> str:
+    lower = text.lower()
+    if "ptfe" in lower or "fep" in lower or "eptfe" in lower:
+        return "ptfe"
+    if "solid pe" in lower or "solid polyethylene" in lower:
+        return "solid_pe"
+    if "air" in lower:
+        return "air_pe"
+    return "foam_pe"
+
+
+def conductor_strands_from_text(text: str) -> int:
+    lower = text.lower()
+    if "19" in lower:
+        return 19
+    if "7-strand" in lower or "7 strand" in lower or "stranded" in lower:
+        return 7
+    return 1
+
+
+def even_carrier_count(value: float) -> int:
+    carriers = max(12, min(24, int(round(value))))
+    return carriers if carriers % 2 == 0 else carriers + 1
+
+
+def family_from_entry(cat: str, shield: str) -> str:
+    lower = shield.lower()
+    if cat == "semi":
+        return "semi_rigid"
+    if cat == "heliax" or "corrugated" in lower or "solid cu tube" in lower:
+        return "ava_hardline"
+    return "video_coax"
+
+
+def spec_from_catalog_entry(cable_id: str, entry: str) -> dict:
+    name = js_string(entry, "name", cable_id)
+    cat = js_string(entry, "cat")
+    conductor = js_string(entry, "conductor")
+    dielectric = js_string(entry, "dielectric")
+    shield = js_string(entry, "shield")
+    jacket = js_string(entry, "jacket")
+    shield_lower = shield.lower()
+    family = family_from_entry(cat, shield)
+    od_mm = js_number(entry, "OD", 5)
+    shield_mm = js_number(entry, "shield", od_mm * 0.82)
+
+    spec = {
+        "name": name,
+        "slug": js_model_slug(entry, cable_id),
+        "family": family,
+        "d_mm": js_number(entry, "d", 0.5),
+        "dielectric_mm": js_number(entry, "D", 2.0),
+        "shield_mm": shield_mm,
+        "od_mm": od_mm,
+        "jacket_color": jacket_color_from_text(name, jacket),
+        "conductor_material": conductor_kind_from_text(conductor),
+        "dielectric_material": dielectric_kind_from_text(dielectric),
+        "air_dielectric": "air" in dielectric.lower(),
+    }
+
+    if family == "video_coax":
+        spec.update(
+            {
+                "braid_carriers": even_carrier_count(12 + min(12, shield_mm * 0.85)),
+                "braid_turns": max(3.15, min(7.15, 6.55 - od_mm * 0.075)),
+                "foil": any(term in shield_lower for term in ("foil", "duobond", "tape", "conductive")),
+                "double_braid": any(term in shield_lower for term in ("double", "dual", "duobond")) and "foil+braid+foil" not in shield_lower,
+                "quad_shield": "quad" in name.lower() or "foil+braid+foil+braid" in shield_lower,
+                "braid_material": braid_kind_from_text(shield),
+                "conductor_strands": conductor_strands_from_text(conductor),
+            }
+        )
+    elif family == "semi_rigid":
+        spec.update(
+            {
+                "outer_tube_material": "silver" if ("tin" in shield_lower or "ss" in shield_lower) else "bare_copper",
+                "corrugated": "corrugated" in shield_lower or "conformable" in name.lower(),
+            }
+        )
+    else:
+        spec.update(
+            {
+                "corrugation_count": max(12, min(32, int(round(10 + od_mm * 0.36)))),
+                "corrugation_amp": max(0.014, min(0.055, shield_mm * 0.0028)),
+            }
+        )
+    return spec
+
+
+def load_catalog_model_specs() -> list[dict]:
+    source = (ROOT / "src" / "pages" / "RFApp.jsx").read_text(encoding="utf-8")
+    block = extract_js_object(source, "const CABLES =")
+    explicit_slugs = {spec["slug"] for spec in MODELS}
+    specs: list[dict] = []
+    for cable_id, entry in iter_top_level_entries(block):
+        spec = spec_from_catalog_entry(cable_id, entry)
+        if spec["slug"] not in explicit_slugs:
+            specs.append(spec)
+    return specs
+
+
 def ensure_dirs() -> None:
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -731,6 +924,7 @@ def dielectric_material_color(kind: str) -> tuple[str, tuple[float, float, float
         "foam_pe": ("gas injected foam pe", (0.88, 0.86, 0.76, 1), 0.78),
         "solid_pe": ("solid polyethylene dielectric", (0.86, 0.84, 0.72, 1), 0.86),
         "ptfe": ("solid ptfe dielectric", (0.96, 0.94, 0.86, 1), 0.90),
+        "air_pe": ("air dielectric with pe spacer", (0.92, 0.90, 0.78, 1), 0.36),
     }
     return palettes.get(kind, palettes["foam_pe"])
 
@@ -746,11 +940,23 @@ def add_label_empty(name: str) -> bpy.types.Object:
 def build_ava_hardline_model(spec: dict) -> None:
     reset_scene()
     root = add_label_empty(f"{spec['name']} runtime GLB root")
+    if "outer_r" not in spec:
+        od_mm = max(float(spec.get("od_mm", 20)), 0.1)
+        scale = min(0.25, 1.02 / (od_mm * 0.5))
+        spec = {
+            **spec,
+            "outer_r": od_mm * 0.5 * scale,
+            "shield_r": float(spec.get("shield_mm", od_mm * 0.88)) * 0.5 * scale,
+            "dielectric_r": float(spec.get("dielectric_mm", od_mm * 0.78)) * 0.5 * scale,
+            "conductor_r": float(spec.get("d_mm", od_mm * 0.16)) * 0.5 * scale,
+            "corrugation_amp": spec.get("corrugation_amp", max(0.018, min(0.058, od_mm * 0.0016))),
+            "corrugation_count": spec.get("corrugation_count", max(12, min(32, int(round(10 + od_mm * 0.34))))),
+        }
 
     copper = make_material("copper conductor", (0.9, 0.43, 0.16, 1), metallic=0.78, roughness=0.22)
     corrugated_copper = make_material("corrugated copper outer conductor", (0.78, 0.39, 0.16, 1), metallic=0.86, roughness=0.2)
     copper_shadow = make_material("dark copper groove shading", (0.34, 0.16, 0.08, 1), metallic=0.75, roughness=0.3)
-    foam = make_material("low density foam dielectric", (0.9, 0.87, 0.75, 1), roughness=0.36, alpha=0.72)
+    foam = make_material("low density foam dielectric", (0.9, 0.87, 0.75, 1), roughness=0.36, alpha=0.34 if spec.get("air_dielectric") else 0.72)
     tape = make_material("ptfe tape spiral wrap", (0.98, 0.96, 0.86, 1), roughness=0.28, alpha=0.44)
     tape_edge = make_material("ptfe tape lap edge", (1.0, 0.98, 0.9, 1), roughness=0.24, alpha=0.68)
     jacket = make_material("black outdoor PE jacket", spec["jacket_color"], roughness=0.82)
@@ -997,17 +1203,84 @@ def build_video_coax_model(spec: dict) -> None:
     )
 
 
+def build_semi_rigid_model(spec: dict) -> None:
+    reset_scene()
+    root = add_label_empty(f"{spec['name']} runtime GLB root")
+
+    scale = 0.38
+    outer_r = max(spec["shield_mm"], spec["od_mm"]) * 0.5 * scale
+    dielectric_r = spec["dielectric_mm"] * 0.5 * scale
+    conductor_r = spec["d_mm"] * 0.5 * scale
+    tube_kind = spec.get("outer_tube_material", "bare_copper")
+    tube_color = (0.82, 0.44, 0.18, 1) if tube_kind == "bare_copper" else (0.82, 0.80, 0.72, 1)
+
+    tube = make_material("solid metal outer conductor tube", tube_color, metallic=0.88, roughness=0.22)
+    tube_shadow = make_material("outer tube cut shadow", (0.22, 0.15, 0.10, 1), metallic=0.64, roughness=0.38)
+    ptfe = make_material("solid ptfe dielectric", (0.96, 0.94, 0.86, 1), roughness=0.34, alpha=0.88)
+    copper = make_material(
+        "silver plated center conductor" if spec.get("conductor_material") == "silver" else "copper center conductor",
+        conductor_material_color(spec.get("conductor_material", "bare_copper")),
+        metallic=0.82,
+        roughness=0.2,
+    )
+
+    objects: list[bpy.types.Object] = []
+    objects.append(cylinder_x("rear solid outer conductor tube", -1.54, 2.42, outer_r, tube, vertices=128))
+    objects.append(cylinder_x("outer conductor cut lip", -0.27, 0.16, outer_r * 1.012, tube_shadow, vertices=128))
+    objects.append(
+        tube_surface(
+            "exposed solid outer conductor sleeve",
+            -0.31,
+            1.28,
+            outer_r * 0.985,
+            tube,
+            corrugation_amp=outer_r * 0.026 if spec.get("corrugated") else 0,
+            corrugation_count=18 if spec.get("corrugated") else 1,
+            radial_segments=112,
+            length_segments=80,
+        )
+    )
+    objects.append(cylinder_x("ptfe dielectric core", 1.74, 1.48, dielectric_r, ptfe, vertices=128))
+    objects.extend(add_center_conductor(0.15, 3.24, conductor_r, copper, strands=spec.get("conductor_strands", 1)))
+
+    for obj in objects:
+        obj.parent = root
+
+    root.rotation_euler = (math.radians(-6), 0, math.radians(-2.5))
+
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in [root, *objects]:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = root
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+
+    bpy.ops.export_scene.gltf(
+        filepath=str(MODELS_DIR / f"{spec['slug']}.glb"),
+        export_format="GLB",
+        export_apply=True,
+        export_yup=True,
+        export_animations=False,
+        export_current_frame=True,
+    )
+
+
 def build_model(spec: dict) -> None:
     family = spec.get("family", "ava_hardline")
     if family == "video_coax":
         build_video_coax_model(spec)
+    elif family == "semi_rigid":
+        build_semi_rigid_model(spec)
     else:
         build_ava_hardline_model(spec)
 
 
 def main() -> None:
     ensure_dirs()
-    for spec in MODELS:
+    seen: set[str] = set()
+    for spec in [*MODELS, *load_catalog_model_specs()]:
+        if spec["slug"] in seen:
+            continue
+        seen.add(spec["slug"])
         build_model(spec)
 
 
