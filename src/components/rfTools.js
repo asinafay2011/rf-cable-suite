@@ -612,7 +612,7 @@ export const RF_TOOLS = [
   {
     name: 'design_dielectric_stack',
     description:
-      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Returns a complete layer recipe + the predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the Dielectric Stack Designer tab. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
+      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Returns a complete layer recipe + the predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the RF Stack Lab tab. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1291,7 +1291,7 @@ function designDielectricStack(input) {
       bragg_notch_1_ghz: notch1,
     },
     label: `${target_z0_ohm ? `${target_z0_ohm} Ω` : ''}${target_vp ? ` · ${(target_vp*100).toFixed(0)}% VP` : ''} · d=${d.toFixed(3)} mm`.trim(),
-    _section: 'dielectric',
+    _section: 'stack',
     _apply_preset: {
       conductor_od_mm: round(d, 4),
       target_z0: target_z0_ohm,

@@ -6,8 +6,7 @@ import FloatingAgent from "../components/FloatingAgent.jsx";
 import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
 import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
 import CompanyDefaultsPanel from "../components/CompanyDefaultsPanel.jsx";
-import SuckoutSim from "../components/SuckoutSim.jsx";
-import DielectricStackDesigner from "../components/DielectricStackDesigner.jsx";
+import RFStackLab from "../components/RFStackLab.jsx";
 import { useIsMobile } from "../components/useIsMobile.js";
 
 const RF_SYSTEM_PROMPT = `You are a senior RF cable engineer embedded in the RF Cable Engineering Suite. You have access to calculation tools — use them whenever a numeric answer is requested instead of relying on memorized constants.
@@ -48,12 +47,12 @@ Multi-tool orchestration (chain calls in one turn whenever the engineer's questi
 - Prefer parallel tool calls (multiple tool_use blocks in one turn) when calls are independent. Chain sequentially only when one feeds the next.
 
 Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP and Y Ω"):
-- The user describes a target — e.g. "conductor 0.045 inch, hit 80% VP at 50 Ω". Call \`design_dielectric_stack\` with the parsed targets. The tool returns a complete layer recipe AND a one-click apply preset that the chat surfaces as an "Apply" button. The user clicks → the Dielectric Stack Designer tab is auto-filled.
+- The user describes a target — e.g. "conductor 0.045 inch, hit 80% VP at 50 Ω". Call \`design_dielectric_stack\` with the parsed targets. The tool returns a complete layer recipe AND a one-click apply preset that the chat surfaces as an "Apply" button. The user clicks → the RF Stack Lab tab is auto-filled.
 - Auto-detect units: if the conductor OD is between 0.005 and 0.5 it is almost certainly inches (RF inner conductors are 0.020 / 0.032 / 0.045 / 0.057"); pass it as \`conductor_od_inch\`. If between 0.5 and 30 and the user said "mm", pass as \`conductor_od_mm\`.
 - Default to a HD-inside / LD-outside MIX unless the user specifies otherwise — it gives the lowest dielectric loss while still hitting target VP.
 - Manufacturing rule (enforced by the tool): if conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm). The tool reports the clamp in its notes — surface that fact to the user so they understand why the recipe uses thinner tape with more passes.
 - After designing, ALSO call \`compute_tape_notches\` in the same turn (parallel) to flag Bragg suckouts the build will produce. Warn explicitly when 2+ tape layers share the same pitch (coherent → strong notch).
-- In the chat reply, summarise: targets → composition (HD% + LD%) → predicted final OD/VP/Z₀ → notch frequencies → "click Apply to build it on the Dielectric Stack Designer tab". Always cite the small-conductor clamp note when it fires.
+- In the chat reply, summarise: targets → composition (HD% + LD%) → predicted final OD/VP/Z₀ → notch frequencies → "click Apply to build it on the RF Stack Lab tab". Always cite the small-conductor clamp note when it fires.
 
 Inline diagrams (\`generate_diagram\` tool):
 - Use it when a picture beats text. Kinds: smith_chart, atten_curve, cross_section, eye_diagram, z_step_chart, bargraph.
@@ -90,8 +89,9 @@ const RF_SECTION_LABELS = {
   launch: 'Connector Launch Lab',
   shielding: 'Shielding Effectiveness Lab',
   scanner: 'Near-field / EMI Scanner Lab',
-  suckout: 'Tape Suckout Sim',
-  dielectric: 'Dielectric Stack Designer',
+  stack: 'RF Stack Lab',
+  suckout: 'RF Stack Lab',
+  dielectric: 'RF Stack Lab',
   wizard: 'Wizard',
   cheat: 'Cheat Sheet',
   compare: 'Compare',
@@ -157,6 +157,12 @@ const RF_SECTION_STARTERS = {
     'Why pick 75 Ω over 50 Ω for video?',
     'Trade-off between dielectric loss and dielectric strength',
   ],
+  stack: [
+    'Build a cable: conductor 0.045", target 80% VP, 50 Ω',
+    'What pitch puts PTFE suckout above 18 GHz?',
+    'Compare foil overlap vs braid coverage for shield leakage',
+    'How do SPC flatwire spiral and helical shields affect notches?',
+  ],
   dielectric: [
     'Build a cable: conductor 0.045", target 80% VP, 50 Ω',
     'Build a 75 Ω cable, conductor 0.032", VP 70%, all HD PTFE',
@@ -179,8 +185,8 @@ const RF_TOOL_TO_SECTION = {
   compute_attenuation:      { id: 'tools',      label: 'Tools' },
   lookup_rf_cable:          { id: 'library',    label: 'Library' },
   lookup_connector:         { id: 'connectors', label: 'Connectors' },
-  design_dielectric_stack:  { id: 'dielectric', label: 'Dielectric Stack' },
-  compute_tape_notches:     { id: 'dielectric', label: 'Dielectric Stack' },
+  design_dielectric_stack:  { id: 'stack', label: 'RF Stack Lab' },
+  compute_tape_notches:     { id: 'stack', label: 'RF Stack Lab' },
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1894,8 +1900,7 @@ export default function RFCableSuite() {
     {
       group: "build", label: "Build",
       children: [
-        { id: "dielectric", label: "Dielectric Stack" },
-        { id: "suckout", label: "Tape Suckout" },
+        { id: "stack", label: "RF Stack Lab" },
       ],
     },
     {
@@ -2264,8 +2269,7 @@ export default function RFCableSuite() {
           {tab === "launch" && <ConnectorLaunchLab />}
           {tab === "shielding" && <ShieldingEffectivenessLab />}
           {tab === "scanner" && <NearFieldEmiScannerLab />}
-          {tab === "suckout" && <SuckoutSim accent="#d97706" defaultLayer="ptfe" />}
-          {tab === "dielectric" && <DielectricStackDesigner />}
+          {(tab === "stack" || tab === "suckout" || tab === "dielectric") && <RFStackLab />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
           {tab === "cheat" && <CheatSheetView />}
           {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}
@@ -2857,7 +2861,7 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
     { id: 'launch', icon: 'launch', title: 'Connector Launch Lab', sub: 'Pin depth · strip length · ferrule step → S11', accent: '#38bdf8' },
     { id: 'shielding', icon: 'shielding', title: 'Shielding Effectiveness Lab', sub: 'Braid · foil gap · bond quality → leakage dB', accent: '#22d3ee' },
     { id: 'scanner', icon: 'scanner', title: 'Near-field / EMI Scanner', sub: 'Probe scan · hotspot map · spectrum clue', accent: '#f472b6' },
-    { id: 'suckout', icon: 'wave', title: 'Tape Suckout Sim', sub: 'Multi-layer Bragg-notch designer', accent: '#e89357' },
+    { id: 'stack', icon: 'wave', title: 'RF Stack Lab', sub: 'PTFE build · shield coverage · RF symptoms', accent: '#e89357' },
     { id: 'wizard', icon: 'sparkles', title: 'Cable Selector', sub: 'Wizard: pick the right cable for the job', accent: '#84cc16' },
     { id: 'cheat', icon: 'book', title: 'Cheat Sheet', sub: 'Formulas · constants · standards', accent: '#cbd5e1' },
   ];
@@ -3039,7 +3043,7 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
           <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 3, color: '#c97b3f', textTransform: 'uppercase', marginBottom: 10 }}>◆ Recently added</div>
           <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 8, fontSize: 13, color: '#a7b0b6' }}>
             <NewItem accent="#e89357">
-              <strong style={{ color: '#fbbf24' }}>Tape Suckout Sim</strong> — multi-layer Bragg-notch designer with mm/inch toggle, cable cross-section visualization, spiral wrap (8-bobbin), and gap-only constraint.
+              <strong style={{ color: '#fbbf24' }}>RF Stack Lab</strong> — PTFE build-up, SPC flatwire shields, foil/braid coverage, suckout, TDR, S11, VSWR, and insertion loss in one macro view.
             </NewItem>
             <NewItem accent="#5eead4">
               <strong style={{ color: '#fbbf24' }}>Library expansion</strong> — 8 new entries (RG-316 / 393, LMR-200 / 900, Heliax LDF5, Sucoflex 104, UT-085, RG-6 / 11) with linked datasheets.
