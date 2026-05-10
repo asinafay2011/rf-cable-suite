@@ -164,6 +164,7 @@ const SECTION_LABELS = {
   m2: 'Twisted Pair (Module 2)',
   m3: 'Bundle (Module 3)',
   calc: 'Z₀ Calc',
+  si: 'Signal Integrity Diagnostics Lab',
   tdr: 'TDR Sim',
   vna: 'VNA Lab',
   sim: 'Process Sim (manufacturing)',
@@ -198,6 +199,12 @@ const SECTION_STARTERS = {
     'What manufacturing knobs hurt yield the most?',
     'Trade-off between line speed and εr drift in foamed dielectric',
     'How do I hit USB4 skew (≤5 ps/m) with manufacturing realistic tolerances?',
+  ],
+  si: [
+    'Which lab should I use: TDR, VNA, or Eye + TDR?',
+    'Show the measurement chain from physical defect to eye closure',
+    'Compare skew, impedance bump, foil gap, and bad twist pitch',
+    'What production fix maps to each SI symptom?',
   ],
   vna: [
     'How do I read a TDR plot — what looks like a defect?',
@@ -260,6 +267,12 @@ const SECTION_STARTERS = {
 function cableContextStarters(ctx) {
   const tabStarters = SECTION_STARTERS[ctx?.section]
   return tabStarters || CABLE_STARTERS
+}
+
+function initialHighspeedSection() {
+  if (typeof window === 'undefined') return 'home';
+  const raw = window.location.hash.replace(/^#/, '');
+  return SECTION_LABELS[raw] ? raw : 'home';
 }
 
 function formatProcessSimContext(state) {
@@ -787,14 +800,12 @@ function HomeView({ setSection }) {
 
   const tools = [
     { id: 'sim',     icon: 'sim',     title: 'Process Sim', sub: '9-stage manufacturing flow → predicted specs', accent: '#c97b3f' },
-    { id: 'vna',     icon: 'vna',     title: 'VNA Lab',     sub: 'Touchstone .s1p / .s2p analysis · TDR · pair skew', accent: '#5eead4' },
+    { id: 'si',      icon: 'si',      title: 'SI Diagnostics Lab', sub: 'TDR + VNA + eye correlation around one Blender twin', accent: '#5eead4' },
     { id: 'calc',    icon: 'calc',    title: 'Z₀ Calc',     sub: '138/√εᵣ · log(D/d) for coax + diff', accent: '#fbbf24' },
-    { id: 'tdr',     icon: 'wave',    title: 'TDR Sim',     sub: 'Toggle defects · see Z(x) trace', accent: '#7dd3fc' },
     { id: 'lay',     icon: 'lay',     title: 'Lay Designer',sub: 'Pair lays + bundle compatibility', accent: '#a78bfa' },
     { id: 'braid',   icon: 'shield',  title: 'Braid Coverage', sub: 'K = (2F − F²)·100 % per SCTE 51', accent: '#e89357' },
     { id: 'atten',   icon: 'atten',   title: 'Attenuation', sub: 'Skin + dielectric loss per geometry', accent: '#84cc16' },
     { id: 'next',    icon: 'next',    title: 'NEXT',         sub: 'Pair-to-pair crosstalk vs lay diversity', accent: '#cbd5e1' },
-    { id: 'eyeTdr',  icon: 'correlation', title: 'Eye + TDR Lab', sub: 'Eye diagram + TDR + IL/RL in one Blender-backed failure view', accent: '#f472b6' },
     { id: 'cost',    icon: 'cost',    title: 'Cost Calc',    sub: 'Cu mass · jacket · labor · CPK', accent: '#facc15' },
     { id: 'library', icon: 'library', title: 'Library',      sub: `${cableCount} vendor presets + your custom cables`, accent: '#5eead4' },
   ];
@@ -852,7 +863,7 @@ function HomeView({ setSection }) {
             </p>
             <div className="hs-ctas" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 22 }}>
               <HsPrimaryCTA onClick={() => setSection('sim')} label="Open Process Sim" />
-              <HsSecondaryCTA onClick={() => setSection('vna')} label="Try VNA Lab" />
+              <HsSecondaryCTA onClick={() => setSection('si')} label="Open SI Lab" />
               <HsSecondaryCTA onClick={() => setSection('progression')} label="Progression walkthrough" />
             </div>
             <div style={{ marginTop: 16, fontSize: 11, color: '#6b7479', fontFamily: 'JetBrains Mono, monospace' }}>
@@ -980,7 +991,7 @@ function HomeView({ setSection }) {
           <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 3, color: '#c97b3f', textTransform: 'uppercase', marginBottom: 10 }}>◆ Recently added</div>
           <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 8, fontSize: 13, color: '#a7b0b6' }}>
             <HsNewItem accent="#f472b6">
-              <strong style={{ color: '#fbbf24' }}>Eye + TDR Correlation Lab</strong> — one high-speed defect drives the Blender scene, eye opening, TDR impedance, insertion loss, and return loss together.
+              <strong style={{ color: '#fbbf24' }}>SI Diagnostics Lab</strong> — TDR, VNA, and eye correlation now live behind one Blender-backed high-speed pair workbench.
             </HsNewItem>
             <HsNewItem accent="#5eead4">
               <strong style={{ color: '#fbbf24' }}>Build recipe upgrade</strong> — pair binder wrap + per-pair foil + outer foil/braid steps on every Vendor recipe; horizontal cross-section build flow with proportional ϕ chips.
@@ -1059,6 +1070,14 @@ function HsToolGlyph({ kind, color }) {
   if (kind === 'sim') return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
       <path d="M3 7h4l2 4 2-8 2 12 2-6h6" />
+    </svg>
+  );
+  if (kind === 'si') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 15c2.6-5.6 4.8-5.6 7.4 0s4.8 5.6 7.4 0S21 9.4 22 11.2" />
+      <path d="M4 5h16M4 19h16" opacity="0.35" />
+      <path d="M7 12h10" opacity="0.55" />
+      <circle cx="12" cy="12" r="2.2" fill={color} stroke="none" />
     </svg>
   );
   if (kind === 'vna') return (
@@ -1331,7 +1350,7 @@ const TAB_INTROS = {
 
 // Tabs whose internal component already renders a polished header — skip
 // the contextual banner for these to avoid double-headers.
-const SKIP_TAB_INTRO = new Set(['sim', 'vna', 'eyeTdr', 'atten']);
+const SKIP_TAB_INTRO = new Set(['sim', 'si', 'vna', 'eyeTdr', 'atten']);
 
 function TabIntro({ section }) {
   const data = TAB_INTROS[section];
@@ -1459,6 +1478,301 @@ function TabIntro({ section }) {
         )}
       </div>
     </section>
+  );
+}
+
+const SI_DIAGNOSTIC_SCENARIOS = [
+  {
+    id: 'nominal',
+    label: 'Clean pair',
+    sub: 'controlled 100 Ω',
+    defect: 'baseline',
+    freq: 1000,
+    d: 0.574,
+    er: 1.55,
+    tand: 0.00035,
+    skinLift: 1.0,
+    dielLift: 1.0,
+    z: '100.2 Ω',
+    eye: '72% UI',
+    tdr: '±1.0 Ω',
+    rl: '-31 dB',
+    fix: 'Lock extrusion centering, keep lay and foil tension stable.',
+    color: '#5eead4',
+  },
+  {
+    id: 'skew',
+    label: 'Pair skew',
+    sub: 'dielectric mismatch',
+    defect: 'delay mismatch',
+    freq: 5000,
+    d: 0.511,
+    er: 1.68,
+    tand: 0.00045,
+    skinLift: 1.08,
+    dielLift: 1.22,
+    z: '99.1 / 101.8 Ω',
+    eye: '43% UI',
+    tdr: 'delay split',
+    rl: '-24 dB',
+    fix: 'Match foam density between wires and tighten cooling/take-up balance.',
+    color: '#7dd3fc',
+  },
+  {
+    id: 'bump',
+    label: 'Impedance bump',
+    sub: 'local crush / void',
+    defect: 'localized Z step',
+    freq: 2400,
+    d: 0.460,
+    er: 1.92,
+    tand: 0.00055,
+    skinLift: 1.18,
+    dielLift: 1.32,
+    z: '+8.5 Ω step',
+    eye: '31% UI',
+    tdr: 'strong echo',
+    rl: '-16 dB',
+    fix: 'Inspect capstan pressure, die centering, and bend/crush handling.',
+    color: '#fbbf24',
+  },
+  {
+    id: 'shield',
+    label: 'Foil gap',
+    sub: 'shield discontinuity',
+    defect: 'return-loss ripple',
+    freq: 8000,
+    d: 0.500,
+    er: 1.62,
+    tand: 0.00042,
+    skinLift: 1.06,
+    dielLift: 1.12,
+    z: '101.4 Ω',
+    eye: '54% UI',
+    tdr: 'small echo',
+    rl: '-13 dB',
+    fix: 'Increase foil overlap, reduce wrap wander, and verify shield drain contact.',
+    color: '#f472b6',
+  },
+];
+
+function SignalIntegrityLab({ setSection }) {
+  const [scenarioId, setScenarioId] = useState('bump');
+  const scenario = SI_DIAGNOSTIC_SCENARIOS.find((item) => item.id === scenarioId) || SI_DIAGNOSTIC_SCENARIOS[0];
+  const selectedPoint = useMemo(() => {
+    const base = calcAttenuationPoint(scenario.freq, scenario.d, scenario.er, scenario.tand);
+    const skin = base.skin * scenario.skinLift;
+    const diel = base.diel * scenario.dielLift;
+    return { ...base, skin, diel, total: skin + diel };
+  }, [scenario]);
+  const crossover = useMemo(() => {
+    const data = Array.from({ length: 80 }, (_, index) => {
+      const f = 1 * Math.pow(10000, index / 79);
+      return calcAttenuationPoint(f, scenario.d, scenario.er, scenario.tand);
+    });
+    return estimateAttenCrossover(data);
+  }, [scenario]);
+  const skinPct = Math.round((selectedPoint.skin / Math.max(selectedPoint.total, 0.001)) * 100);
+  const dielPct = 100 - skinPct;
+
+  const labTiles = [
+    {
+      id: 'tdr',
+      title: 'TDR defect locator',
+      kicker: 'time domain',
+      body: 'Use when the problem looks physical: crush, kink, void, bad launch, impedance step.',
+      metric: scenario.tdr,
+      icon: Activity,
+      color: '#7dd3fc',
+    },
+    {
+      id: 'vna',
+      title: 'VNA / Touchstone lab',
+      kicker: 'frequency domain',
+      body: 'Use when you have .s1p/.s2p files and need RL, VSWR, group delay, or gated TDR.',
+      metric: scenario.rl,
+      icon: FlaskConical,
+      color: '#5eead4',
+    },
+    {
+      id: 'eyeTdr',
+      title: 'Eye + TDR correlation',
+      kicker: 'system margin',
+      body: 'Use when you need to connect a defect to eye opening, jitter, IL, RL, and the first fix.',
+      metric: scenario.eye,
+      icon: Eye,
+      color: '#f472b6',
+    },
+    {
+      id: 'atten',
+      title: 'Attenuation twin',
+      kicker: 'loss budget',
+      body: 'Use when geometry/material changes decide reach through skin and dielectric loss.',
+      metric: `${selectedPoint.total.toFixed(1)} dB`,
+      icon: Zap,
+      color: '#84cc16',
+    },
+  ];
+
+  return (
+    <section className="space-y-6">
+      <header className="border-b border-[#252e33] pb-6">
+        <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-[#5eead4]">◆ Labs / grouped workbench</div>
+        <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-end">
+          <div>
+            <h1 className="m-0 text-[clamp(28px,4vw,44px)] leading-tight font-light text-[#f0ebe2]" style={{ fontFamily: 'Bricolage Grotesque, sans-serif' }}>
+              Signal Integrity Diagnostics Lab
+            </h1>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-[#a7b0b6]">
+              One high-speed pair scene ties the labs together: choose a physical defect, then jump into TDR, VNA, eye correlation, or attenuation without making the Labs menu feel crowded.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 border border-[#252e33] bg-[#12171a]">
+            <SiMiniMetric label="TDR" value={scenario.tdr} color="#7dd3fc" />
+            <SiMiniMetric label="RL" value={scenario.rl} color="#5eead4" />
+            <SiMiniMetric label="Eye" value={scenario.eye} color="#f472b6" />
+          </div>
+        </div>
+      </header>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_420px]">
+        <div className="overflow-hidden border border-[#2f7a6e] bg-[#081112] shadow-[0_0_45px_rgba(94,234,212,0.08)]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#252e33] bg-[#0a0d0f] px-4 py-3">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.26em] text-[#5eead4]">Blender GLB high-speed twin</div>
+              <div className="mt-1 text-sm text-[#f0ebe2]">
+                {scenario.label} <span className="font-mono text-[#fbbf24]">@ {formatAttenFrequency(scenario.freq)}</span>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="border border-[#7a4a26] bg-[#1f1410] px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-[#e89357]">
+                skin {skinPct}%
+              </span>
+              <span className="border border-[#384249] bg-[#0a0d0f] px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-[#a7b0b6]">
+                dielectric {dielPct}%
+              </span>
+            </div>
+          </div>
+          <AttenMacroGlbViewer
+            d={scenario.d}
+            er={scenario.er}
+            tand={scenario.tand}
+            selectedFreq={scenario.freq}
+            selectedPoint={selectedPoint}
+            crossover={crossover}
+            view="hero"
+          />
+        </div>
+
+        <aside className="space-y-4">
+          <div className="border border-[#252e33] bg-[#12171a] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[#c97b3f]">Failure director</div>
+              <div className="font-mono text-[11px] text-[#5eead4]">{scenario.z}</div>
+            </div>
+            <div className="mt-3 grid gap-2">
+              {SI_DIAGNOSTIC_SCENARIOS.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => setScenarioId(item.id)}
+                  className={`flex items-center gap-3 border px-3 py-3 text-left transition-all ${
+                    item.id === scenario.id
+                      ? 'border-[#5eead4] bg-[#0d1f1d] text-[#f0ebe2]'
+                      : 'border-[#252e33] bg-[#0a0d0f] text-[#a7b0b6] hover:border-[#384249] hover:text-[#f0ebe2]'
+                  }`}
+                >
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: item.color, boxShadow: `0 0 12px ${item.color}` }} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-mono text-[11px] font-semibold uppercase tracking-wider">{item.label}</span>
+                    <span className="mt-0.5 block text-[11px] text-[#6b7479]">{item.sub}</span>
+                  </span>
+                  <span className="font-mono text-[10px] uppercase text-[#6b7479]">{item.defect}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="border border-[#252e33] bg-[#12171a] p-4">
+            <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[#c97b3f]">First engineering read</div>
+            <p className="mt-3 text-sm leading-6 text-[#f0ebe2]">{scenario.fix}</p>
+            <div className="mt-4">
+              <SiMicroTrace color={scenario.color} />
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {labTiles.map((tile) => (
+          <button
+            key={tile.id}
+            onClick={() => setSection(tile.id)}
+            className="group border border-[#252e33] bg-[#12171a] p-4 text-left transition-all hover:-translate-y-0.5 hover:border-[#5eead4] hover:bg-[#10191a]"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex h-9 w-9 items-center justify-center border border-[#384249] bg-[#0a0d0f]" style={{ color: tile.color }}>
+                <tile.icon size={18} />
+              </div>
+              <div className="font-mono text-lg text-[#fbbf24]">{tile.metric}</div>
+            </div>
+            <div className="mt-4 font-mono text-[10px] uppercase tracking-[0.24em]" style={{ color: tile.color }}>{tile.kicker}</div>
+            <div className="mt-1 text-base font-semibold text-[#f0ebe2]">{tile.title}</div>
+            <p className="mt-2 min-h-[54px] text-xs leading-5 text-[#a7b0b6]">{tile.body}</p>
+            <div className="mt-4 flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-[#6b7479] group-hover:text-[#5eead4]">
+              Open lab <ArrowRight size={13} />
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-[1fr_1fr]">
+        <div className="border border-[#2f7a6e] bg-[#0d1f1d] p-4">
+          <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[#5eead4]">What got grouped</div>
+          <p className="mt-2 text-sm leading-6 text-[#d7e6e3]">
+            TDR Sim, VNA Lab, Eye + TDR, and attenuation now read as one SI diagnostics workflow. The individual tools remain one click away, but the main Labs menu stays calm.
+          </p>
+        </div>
+        <div className="border border-[#7a5a14] bg-[#201808] p-4">
+          <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[#fbbf24]">Next best Blender upgrade</div>
+          <p className="mt-2 text-sm leading-6 text-[#f0ebe2]">
+            A dedicated “measurement bench” GLB would be the next level: twinax cable, probe pins, VNA ports, and glowing TDR plane all in one macro render.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SiMiniMetric({ label, value, color }) {
+  return (
+    <div className="border-r border-[#252e33] px-3 py-3 last:border-r-0">
+      <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+      <div className="mt-1 font-mono text-lg" style={{ color }}>{value}</div>
+    </div>
+  );
+}
+
+function SiMicroTrace({ color }) {
+  return (
+    <svg viewBox="0 0 360 92" className="block w-full" role="img" aria-label="Signal integrity trace preview">
+      <defs>
+        <pattern id="siTraceGrid" width="30" height="23" patternUnits="userSpaceOnUse">
+          <path d="M30 0H0V23" fill="none" stroke="#252e33" strokeWidth="1" opacity="0.75" />
+        </pattern>
+        <filter id="siTraceGlow" x="-20%" y="-80%" width="140%" height="260%">
+          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+      <rect width="360" height="92" fill="#071012" />
+      <rect width="360" height="92" fill="url(#siTraceGrid)" />
+      <path d="M16 55 C52 55 62 34 92 34 S132 76 164 55 S207 30 235 49 S277 75 344 38" fill="none" stroke={color} strokeWidth="3" filter="url(#siTraceGlow)" />
+      <path d="M16 66 H344" stroke="#6b7479" strokeDasharray="4 8" opacity="0.45" />
+      <text x="16" y="20" fill="#6b7479" fontFamily="JetBrains Mono" fontSize="9" letterSpacing="2">CORRELATED SIGNATURE</text>
+    </svg>
   );
 }
 
@@ -5261,7 +5575,7 @@ function AttenTwinScene({ d, er, tand, selectedFreq, selectedPoint, crossover })
   );
 }
 
-function AttenMacroGlbViewer({ d, er, tand, selectedFreq, selectedPoint, crossover }) {
+function AttenMacroGlbViewer({ d, er, tand, selectedFreq, selectedPoint, crossover, view = 'default' }) {
   const mountRef = useRef(null);
   const runtimeRef = useRef({ model: null, dynamic: [], materials: [], resize: null, renderer: null });
   const [status, setStatus] = useState('Loading Blender GLB');
@@ -5325,8 +5639,9 @@ function AttenMacroGlbViewer({ d, er, tand, selectedFreq, selectedPoint, crossov
         scene = new THREE.Scene();
         scene.fog = new THREE.FogExp2(0x071012, 0.026);
 
-        camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
-        camera.position.set(0.05, -8.35, 2.28);
+        const heroView = view === 'hero';
+        camera = new THREE.PerspectiveCamera(heroView ? 31 : 34, 1, 0.1, 100);
+        camera.position.set(0.05, heroView ? -6.65 : -8.35, heroView ? 1.86 : 2.28);
 
         const hemi = new THREE.HemisphereLight(0xdffff8, 0x050607, 1.55);
         scene.add(hemi);
@@ -5344,8 +5659,8 @@ function AttenMacroGlbViewer({ d, er, tand, selectedFreq, selectedPoint, crossov
         controls.enableDamping = true;
         controls.enablePan = false;
         controls.enableZoom = true;
-        controls.minDistance = 5.6;
-        controls.maxDistance = 13.2;
+        controls.minDistance = heroView ? 4.3 : 5.6;
+        controls.maxDistance = heroView ? 10.5 : 13.2;
         controls.target.set(0.05, 0, 0.05);
         controls.rotateSpeed = 0.42;
         controls.zoomSpeed = 0.55;
@@ -5360,7 +5675,7 @@ function AttenMacroGlbViewer({ d, er, tand, selectedFreq, selectedPoint, crossov
             model.name = 'Highspeed_Attenuation_Macro_GLB';
             model.rotation.set(0, 0, 0);
             model.position.set(0, 0, 0);
-            model.scale.setScalar(0.96);
+            model.scale.setScalar(heroView ? 1.14 : 0.96);
             const dynamic = [];
             const materials = [];
             model.traverse((node) => {
@@ -5426,7 +5741,7 @@ function AttenMacroGlbViewer({ d, er, tand, selectedFreq, selectedPoint, crossov
       renderer?.domElement?.remove?.();
       runtimeRef.current = { model: null, dynamic: [], materials: [], resize: null, renderer: null };
     };
-  }, []);
+  }, [view]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -9257,13 +9572,11 @@ const NAV_TREE = [
     ],
   },
   {
-    group: 'sim', label: 'Labs', icon: Wrench,
+    group: 'sim', label: 'Labs', icon: Wrench, aliases: ['tdr', 'vna', 'eyeTdr'],
     children: [
       { id: 'sim', label: 'Process Sim', icon: Wrench },
-      { id: 'tdr', label: 'TDR Sim', icon: Activity },
-      { id: 'vna', label: 'VNA Lab', icon: FlaskConical },
-      { id: 'next', label: 'NEXT crosstalk', icon: Radio },
-      { id: 'eyeTdr', label: 'Eye + TDR Lab', icon: Activity },
+      { id: 'si', label: 'SI Diagnostics', icon: Activity },
+      { id: 'next', label: 'NEXT Crosstalk', icon: Radio },
     ],
   },
   {
@@ -9301,13 +9614,14 @@ function findActiveLabel(active) {
       if (child) return child.label;
     }
   }
-  return 'CABLE.LAB';
+  return SECTION_LABELS[active] || 'CABLE.LAB';
 }
 
 // Find which group contains the given child id (for highlighting parent)
 function findActiveGroup(active) {
   for (const node of NAV_TREE) {
     if (node.children?.some((c) => c.id === active)) return node.group;
+    if (node.aliases?.includes(active)) return node.group;
   }
   return null;
 }
@@ -9532,8 +9846,15 @@ function TopNav({ active, onChange }) {
    App
    ============================================================ */
 export default function CableApp() {
-  const [section, setSection] = useState('home');
+  const [section, setSectionState] = useState(initialHighspeedSection);
   const [recipeProduct, setRecipeProduct] = useState(null);
+
+  const setSection = (next) => {
+    setSectionState(next);
+    if (typeof window !== 'undefined' && SECTION_LABELS[next]) {
+      window.history.replaceState(null, '', `#${next}`);
+    }
+  };
 
   const openRecipe = (product) => {
     setRecipeProduct(product);
@@ -9698,7 +10019,7 @@ export default function CableApp() {
       {section !== 'recipe' && <TopNav active={section} onChange={setSection} />}
       {section !== 'recipe' && section !== 'home' && <TabIntro section={section} />}
 
-      <main className={`${section === 'atten' ? 'max-w-[1780px] px-4 md:px-8' : 'max-w-6xl px-4 md:px-12'} mx-auto py-12`}>
+      <main className={`${section === 'atten' || section === 'si' ? 'max-w-[1780px] px-4 md:px-8' : 'max-w-6xl px-4 md:px-12'} mx-auto py-12`}>
         {section === 'recipe' && <BuildRecipePage product={recipeProduct} onBack={closeRecipe} />}
         {section === 'home' && <HomeView setSection={setSection} />}
         {section === 'progression' && <ProgressionView />}
@@ -9706,6 +10027,7 @@ export default function CableApp() {
         {section === 'm2' && <ModuleTwistedPair />}
         {section === 'm3' && <ModuleBundle />}
         {section === 'calc' && <ImpedanceCalc />}
+        {section === 'si' && <SignalIntegrityLab setSection={setSection} />}
         {section === 'tdr' && <TDRSim />}
         {section === 'vna' && <VNATest />}
         {section === 'sim' && <ProcessSim />}
