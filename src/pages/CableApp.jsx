@@ -12,7 +12,6 @@ import VNATest from '../components/VNATest.jsx';
 import CustomCablesPanel from '../components/CustomCablesPanel.jsx';
 import CompanyDefaultsPanel from '../components/CompanyDefaultsPanel.jsx';
 import ProcessSim from '../components/ProcessSim.jsx';
-import SuckoutSim from '../components/SuckoutSim.jsx';
 import QCStats from '../components/QCStats.jsx';
 import Cable3D from '../components/Cable3D.jsx';
 import { useIsMobile } from '../components/useIsMobile.js';
@@ -112,7 +111,7 @@ Multi-tab workflow orchestration (drive the UI across tabs in a single turn):
   1. \`calc_z0_coax\` to verify the geometry
   2. \`propose_pair_preset\` for the pair lay
   3. \`propose_braid_preset\` for the outer shield
-  4. \`propose_eye_preset\` for an eye-diagram preview
+  4. \`propose_eye_preset\` for the Eye + TDR correlation preview
   Then text-summarise: "I've staged 4 presets. Click Apply on each to push them into the right tab." The engineer can audit + approve incrementally.
 - When the engineer asks for a complete picture ("end-to-end build for this cable"), call \`generate_diagram\` with kind=\`cross_section\` to render the layered build inline so they see the whole structure at a glance.
 
@@ -169,12 +168,10 @@ const SECTION_LABELS = {
   vna: 'VNA Lab',
   sim: 'Process Sim (manufacturing)',
   braid: 'Braid Coverage',
-  atten: 'Attenuation Plot',
-  suckout: 'Tape Suckout Sim',
+  atten: 'Attenuation Digital Twin',
   qc: 'QC Stats Analyzer',
   '3d': '3D Cable Visualizer',
   next: 'NEXT Crosstalk',
-  eye: 'Eye Diagram',
   eyeTdr: 'Eye + TDR Correlation Lab',
   cost: 'Cost Calc',
   lay: 'Lay Designer',
@@ -195,12 +192,6 @@ const SECTION_STARTERS = {
     'What D/d ratio hits 50 Ω with PTFE εr=2.10?',
     'Compare solid PE vs foamed PE for 75 Ω coax',
     'Why is εr lower for foamed dielectrics?',
-  ],
-  suckout: [
-    'Tape width 12 mm, 25% overlap, VF 0.70 — where does suckout land?',
-    'I need clean 18 GHz on a PTFE-wrapped semi-rigid — what tape width is safe?',
-    'Why does my LMR-style cable have a notch at 8 GHz?',
-    'How to pick foil tape width to avoid suckout in 24-40 GHz band?',
   ],
   sim: [
     'Why does my Cat 6A NEXT come out below 50 dB?',
@@ -332,7 +323,7 @@ const CABLE_TOOL_TO_SECTION = {
   propose_pair_preset:   { id: 'lay',   label: 'Lay Design' },
   propose_tdr_scenario:  { id: 'tdr',   label: 'TDR Sim' },
   propose_atten_preset:  { id: 'atten', label: 'Atten' },
-  propose_eye_preset:    { id: 'eye',   label: 'Eye' },
+  propose_eye_preset:    { id: 'eyeTdr', label: 'Eye + TDR Lab' },
   propose_cost_preset:   { id: 'cost',  label: 'Cost' },
   compute_attenuation:   { id: 'atten', label: 'Atten' },
   pair_lay_skew:         { id: 'lay',   label: 'Lay Design' },
@@ -802,10 +793,8 @@ function HomeView({ setSection }) {
     { id: 'lay',     icon: 'lay',     title: 'Lay Designer',sub: 'Pair lays + bundle compatibility', accent: '#a78bfa' },
     { id: 'braid',   icon: 'shield',  title: 'Braid Coverage', sub: 'K = (2F − F²)·100 % per SCTE 51', accent: '#e89357' },
     { id: 'atten',   icon: 'atten',   title: 'Attenuation', sub: 'Skin + dielectric loss per geometry', accent: '#84cc16' },
-    { id: 'suckout', icon: 'suckout', title: 'Tape Suckout', sub: 'Multi-layer Bragg-notch designer', accent: '#f87171' },
     { id: 'next',    icon: 'next',    title: 'NEXT',         sub: 'Pair-to-pair crosstalk vs lay diversity', accent: '#cbd5e1' },
-    { id: 'eye',     icon: 'eye',     title: 'Eye Diagram',  sub: 'BW · jitter · noise → eye opening', accent: '#fb923c' },
-    { id: 'eyeTdr',  icon: 'correlation', title: 'Eye + TDR Lab', sub: 'Defect → eye · IL · RL · TDR together', accent: '#f472b6' },
+    { id: 'eyeTdr',  icon: 'correlation', title: 'Eye + TDR Lab', sub: 'Eye diagram + TDR + IL/RL in one Blender-backed failure view', accent: '#f472b6' },
     { id: 'cost',    icon: 'cost',    title: 'Cost Calc',    sub: 'Cu mass · jacket · labor · CPK', accent: '#facc15' },
     { id: 'library', icon: 'library', title: 'Library',      sub: `${cableCount} vendor presets + your custom cables`, accent: '#5eead4' },
   ];
@@ -990,8 +979,8 @@ function HomeView({ setSection }) {
         <section style={{ marginTop: 32, padding: 18, background: '#12171a', border: '1px solid #252e33', borderRadius: 4 }}>
           <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 3, color: '#c97b3f', textTransform: 'uppercase', marginBottom: 10 }}>◆ Recently added</div>
           <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 8, fontSize: 13, color: '#a7b0b6' }}>
-            <HsNewItem accent="#e89357">
-              <strong style={{ color: '#fbbf24' }}>Tape Suckout Sim</strong> — multi-layer Bragg-notch designer with mm/inch toggle, cable cross-section visualization, spiral SPC flatwire shield (8 bobbins, gap-only).
+            <HsNewItem accent="#f472b6">
+              <strong style={{ color: '#fbbf24' }}>Eye + TDR Correlation Lab</strong> — one high-speed defect drives the Blender scene, eye opening, TDR impedance, insertion loss, and return loss together.
             </HsNewItem>
             <HsNewItem accent="#5eead4">
               <strong style={{ color: '#fbbf24' }}>Build recipe upgrade</strong> — pair binder wrap + per-pair foil + outer foil/braid steps on every Vendor recipe; horizontal cross-section build flow with proportional ϕ chips.
@@ -1199,7 +1188,7 @@ function CoaxBadge() {
    TabIntro — compact contextual banner for each section.
    Replaces the global marketing Hero on all tabs except home / recipe
    (which have their own intros), and skipped on tabs whose internal
-   component already renders a polished header (sim, suckout, vna).
+   component already renders a polished header (sim, vna).
    ============================================================ */
 const TAB_INTROS = {
   progression: {
@@ -1342,7 +1331,7 @@ const TAB_INTROS = {
 
 // Tabs whose internal component already renders a polished header — skip
 // the contextual banner for these to avoid double-headers.
-const SKIP_TAB_INTRO = new Set(['sim', 'suckout', 'vna']);
+const SKIP_TAB_INTRO = new Set(['sim', 'vna', 'eyeTdr', 'atten']);
 
 function TabIntro({ section }) {
   const data = TAB_INTROS[section];
@@ -4454,7 +4443,7 @@ function BraidCoverage() {
 /* ============================================================
    Lab 03 — Attenuation Plotter
    ============================================================ */
-function AttenPlot() {
+function AttenPlotLegacy() {
   const presets = {
     cat6a: { name: 'Cat 6A — 23 AWG', d: 0.574, er: 1.55, tand: 0.00035 },
     cat8: { name: 'Cat 8 — 22 AWG', d: 0.643, er: 2.05, tand: 0.0007 },
@@ -4722,6 +4711,591 @@ function AttenPlot() {
         Cat 8 pushes to 2 GHz so dielectric loss is critical → must use FEP with tan δ &lt; 0.0007. Cat 6A at 500 MHz can use cheaper foam PE.
       </Callout>
     </section>
+  );
+}
+
+function AttenPlot() {
+  const presets = {
+    cat6a: { name: 'Cat 6A — 23 AWG', d: 0.574, er: 1.55, tand: 0.00035 },
+    cat8: { name: 'Cat 8 — 22 AWG', d: 0.643, er: 2.05, tand: 0.0007 },
+    rg6: { name: 'RG6 — Foam PE', d: 1.024, er: 1.45, tand: 0.0002 },
+    spw: { name: 'SpaceWire 26 AWG', d: 0.405, er: 2.05, tand: 0.0007 },
+    custom: { name: 'Custom' },
+  };
+  const [preset, setPreset] = useState('cat6a');
+  const [d, setD] = useState(0.574);
+  const [er, setEr] = useState(1.55);
+  const [tand, setTand] = useState(0.00035);
+  const [selectedFreq, setSelectedFreq] = useState(1000);
+
+  const usePreset = (k) => {
+    setPreset(k);
+    if (k !== 'custom' && presets[k]) {
+      setD(presets[k].d);
+      setEr(presets[k].er);
+      setTand(presets[k].tand);
+    }
+  };
+
+  useEffect(() => {
+    const onApply = (e) => {
+      const { section, params } = e.detail || {};
+      if (section !== 'atten' || !params) return;
+      if (params.d != null) setD(parseFloat(params.d));
+      if (params.er != null) setEr(parseFloat(params.er));
+      if (params.tand != null) setTand(parseFloat(params.tand));
+      setPreset('custom');
+    };
+    window.addEventListener('cable-suite:apply-preset', onApply);
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply);
+  }, []);
+
+  const handleParam = (setter) => (val) => {
+    setter(val);
+    setPreset('custom');
+  };
+
+  const data = useMemo(() => {
+    const arr = [];
+    for (let logF = 0; logF <= 4.0001; logF += 0.035) {
+      arr.push(calcAttenuationPoint(Math.pow(10, logF), d, er, tand));
+    }
+    return arr;
+  }, [d, er, tand]);
+
+  const selectedPoint = useMemo(
+    () => calcAttenuationPoint(selectedFreq, d, er, tand),
+    [selectedFreq, d, er, tand],
+  );
+  const crossover = useMemo(() => estimateAttenCrossover(data), [data]);
+  const chartDomain = useMemo(() => {
+    const values = data.flatMap((p) => [p.skin, p.diel, p.total]).filter((v) => v > 0);
+    const low = Math.max(0.01, Math.min(...values) * 0.65);
+    const high = Math.max(1, Math.max(...data.map((p) => p.total)) * 1.45);
+    return [low, high];
+  }, [data]);
+
+  const at500 = nearestAttenPoint(data, 500);
+  const at1G = nearestAttenPoint(data, 1000);
+  const at2G = nearestAttenPoint(data, 2000);
+  const at5G = nearestAttenPoint(data, 5000);
+  const selectedLog = Math.log10(selectedFreq);
+  const skinShare = selectedPoint.total ? selectedPoint.skin / selectedPoint.total : 0;
+  const dielShare = selectedPoint.total ? selectedPoint.diel / selectedPoint.total : 0;
+  const tenDbLengthM = selectedPoint.total > 0 ? 1000 / selectedPoint.total : 0;
+  const materialRead =
+    dielShare > 0.62
+      ? 'Dielectric is driving the limit. Lower tan δ material buys more reach than bigger copper.'
+      : skinShare > 0.62
+        ? 'Conductor loss dominates. Larger diameter or plated/low-R surface gives the cleanest gain.'
+        : 'Balanced region. Geometry and dielectric both matter, so optimize together.';
+
+  return (
+    <section className="mb-20">
+      <SectionTitle
+        tag="LAB 03 — ATTENUATION"
+        title="Attenuation digital twin"
+        subtitle="A macro cutaway plus log sweep showing where the dB/100 m comes from: copper skin depth, dielectric loss, crossover, and usable reach."
+        icon={Zap}
+      />
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-6">
+        {Object.entries(presets).map(([k, p]) => (
+          <button
+            key={k}
+            onClick={() => usePreset(k)}
+            className={`tappable p-3 border rounded-sm text-left ${
+              preset === k
+                ? 'border-[#5eead4] bg-[#0d1f1d]'
+                : 'border-[#384249] bg-[#1d2329]'
+            }`}
+          >
+            <div className={`text-xs font-mono ${preset === k ? 'text-[#5eead4]' : 'text-[#a7b0b6]'}`}>
+              {p.name}
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="grid xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] gap-5 mb-5">
+        <div className="border border-[#2f7a6e] bg-[#0b1012] overflow-hidden shadow-[0_0_36px_rgba(94,234,212,0.08)]">
+          <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4 border-b border-[#252e33]">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[#5eead4]">Macro attenuation twin</div>
+              <div className="mt-1 text-sm text-[#a7b0b6]">
+                {presets[preset]?.name || 'Custom'} at <span className="text-[#fbbf24] font-mono">{formatAttenFrequency(selectedFreq)}</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Pill tone={skinShare >= dielShare ? 'copper' : 'default'}>skin {Math.round(skinShare * 100)}%</Pill>
+              <Pill tone={dielShare > skinShare ? 'amber' : 'default'}>dielectric {Math.round(dielShare * 100)}%</Pill>
+            </div>
+          </div>
+          <AttenTwinScene
+            d={d}
+            er={er}
+            tand={tand}
+            selectedFreq={selectedFreq}
+            selectedPoint={selectedPoint}
+            crossover={crossover}
+          />
+          <div className="grid sm:grid-cols-4 border-t border-[#252e33]">
+            <AttenMetric label="total loss" value={`${selectedPoint.total.toFixed(1)}`} unit="dB/100m" tone="teal" />
+            <AttenMetric label="skin depth" value={`${selectedPoint.skinDepthUm.toFixed(selectedPoint.skinDepthUm < 5 ? 1 : 0)}`} unit="µm" tone="copper" />
+            <AttenMetric label="10 dB reach" value={`${tenDbLengthM >= 1000 ? (tenDbLengthM / 1000).toFixed(1) : Math.round(tenDbLengthM)}`} unit={tenDbLengthM >= 1000 ? 'km' : 'm'} />
+            <AttenMetric
+              label="crossover"
+              value={crossover ? formatAttenFrequency(crossover) : 'none'}
+              unit={crossover ? 'αc=αd' : 'in sweep'}
+              tone="amber"
+            />
+          </div>
+        </div>
+
+        <div className="border border-[#252e33] bg-[#12171a] p-5">
+          <div className="flex items-baseline justify-between gap-3 mb-4">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f]">Cable parameters</div>
+            <div className="font-mono text-[10px] text-[#5eead4]">Z₀ model 100 Ω</div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="p-3 border border-[#384249] bg-[#0a0d0f]">
+              <div className="flex justify-between items-baseline mb-2">
+                <label className="text-xs text-[#a7b0b6] font-mono uppercase tracking-wider">Test frequency</label>
+                <span className="font-mono text-[#5eead4]">{formatAttenFrequency(selectedFreq)}</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="4"
+                step="0.01"
+                value={selectedLog}
+                onChange={(e) => setSelectedFreq(Math.pow(10, Number(e.target.value)))}
+                className="w-full accent-[#5eead4]"
+              />
+              <div className="grid grid-cols-4 gap-1 mt-3">
+                {[100, 500, 1000, 2400, 5000, 10000, crossover].filter(Boolean).slice(0, 8).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setSelectedFreq(Math.min(10000, Math.max(1, f)))}
+                    className="tappable px-2 py-1 border border-[#252e33] text-[10px] font-mono text-[#a7b0b6] hover:border-[#5eead4] hover:text-[#5eead4]"
+                  >
+                    {formatAttenFrequency(f)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <AttenRange
+              label="Conductor Ø (mm)"
+              value={d}
+              display={d.toFixed(3)}
+              min={0.15}
+              max={2}
+              step={0.005}
+              onChange={handleParam(setD)}
+            />
+            <AttenRange
+              label="εᵣ dielectric"
+              value={er}
+              display={er.toFixed(2)}
+              min={1.4}
+              max={2.5}
+              step={0.01}
+              onChange={handleParam(setEr)}
+            />
+            <AttenRange
+              label="tan δ × 10⁴"
+              value={tand * 10000}
+              display={(tand * 10000).toFixed(1)}
+              min={1}
+              max={50}
+              step={0.5}
+              onChange={(val) => handleParam(setTand)(val / 10000)}
+            />
+          </div>
+
+          <div className="mt-5 pt-4 border-t border-dashed border-[#252e33]">
+            <div className="flex items-baseline justify-between mb-2">
+              <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f]">Loss split</div>
+              <div className="font-mono text-[10px] text-[#6b7479]">at {formatAttenFrequency(selectedFreq)}</div>
+            </div>
+            <LossShareBar skin={skinShare} diel={dielShare} />
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              <div className="border border-[#252e33] p-3 bg-[#0a0d0f]">
+                <div className="font-mono text-[10px] uppercase text-[#6b7479]">αc skin</div>
+                <div className="font-mono text-lg text-[#e89357]">{selectedPoint.skin.toFixed(1)}</div>
+                <div className="text-[10px] text-[#a7b0b6]">dB/100m</div>
+              </div>
+              <div className="border border-[#252e33] p-3 bg-[#0a0d0f]">
+                <div className="font-mono text-[10px] uppercase text-[#6b7479]">αd dielectric</div>
+                <div className="font-mono text-lg text-[#fbbf24]">{selectedPoint.diel.toFixed(1)}</div>
+                <div className="text-[10px] text-[#a7b0b6]">dB/100m</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 p-4 border border-[#7a5a14] bg-[#1a1408]">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#fbbf24] mb-1">Engineering read</div>
+            <p className="text-sm text-[#f0ebe2] leading-relaxed">{materialRead}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] gap-5 mb-6">
+        <div className="p-5 border border-[#252e33] bg-[#12171a]">
+          <div className="flex justify-between items-baseline mb-3">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f]">α(f) — dB / 100 m</div>
+            <div className="text-[10px] font-mono text-[#6b7479]">log-log sweep · 1 MHz to 10 GHz</div>
+          </div>
+
+          <ResponsiveContainer width="100%" height={330}>
+            <LineChart data={data} margin={{ top: 6, right: 14, left: 0, bottom: 6 }}>
+              <CartesianGrid strokeDasharray="2 2" stroke={C.border} />
+              <XAxis
+                dataKey="f"
+                scale="log"
+                domain={[1, 10000]}
+                stroke={C.textMuted}
+                tick={{ fontSize: 10, fontFamily: 'JetBrains Mono' }}
+                ticks={[1, 10, 100, 1000, 10000]}
+                tickFormatter={(v) => (v >= 1000 ? `${v / 1000}G` : `${v}M`)}
+                label={{ value: 'frequency', position: 'insideBottom', offset: -2, fill: C.textMuted, fontSize: 10 }}
+              />
+              <YAxis
+                scale="log"
+                domain={chartDomain}
+                stroke={C.textMuted}
+                tick={{ fontSize: 10, fontFamily: 'JetBrains Mono' }}
+                tickFormatter={(v) => (v >= 1 ? v.toFixed(v < 10 ? 1 : 0) : v.toFixed(2))}
+                ticks={[0.03, 0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000].filter((v) => v >= chartDomain[0] && v <= chartDomain[1])}
+                label={{ value: 'dB/100m', angle: -90, position: 'insideLeft', fill: C.textMuted, fontSize: 10 }}
+              />
+              <Tooltip
+                contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12, fontFamily: 'JetBrains Mono' }}
+                labelStyle={{ color: C.copperBright }}
+                labelFormatter={(v) => formatAttenFrequency(v)}
+                formatter={(v, n) => [`${Number(v).toFixed(2)} dB/100m`, n]}
+              />
+              {crossover && (
+                <ReferenceLine
+                  x={crossover}
+                  stroke={C.amber}
+                  strokeDasharray="4 4"
+                  label={{ value: 'crossover', fill: C.amber, fontSize: 10, position: 'top' }}
+                />
+              )}
+              <ReferenceLine
+                x={selectedFreq}
+                stroke={C.teal}
+                strokeDasharray="5 5"
+                label={{ value: formatAttenFrequency(selectedFreq), fill: C.teal, fontSize: 10, position: 'insideTopRight' }}
+              />
+              <Line type="monotone" dataKey="skin" stroke={C.copperBright} strokeWidth={1.7} dot={false} name="skin αc" />
+              <Line type="monotone" dataKey="diel" stroke={C.amber} strokeWidth={1.7} dot={false} name="dielectric αd" />
+              <Line type="monotone" dataKey="total" stroke={C.teal} strokeWidth={2.8} dot={false} name="total α" />
+            </LineChart>
+          </ResponsiveContainer>
+
+          <div className="flex flex-wrap gap-4 justify-center mt-2 text-[10px] font-mono">
+            <span className="flex items-center gap-1.5">
+              <div className="w-3 h-0.5 bg-[#e89357]"></div>
+              <span className="text-[#a7b0b6]">skin effect ∝ √f</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <div className="w-3 h-0.5 bg-[#fbbf24]"></div>
+              <span className="text-[#a7b0b6]">dielectric ∝ f</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <div className="w-3 h-0.5 bg-[#5eead4]"></div>
+              <span className="text-[#a7b0b6]">total attenuation</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="border border-[#252e33] bg-[#12171a] p-5">
+          <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f] mb-4">Decision table</div>
+          <div className="grid sm:grid-cols-2 gap-2">
+            {[
+              { f: '500 MHz', v: at500 },
+              { f: '1 GHz', v: at1G },
+              { f: '2 GHz', v: at2G },
+              { f: '5 GHz', v: at5G },
+            ].map((s) => (
+              <div key={s.f} className="border border-[#252e33] p-3 bg-[#0a0d0f]">
+                <div className="text-[10px] font-mono text-[#6b7479]">{s.f}</div>
+                <div className="font-mono text-lg text-[#5eead4] mt-1">
+                  {s.v ? `${s.v.total.toFixed(1)} dB/100m` : '—'}
+                </div>
+                <div className="text-[10px] text-[#a7b0b6]">
+                  {s.v ? `${Math.round((s.v.skin / s.v.total) * 100)}% skin · ${Math.round((s.v.diel / s.v.total) * 100)}% dielectric` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 pt-4 border-t border-dashed border-[#252e33]">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f] mb-2">Loss components</div>
+            <Formula>αc = R/(2Z₀) · 8.686  ∝ √f / d</Formula>
+            <Formula>αd = 27.3·√εᵣ·tanδ·f/c</Formula>
+          </div>
+        </div>
+      </div>
+
+      <Callout tone="teal" title="How to read this">
+        At low frequency the copper surface is thick enough that conductor geometry dominates. As frequency rises, skin depth collapses and dielectric loss grows linearly.
+        The crossover marker tells you when material selection starts beating geometry changes; the 10 dB reach card turns the plot into a quick link-budget sanity check.
+      </Callout>
+    </section>
+  );
+}
+
+function calcAttenuationPoint(f_MHz, d, er, tand) {
+  const f_Hz = f_MHz * 1e6;
+  const delta_m = (0.066 / Math.sqrt(f_MHz)) * 1e-3;
+  const sigma = 5.8e7;
+  const d_m = d * 1e-3;
+  const R = 2 / (sigma * delta_m * Math.PI * d_m);
+  const alpha_c = (R / (2 * 100)) * 8.686;
+  const alpha_d = (27.3 * Math.sqrt(er) * tand * f_Hz) / 3e8;
+  const total = alpha_c + alpha_d;
+  return {
+    f: f_MHz,
+    skin: alpha_c * 100,
+    diel: alpha_d * 100,
+    total: total * 100,
+    skinDepthUm: 66 / Math.sqrt(f_MHz),
+  };
+}
+
+function nearestAttenPoint(data, f) {
+  return data.reduce((best, p) => (Math.abs(p.f - f) < Math.abs(best.f - f) ? p : best), data[0]);
+}
+
+function estimateAttenCrossover(data) {
+  for (let i = 0; i < data.length - 1; i++) {
+    const a = data[i].skin - data[i].diel;
+    const b = data[i + 1].skin - data[i + 1].diel;
+    if (a === 0) return data[i].f;
+    if (a * b <= 0) {
+      const t = Math.abs(a) / (Math.abs(a) + Math.abs(b));
+      return data[i].f * Math.pow(data[i + 1].f / data[i].f, t);
+    }
+  }
+  return null;
+}
+
+function formatAttenFrequency(f) {
+  if (!Number.isFinite(f)) return '—';
+  if (f >= 1000) return `${(f / 1000).toFixed(f >= 9950 ? 0 : f >= 2000 ? 1 : 2)} GHz`;
+  if (f >= 100) return `${Math.round(f)} MHz`;
+  if (f >= 10) return `${f.toFixed(1)} MHz`;
+  return `${f.toFixed(2)} MHz`;
+}
+
+function AttenRange({ label, value, display, min, max, step, onChange }) {
+  return (
+    <div>
+      <div className="flex justify-between items-baseline mb-1">
+        <label className="text-xs text-[#a7b0b6] font-mono uppercase tracking-wider">{label}</label>
+        <span className="font-mono text-[#fbbf24]">{display}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-[#c97b3f]"
+      />
+    </div>
+  );
+}
+
+function AttenMetric({ label, value, unit, tone = 'default' }) {
+  const colors = {
+    default: 'text-[#f0ebe2]',
+    teal: 'text-[#5eead4]',
+    copper: 'text-[#e89357]',
+    amber: 'text-[#fbbf24]',
+  };
+  return (
+    <div className="p-4 border-r border-[#252e33] last:border-r-0 bg-[#0a0d0f]">
+      <div className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+      <div className={`mt-1 font-mono text-xl ${colors[tone]}`}>{value}</div>
+      {unit && <div className="mt-1 text-[10px] text-[#a7b0b6] font-mono">{unit}</div>}
+    </div>
+  );
+}
+
+function LossShareBar({ skin, diel }) {
+  const skinPct = Math.max(2, Math.min(98, skin * 100));
+  const dielPct = Math.max(2, Math.min(98, diel * 100));
+  return (
+    <div>
+      <div className="h-3 border border-[#252e33] bg-[#050708] flex overflow-hidden">
+        <div style={{ width: `${skinPct}%` }} className="bg-gradient-to-r from-[#7a4a26] to-[#e89357]" />
+        <div style={{ width: `${dielPct}%` }} className="bg-gradient-to-r from-[#fbbf24] to-[#5eead4]" />
+      </div>
+      <div className="flex justify-between mt-1 text-[10px] font-mono text-[#6b7479]">
+        <span>skin {Math.round(skin * 100)}%</span>
+        <span>dielectric {Math.round(diel * 100)}%</span>
+      </div>
+    </div>
+  );
+}
+
+function AttenTwinScene({ d, er, tand, selectedFreq, selectedPoint, crossover }) {
+  const radiusUm = (d * 1000) / 2;
+  const skinRatio = Math.max(0.015, Math.min(0.55, selectedPoint.skinDepthUm / radiusUm));
+  const annulus = 4 + skinRatio * 36;
+  const dielShare = selectedPoint.total ? selectedPoint.diel / selectedPoint.total : 0;
+  const skinShare = selectedPoint.total ? selectedPoint.skin / selectedPoint.total : 0;
+  const conductorGlow = 0.28 + skinShare * 0.5;
+  const fieldOpacity = 0.14 + dielShare * 0.55;
+  const heatOpacity = Math.min(0.75, 0.18 + selectedPoint.total / 90);
+  const freqLabel = formatAttenFrequency(selectedFreq);
+  const crossoverLabel = crossover ? formatAttenFrequency(crossover) : 'outside sweep';
+  const dielectricName = er < 1.65 ? 'foamed PE / air' : er < 2.0 ? 'low-ε polymer' : 'solid FEP / PE';
+
+  return (
+    <div className="relative bg-[#061011]">
+      <svg viewBox="0 0 900 430" className="w-full block" role="img" aria-label="Attenuation macro cable cutaway">
+        <defs>
+          <linearGradient id="attenBg" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0%" stopColor="#102123" />
+            <stop offset="55%" stopColor="#071012" />
+            <stop offset="100%" stopColor="#040708" />
+          </linearGradient>
+          <linearGradient id="attenJacket" x1="0" x2="1">
+            <stop offset="0%" stopColor="#11161a" />
+            <stop offset="45%" stopColor="#30373a" />
+            <stop offset="100%" stopColor="#090b0d" />
+          </linearGradient>
+          <linearGradient id="attenDielectric" x1="0" x2="1">
+            <stop offset="0%" stopColor="#ddc89b" stopOpacity="0.92" />
+            <stop offset="55%" stopColor="#fff2c9" stopOpacity="0.96" />
+            <stop offset="100%" stopColor="#b68d55" stopOpacity="0.9" />
+          </linearGradient>
+          <linearGradient id="attenCopper" x1="0" x2="1">
+            <stop offset="0%" stopColor="#6c3513" />
+            <stop offset="45%" stopColor="#ff9b34" />
+            <stop offset="70%" stopColor="#ffd38c" />
+            <stop offset="100%" stopColor="#7b3b14" />
+          </linearGradient>
+          <radialGradient id="attenCopperFace">
+            <stop offset="0%" stopColor="#fff0b8" />
+            <stop offset="45%" stopColor="#ff9b24" />
+            <stop offset="100%" stopColor="#7a3513" />
+          </radialGradient>
+          <filter id="attenGlow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="7" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="attenSoft" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="2.2" />
+          </filter>
+        </defs>
+
+        <rect width="900" height="430" fill="url(#attenBg)" />
+        <ellipse cx="446" cy="338" rx="330" ry="32" fill="#000" opacity="0.34" />
+
+        <g opacity="0.28">
+          {[0, 1, 2, 3, 4].map((n) => (
+            <path
+              key={`grid-${n}`}
+              d={`M${70 + n * 160} 70 C ${120 + n * 130} 120, ${160 + n * 120} 280, ${250 + n * 110} 365`}
+              fill="none"
+              stroke="#5eead4"
+              strokeWidth="0.8"
+              strokeDasharray="4 10"
+            />
+          ))}
+        </g>
+
+        <path
+          d="M88 156 C88 108 128 82 185 82 H455 C504 82 538 112 538 168 V262 C538 318 502 348 449 348 H185 C128 348 88 320 88 272 Z"
+          fill="url(#attenJacket)"
+          stroke="#3b454a"
+          strokeWidth="1.2"
+        />
+        <path d="M430 84 C474 92 502 121 502 168 V264 C502 309 475 337 430 347" fill="none" stroke="#454f54" strokeWidth="18" opacity="0.65" />
+        <rect x="416" y="82" width="344" height="266" fill="#071012" opacity="0.72" />
+
+        <rect x="258" y="146" width="494" height="138" fill="url(#attenDielectric)" opacity="0.98" />
+        <ellipse cx="258" cy="215" rx="44" ry="69" fill="#c4ab7a" opacity="0.76" />
+        <ellipse cx="752" cy="215" rx="44" ry="69" fill="#f8e7bc" stroke="#d0b070" strokeWidth="1.2" />
+
+        <g opacity={fieldOpacity} filter="url(#attenGlow)">
+          {[0, 1, 2, 3, 4, 5].map((n) => (
+            <path
+              key={`field-${n}`}
+              d={`M${315 + n * 62} 160 C ${350 + n * 62} ${124 + (n % 2) * 16}, ${396 + n * 54} ${300 - (n % 2) * 18}, ${432 + n * 54} 266`}
+              fill="none"
+              stroke={n % 2 ? '#5eead4' : '#fbbf24'}
+              strokeWidth="1.5"
+              strokeDasharray="7 9"
+            />
+          ))}
+        </g>
+
+        <rect x="95" y="200" width="708" height="30" rx="14" fill="url(#attenCopper)" />
+        <ellipse cx="804" cy="215" rx="16" ry="15" fill="url(#attenCopperFace)" />
+        <ellipse cx="96" cy="215" rx="14" ry="13" fill="#7a3513" />
+        <rect x="102" y="203" width="693" height="8" rx="4" fill="#fff0b8" opacity={conductorGlow} filter="url(#attenSoft)" />
+        <rect x="102" y="219" width="693" height="5" rx="2.5" fill="#ff7a18" opacity={heatOpacity} filter="url(#attenGlow)" />
+
+        <g transform="translate(674 84)">
+          <circle cx="63" cy="63" r="51" fill="#071012" stroke="#384249" strokeWidth="1" opacity="0.92" />
+          <circle cx="63" cy="63" r="34" fill="#7a3513" />
+          <circle cx="63" cy="63" r="34" fill="none" stroke="#ffd38c" strokeWidth={annulus} opacity="0.92" />
+          <circle cx="63" cy="63" r="11" fill="#451b08" opacity="0.7" />
+          <text x="63" y="131" textAnchor="middle" fill="#5eead4" fontSize="11" fontFamily="JetBrains Mono">skin depth</text>
+          <text x="63" y="146" textAnchor="middle" fill="#fbbf24" fontSize="13" fontFamily="JetBrains Mono">{selectedPoint.skinDepthUm.toFixed(selectedPoint.skinDepthUm < 5 ? 1 : 0)} µm</text>
+        </g>
+
+        <g opacity={heatOpacity}>
+          {[0, 1, 2, 3].map((n) => (
+            <path
+              key={`heat-${n}`}
+              d={`M${250 + n * 112} ${190 - n * 4} C ${330 + n * 90} ${158 - n * 10}, ${450 + n * 75} ${160 + n * 8}, ${560 + n * 60} ${135 + n * 7}`}
+              fill="none"
+              stroke={n % 2 ? '#fbbf24' : '#e89357'}
+              strokeWidth={1.2 + n * 0.4}
+              strokeDasharray="10 14"
+              filter="url(#attenGlow)"
+            />
+          ))}
+        </g>
+
+        <g transform="translate(42 36)">
+          <rect x="0" y="0" width="314" height="84" fill="#081012" stroke="#252e33" opacity="0.92" />
+          <text x="16" y="25" fill="#5eead4" fontSize="11" fontFamily="JetBrains Mono" letterSpacing="3">LIVE LOSS PLANE</text>
+          <text x="16" y="52" fill="#f0ebe2" fontSize="24" fontFamily="JetBrains Mono">{freqLabel}</text>
+          <text x="160" y="52" fill="#fbbf24" fontSize="24" fontFamily="JetBrains Mono">{selectedPoint.total.toFixed(1)} dB</text>
+          <text x="160" y="70" fill="#6b7479" fontSize="10" fontFamily="JetBrains Mono">per 100 m</text>
+        </g>
+
+        <g transform="translate(42 316)">
+          <rect x="0" y="0" width="268" height="62" fill="#081012" stroke="#252e33" opacity="0.9" />
+          <text x="14" y="22" fill="#6b7479" fontSize="10" fontFamily="JetBrains Mono">DIELECTRIC</text>
+          <text x="14" y="43" fill="#f0ebe2" fontSize="14" fontFamily="JetBrains Mono">{dielectricName}</text>
+          <text x="178" y="22" fill="#6b7479" fontSize="10" fontFamily="JetBrains Mono">tanδ</text>
+          <text x="178" y="43" fill="#fbbf24" fontSize="14" fontFamily="JetBrains Mono">{(tand * 10000).toFixed(1)}e-4</text>
+        </g>
+
+        <g transform="translate(608 316)">
+          <rect x="0" y="0" width="244" height="62" fill="#081012" stroke="#252e33" opacity="0.9" />
+          <text x="14" y="22" fill="#6b7479" fontSize="10" fontFamily="JetBrains Mono">CROSSOVER</text>
+          <text x="14" y="43" fill="#fbbf24" fontSize="14" fontFamily="JetBrains Mono">{crossoverLabel}</text>
+          <text x="130" y="22" fill="#6b7479" fontSize="10" fontFamily="JetBrains Mono">Ø</text>
+          <text x="130" y="43" fill="#5eead4" fontSize="14" fontFamily="JetBrains Mono">{d.toFixed(3)} mm</text>
+        </g>
+      </svg>
+    </div>
   );
 }
 
@@ -5629,6 +6203,23 @@ function EyeTdrCorrelationLab() {
   const [bitRateGbps, setBitRateGbps] = useState(10);
   const [lengthM, setLengthM] = useState(30);
   const [equalizationDb, setEqualizationDb] = useState(3);
+
+  useEffect(() => {
+    const onApply = (event) => {
+      const { section, params } = event.detail || {};
+      if (section !== 'eyeTdr' || !params) return;
+      if (params.bitRate != null) setBitRateGbps(Number(params.bitRate));
+      if (params.lengthM != null) setLengthM(Number(params.lengthM));
+      if (params.equalizationDb != null) setEqualizationDb(Number(params.equalizationDb));
+      if (params.cableBW != null) {
+        const bw = Number(params.cableBW);
+        if (Number.isFinite(bw)) setEqualizationDb(Math.max(0, Math.min(12, 8 - bw * 0.35)));
+      }
+    };
+    window.addEventListener('cable-suite:apply-preset', onApply);
+    return () => window.removeEventListener('cable-suite:apply-preset', onApply);
+  }, []);
+
   const activeDefect = EYE_TDR_DEFECTS.find((item) => item.id === defectId) || EYE_TDR_DEFECTS[0];
   const result = useMemo(
     () => computeEyeTdrCorrelation({ defect: activeDefect, bitRateGbps, lengthM, equalizationDb }),
@@ -5842,7 +6433,7 @@ function EyeTdrBlenderPanel({ defect, result, bitRateGbps }) {
     <div className="border border-[#252e33] bg-[#12171a] overflow-hidden rounded-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-[#252e33]">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#5eead4]">Blender defect scene</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#5eead4]">Macro defect scene</div>
           <div className="text-xs text-[#a7b0b6] mt-1">{defect.scene}</div>
         </div>
         <div className="font-mono text-[10px] uppercase tracking-wider border px-2 py-1 bg-[#0a0d0f]" style={{ color: defect.color, borderColor: `${defect.color}66` }}>
@@ -5850,28 +6441,22 @@ function EyeTdrBlenderPanel({ defect, result, bitRateGbps }) {
         </div>
       </div>
 
-      <div className="relative aspect-[21/9] min-h-[300px] bg-[#0a0d0f]">
-        <img
-          data-testid="eye-tdr-blender-preview"
-          src={defect.image}
-          alt={`${defect.label} Blender eye TDR defect scene`}
-          className="w-full h-full object-cover"
-        />
-        <div className="absolute top-3 left-3 font-mono text-[10px] uppercase tracking-[0.2em] bg-[#0a0d0f]/75 border border-[#252e33] px-2 py-1" style={{ color: defect.color }}>
-          Physical defect
-        </div>
-        <div className="absolute bottom-3 left-3 right-3 grid sm:grid-cols-3 gap-2">
-          {[
-            ['Verdict', result.verdict, result.verdictColor],
-            ['Eye width', `${eyeWidthPct.toFixed(0)}% UI`, eyeWidthPct >= 35 ? C.teal : '#f87171'],
-            ['Nyquist', `${(bitRateGbps / 2).toFixed(1)} GHz`, '#fbbf24'],
-          ].map(([label, value, color]) => (
-            <div key={label} className="bg-[#0a0d0f]/85 border border-[#252e33] rounded-sm p-2">
-              <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">{label}</div>
-              <div className="font-mono text-[11px]" style={{ color }}>{value}</div>
-            </div>
-          ))}
-        </div>
+      <div className="bg-[#081011] border-b border-[#252e33]">
+        <EyeTdrMacroScene defect={defect} result={result} />
+      </div>
+
+      <div className="grid sm:grid-cols-3 gap-px bg-[#252e33] border-t border-[#252e33]">
+        {[
+          ['Verdict', result.verdict, result.verdictColor, status],
+          ['Eye width', `${eyeWidthPct.toFixed(0)}% UI`, eyeWidthPct >= 35 ? C.teal : '#f87171', 'receiver sampling window'],
+          ['Nyquist', `${(bitRateGbps / 2).toFixed(1)} GHz`, '#fbbf24', 'frequency of interest'],
+        ].map(([label, value, color, sub]) => (
+          <div key={label} className="bg-[#0a0d0f] p-3">
+            <div className="font-mono text-[9px] uppercase tracking-wider text-[#6b7479]">{label}</div>
+            <div className="font-mono text-[13px] mt-1" style={{ color }}>{value}</div>
+            <div className="text-[10px] text-[#6b7479] mt-1">{sub}</div>
+          </div>
+        ))}
       </div>
 
       <div className="grid md:grid-cols-3 gap-px bg-[#252e33] border-t border-[#252e33]">
@@ -5889,6 +6474,161 @@ function EyeTdrBlenderPanel({ defect, result, bitRateGbps }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function EyeTdrMacroScene({ defect, result }) {
+  const W = 900;
+  const H = 330;
+  const cableStart = 70;
+  const cableEnd = 830;
+  const cableLen = cableEnd - cableStart;
+  const centerY = 168;
+  const defectX = cableStart + hsClamp(defect.distanceM / 32, 0.12, 0.88) * cableLen;
+  const defectW = defect.id === 'bad-twist' ? 130 : defect.id === 'skew' ? 100 : 78;
+  const turns = Array.from({ length: 15 }, (_, i) => i);
+  const wirePath = (phase, amp = 24, yOffset = 0, pitch = 1) => {
+    const points = [];
+    const count = 156;
+    for (let i = 0; i <= count; i += 1) {
+      const t = i / count;
+      const x = cableStart + t * cableLen;
+      const localPitch = defect.id === 'bad-twist' && Math.abs(x - defectX) < 90 ? pitch * 1.6 : pitch;
+      const y = centerY + yOffset + Math.sin(t * Math.PI * 14 * localPitch + phase) * amp;
+      points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    }
+    return `M ${points.join(' L ')}`;
+  };
+  const isFail = result.verdict === 'FAIL';
+  const haloColor = isFail ? '#f87171' : result.verdict === 'MARGINAL' ? '#fbbf24' : '#5eead4';
+
+  return (
+    <svg
+      data-testid="eye-tdr-blender-preview"
+      viewBox={`0 0 ${W} ${H}`}
+      className="w-full"
+      style={{ display: 'block', minHeight: 300 }}
+      role="img"
+      aria-label={`${defect.label} macro defect scene`}
+    >
+      <defs>
+        <linearGradient id="eye-tdr-bg" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0" stopColor="#102426" />
+          <stop offset="0.48" stopColor="#081011" />
+          <stop offset="1" stopColor="#050708" />
+        </linearGradient>
+        <radialGradient id="eye-tdr-spot" cx="50%" cy="45%" r="60%">
+          <stop offset="0" stopColor={defect.color} stopOpacity="0.28" />
+          <stop offset="0.5" stopColor={defect.color} stopOpacity="0.08" />
+          <stop offset="1" stopColor={defect.color} stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id="eye-tdr-jacket" x1="0" x2="1">
+          <stop offset="0" stopColor="#2a3032" />
+          <stop offset="0.5" stopColor="#131719" />
+          <stop offset="1" stopColor="#303638" />
+        </linearGradient>
+        <linearGradient id="eye-tdr-shield" x1="0" x2="1">
+          <stop offset="0" stopColor="#859092" />
+          <stop offset="0.5" stopColor="#d9ddda" />
+          <stop offset="1" stopColor="#6e7778" />
+        </linearGradient>
+        <linearGradient id="eye-tdr-wire-blue" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stopColor="#c8f1ff" />
+          <stop offset="0.42" stopColor="#65c4df" />
+          <stop offset="1" stopColor="#24566b" />
+        </linearGradient>
+        <linearGradient id="eye-tdr-wire-white" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stopColor="#ffffff" />
+          <stop offset="0.5" stopColor="#e8eee9" />
+          <stop offset="1" stopColor="#9ba39c" />
+        </linearGradient>
+        <filter id="eye-tdr-soft-shadow" x="-20%" y="-40%" width="140%" height="180%">
+          <feDropShadow dx="0" dy="12" stdDeviation="8" floodColor="#000000" floodOpacity="0.45" />
+        </filter>
+      </defs>
+
+      <rect width={W} height={H} fill="url(#eye-tdr-bg)" />
+      <rect x="0" y="0" width={W} height={H} fill="url(#eye-tdr-spot)" />
+      <path d="M 48 270 C 210 238 336 284 502 245 C 655 209 766 246 856 218" stroke="#1e3434" strokeWidth="1" fill="none" opacity="0.8" />
+
+      <g filter="url(#eye-tdr-soft-shadow)">
+        <rect x={cableStart - 34} y={centerY - 82} width={cableLen + 68} height="164" rx="82" fill="#020405" opacity="0.65" />
+        <rect x={cableStart - 18} y={centerY - 72} width={cableLen + 36} height="144" rx="72" fill="url(#eye-tdr-jacket)" opacity="0.84" />
+        <path
+          d={`M ${cableStart - 8} ${centerY - 50} H ${cableEnd + 8} V ${centerY + 50} H ${cableStart - 8} Z`}
+          fill="#0b1112"
+          opacity="0.92"
+        />
+        <rect x={cableStart + 10} y={centerY - 54} width={cableLen - 20} height="108" rx="54" fill="#11191a" stroke="#384249" strokeWidth="1" />
+        <path d={`M ${cableStart + 24} ${centerY - 43} H ${cableEnd - 24}`} stroke="url(#eye-tdr-shield)" strokeWidth="10" strokeLinecap="round" opacity="0.62" />
+        <path d={`M ${cableStart + 24} ${centerY + 43} H ${cableEnd - 24}`} stroke="url(#eye-tdr-shield)" strokeWidth="10" strokeLinecap="round" opacity="0.38" />
+
+        {turns.map((i) => {
+          const x = cableStart + 22 + i * (cableLen - 44) / (turns.length - 1);
+          const inDefect = Math.abs(x - defectX) < defectW / 2;
+          return (
+            <path
+              key={i}
+              d={`M ${x - 18} ${centerY + 58} C ${x - 2} ${centerY + 18}, ${x + 2} ${centerY - 18}, ${x + 18} ${centerY - 58}`}
+              stroke={inDefect ? defect.color : '#e5ece8'}
+              strokeWidth={inDefect ? 8 : 7}
+              strokeLinecap="round"
+              opacity={inDefect ? 0.96 : 0.62}
+            />
+          );
+        })}
+
+        {defect.id === 'foil-gap' && (
+          <>
+            <rect x={defectX - 46} y={centerY - 63} width="34" height="126" fill="#081011" opacity="0.92" />
+            <rect x={defectX + 14} y={centerY - 63} width="34" height="126" fill="#081011" opacity="0.92" />
+            <path d={`M ${defectX - 44} ${centerY - 70} L ${defectX - 12} ${centerY - 52} M ${defectX + 12} ${centerY + 52} L ${defectX + 44} ${centerY + 70}`} stroke={defect.color} strokeWidth="4" strokeLinecap="round" />
+          </>
+        )}
+
+        {defect.id === 'impedance' && (
+          <ellipse cx={defectX} cy={centerY} rx="54" ry="75" fill={defect.color} opacity="0.20" stroke={defect.color} strokeWidth="2" strokeDasharray="8 8" />
+        )}
+        {defect.id === 'skew' && (
+          <path d={`M ${defectX - 54} ${centerY - 82} H ${defectX + 54} M ${defectX - 54} ${centerY + 82} H ${defectX + 54}`} stroke={defect.color} strokeWidth="2" strokeDasharray="7 6" opacity="0.9" />
+        )}
+        {defect.id === 'bad-twist' && (
+          <rect x={defectX - 72} y={centerY - 68} width="144" height="136" rx="18" fill={defect.color} opacity="0.12" stroke={defect.color} strokeWidth="2" strokeDasharray="9 7" />
+        )}
+
+        <path d={wirePath(0, 25, -2)} stroke="url(#eye-tdr-wire-blue)" strokeWidth="18" strokeLinecap="round" fill="none" />
+        <path d={wirePath(Math.PI, 25, 2, defect.id === 'bad-twist' ? 0.78 : 1)} stroke="url(#eye-tdr-wire-white)" strokeWidth="18" strokeLinecap="round" fill="none" />
+        <path d={wirePath(0, 25, -2)} stroke="#ffffff" strokeWidth="3" strokeLinecap="round" fill="none" opacity="0.45" />
+        <path d={wirePath(Math.PI, 25, 2, defect.id === 'bad-twist' ? 0.78 : 1)} stroke="#ffffff" strokeWidth="3" strokeLinecap="round" fill="none" opacity="0.50" />
+      </g>
+
+      <g>
+        <line x1={defectX} y1="62" x2={defectX} y2="268" stroke={defect.color} strokeWidth="2" strokeDasharray="6 8" opacity="0.88" />
+        <circle cx={defectX} cy={centerY} r="48" fill="none" stroke={defect.color} strokeWidth="2" opacity="0.9" />
+        <circle cx={defectX} cy={centerY} r="8" fill={defect.color} />
+        <rect x={hsClamp(defectX - 96, 18, W - 206)} y="22" width="188" height="42" rx="2" fill="#0a0d0f" stroke={defect.color} strokeWidth="1" />
+        <text x={hsClamp(defectX - 84, 30, W - 194)} y="40" fill={defect.color} fontFamily="JetBrains Mono" fontSize="10" fontWeight="700" letterSpacing="2">
+          PHYSICAL DEFECT
+        </text>
+        <text x={hsClamp(defectX - 84, 30, W - 194)} y="56" fill="#a7b0b6" fontFamily="JetBrains Mono" fontSize="10">
+          {defect.label}
+        </text>
+      </g>
+
+      <g transform="translate(28 286)">
+        <rect x="0" y="0" width="226" height="25" rx="2" fill="#0a0d0f" stroke="#252e33" />
+        <circle cx="15" cy="12.5" r="4" fill={haloColor} />
+        <text x="28" y="16" fill="#a7b0b6" fontFamily="JetBrains Mono" fontSize="10">
+          TDR echo: {Math.abs(defect.zStepOhm).toFixed(1)} ohm step
+        </text>
+      </g>
+      <g transform="translate(672 286)">
+        <rect x="0" y="0" width="200" height="25" rx="2" fill="#0a0d0f" stroke="#252e33" />
+        <text x="12" y="16" fill="#a7b0b6" fontFamily="JetBrains Mono" fontSize="10">
+          local zone at {defect.distanceM.toFixed(1)} m
+        </text>
+      </g>
+    </svg>
   );
 }
 
@@ -8000,7 +8740,7 @@ function FurtherModules() {
     { n: '06', title: 'Testing & QA', vi: 'TDR, VNA, Hi-Pot', icon: FlaskConical, key: 'Cpk ≥1.33 normal, ≥1.67 mil-aero' },
     { n: '07', title: 'Standards Index', vi: 'TIA / IEC / IEEE / ECSS / MIL', icon: BookOpen, key: '568.2-D, 11801, 802.3bq, 1553B' },
     { n: '08', title: 'Formula Stack', vi: 'All design equations', icon: Calculator, key: 'Z₀, skin depth, braid coverage' },
-    { n: '09', title: 'Defects & Pitfalls', vi: 'Eccentricity, kinks, suckouts', icon: Activity, key: 'Western Electric run rules' },
+    { n: '09', title: 'Defects & Pitfalls', vi: 'Eccentricity, kinks, impedance steps', icon: Activity, key: 'Western Electric run rules' },
     { n: '10', title: 'Capstone Lab', vi: 'Design 100Ω 26AWG STP for USB 3.2 Gen 2x2 aerospace', icon: Wrench, key: 'Output: full Glenair-style datasheet' },
   ];
 
@@ -8164,14 +8904,12 @@ const NAV_TREE = [
     ],
   },
   {
-    group: 'sim', label: 'Simulations', icon: Wrench,
+    group: 'sim', label: 'Labs', icon: Wrench,
     children: [
       { id: 'sim', label: 'Process Sim', icon: Wrench },
       { id: 'tdr', label: 'TDR Sim', icon: Activity },
       { id: 'vna', label: 'VNA Lab', icon: FlaskConical },
-      { id: 'suckout', label: 'Tape Suckout', icon: Activity },
       { id: 'next', label: 'NEXT crosstalk', icon: Radio },
-      { id: 'eye', label: 'Eye Diagram', icon: Eye },
       { id: 'eyeTdr', label: 'Eye + TDR Lab', icon: Activity },
     ],
   },
@@ -8620,9 +9358,7 @@ export default function CableApp() {
         {section === 'sim' && <ProcessSim />}
         {section === 'braid' && <BraidCoverage />}
         {section === 'atten' && <AttenPlot />}
-        {section === 'suckout' && <SuckoutSim />}
         {section === 'next' && <NEXTViz />}
-        {section === 'eye' && <EyeDiagram />}
         {section === 'eyeTdr' && <EyeTdrCorrelationLab />}
         {section === 'cost' && <CostCalc />}
         {section === 'qc' && <QCStats />}
@@ -8681,6 +9417,10 @@ export default function CableApp() {
         onJumpToSection={(target) => {
           // Process Sim consumes every preset locally (braid → stage ⑧, etc.) — don't tab-hop.
           if (section === 'sim') return;
+          if (target === 'suckout') {
+            setSection('eyeTdr');
+            return;
+          }
           setSection(target);
         }}
       />

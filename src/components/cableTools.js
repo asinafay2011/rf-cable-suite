@@ -494,7 +494,7 @@ export const CABLE_TOOLS = [
   {
     name: 'propose_eye_preset',
     description:
-      'Propose an Eye-diagram preset { bitRate (Gbps), cableBW (GHz), jitter (ps p-p), noise (mV-equivalent ×1000) }. The user clicks Apply on the tool pill and the Eye tab redraws.',
+      'Propose an Eye + TDR correlation preset { bitRate (Gbps), cableBW (GHz), jitter (ps p-p), noise (mV-equivalent ×1000) }. The user clicks Apply on the tool pill and the Highspeed Eye + TDR Lab updates its channel setup.',
     input_schema: {
       type: 'object',
       properties: {
@@ -924,7 +924,7 @@ export function dispatchCableTool(name, input) {
           inputs: { bitRate, cableBW, jitter, noise },
           rationale: rationale || undefined,
           _apply_preset: { bitRate, cableBW, jitter, noise },
-          _section: 'eye',
+          _section: 'eyeTdr',
         };
       }
       case 'propose_cost_preset': {
