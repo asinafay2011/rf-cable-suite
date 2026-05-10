@@ -100,6 +100,7 @@ const PRESETS = {
 const PTFE_SOLID_DENSITY = 2.15
 const PTFE_SOLID_EPS = 2.1
 const MIL_TO_MM = 0.0254
+const MM_PER_IN = 25.4
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value))
@@ -136,6 +137,34 @@ function fmt(value, digits = 1) {
   return Number.isFinite(value) ? value.toFixed(digits) : '—'
 }
 
+function displayMm(valueMm, unitMode) {
+  return unitMode === 'inch' ? valueMm / MM_PER_IN : valueMm
+}
+
+function unitSuffix(unitMode) {
+  return unitMode === 'inch' ? ' in' : ' mm'
+}
+
+function unitDigits(unitMode, mmStep = 0.1) {
+  return unitMode === 'inch' ? 3 : (mmStep < 1 ? 2 : 0)
+}
+
+function spiralPitchFromGap(gapPct, widthMm) {
+  return clamp(Math.max(widthMm, 0.1) * 14 * (1 + clamp(gapPct, 0, 28) / 100), 1, 140)
+}
+
+function spiralGapFromPitch(pitchMm, widthMm) {
+  return clamp((Number(pitchMm) / Math.max(0.1, Number(widthMm) * 14) - 1) * 100, 0, 28)
+}
+
+function helicalPitchFromOverlap(overlapPct, widthMm) {
+  return clamp(Math.max(widthMm, 0.1) * 10 * (1 - clamp(overlapPct, 0, 80) / 100), 0.8, 140)
+}
+
+function helicalOverlapFromPitch(pitchMm, widthMm) {
+  return clamp((1 - Number(pitchMm) / Math.max(0.1, Number(widthMm) * 10)) * 100, 0, 80)
+}
+
 function overlapToPct(value) {
   if (typeof value === 'number') return clamp(value * 100, 0, 80)
   if (value === 'butt') return 0
@@ -159,16 +188,19 @@ function makeAnimationKey(prefix) {
 
 function makeShieldLayer(type, source = PRESETS.phaseStable) {
   if (type === 'flatwire') {
+    const width = source.helicalWidth ?? 1.4
+    const overlap = source.helicalOverlap ?? 45
     return {
       id: makeShieldId(),
       type,
       label: 'SPC flatwire helical',
-    direction: 'S',
-    length: 150,
-    width: source.helicalWidth ?? 1.4,
-    overlap: source.helicalOverlap ?? 45,
-    animateKey: makeAnimationKey('shield'),
-  }
+      direction: 'S',
+      length: 150,
+      width,
+      pitch: helicalPitchFromOverlap(overlap, width),
+      overlap,
+      animateKey: makeAnimationKey('shield'),
+    }
   }
   if (type === 'foil') {
     return {
@@ -194,15 +226,18 @@ function makeShieldLayer(type, source = PRESETS.phaseStable) {
       animateKey: makeAnimationKey('shield'),
     }
   }
+  const width = source.spiralWidth ?? 1.0
+  const gap = source.spiralGap ?? 10
   return {
     id: makeShieldId(),
     type: 'spiral',
     label: 'SPC flatwire spiral',
     direction: 'Z',
     length: 155,
-    width: source.spiralWidth ?? 1.0,
+    width,
+    pitch: spiralPitchFromGap(gap, width),
     bobbins: source.spiralBobbins ?? 8,
-    gap: source.spiralGap ?? 10,
+    gap,
     animateKey: makeAnimationKey('shield'),
   }
 }
@@ -636,9 +671,10 @@ function useRfStackModel(config) {
 
             if (type === 'spiral') {
               const bobbins = clamp(Math.round(Number(layer.bobbins) || 8), 1, 16)
+              const pitch = clamp(Number(layer.pitch) || spiralPitchFromGap(Number(layer.gap) || 10, width), 1, 140)
               const gap = clamp(Number(layer.gap) || 10, 0, 28)
-              const tapeWidth = clamp(width * 0.018, 0.012, 0.055)
-              const turns = clamp(2.7 + lengthRatio * 1.5 + (13 - gap) * 0.035, 2.2, 5.4)
+              const tapeWidth = clamp(width * 0.012, 0.012, 0.15)
+              const turns = clamp(((x1 - x0) * 13) / Math.max(1, pitch), 1.2, 18)
               for (let bobbin = 0; bobbin < bobbins; bobbin++) {
                 const phase = (Math.PI * 2 * bobbin) / bobbins + shieldIndex * 0.33
                 dynamicGroup.add(makeRibbonMesh({
@@ -670,8 +706,9 @@ function useRfStackModel(config) {
               }
             } else {
               const overlap = clamp(Number(layer.overlap) || 45, 0, 80)
-              const tapeWidth = clamp(width * 0.064, 0.055, 0.22)
-              const turns = clamp(2.8 + overlap / 18 + lengthRatio * 0.65, 3.0, 8.2)
+              const pitch = clamp(Number(layer.pitch) || helicalPitchFromOverlap(overlap, width), 0.8, 140)
+              const tapeWidth = clamp(width * 0.045, 0.055, 0.44)
+              const turns = clamp(((x1 - x0) * 13) / Math.max(0.8, pitch), 1.1, 22)
               dynamicGroup.add(makeRibbonMesh({
                 name: 'live SPC flatwire helical overlap wrap',
                 x0,
@@ -831,12 +868,15 @@ function useRfStackModel(config) {
   return { mountRef, status }
 }
 
-function Slider({ label, value, setValue, min, max, step = 1, unit = '', accent = C.amber }) {
+function Slider({ label, value, setValue, min, max, step = 1, unit = '', accent = C.amber, displayValue, displayUnit, displayDigits }) {
+  const shownValue = displayValue ?? value
+  const shownUnit = displayUnit ?? unit
+  const shownDigits = displayDigits ?? (step < 1 ? 2 : 0)
   return (
     <label style={S.slider}>
       <span style={S.sliderTop}>
         <span>{label}</span>
-        <strong style={{ color: accent }}>{fmt(value, step < 1 ? 2 : 0)}{unit}</strong>
+        <strong style={{ color: accent }}>{fmt(shownValue, shownDigits)}{shownUnit}</strong>
       </span>
       <input
         type="range"
@@ -848,6 +888,23 @@ function Slider({ label, value, setValue, min, max, step = 1, unit = '', accent 
         style={{ accentColor: accent }}
       />
     </label>
+  )
+}
+
+function DimensionSlider({ label, value, setValue, min, max, step = 0.1, unitMode, accent = C.amber }) {
+  return (
+    <Slider
+      label={label}
+      value={value}
+      setValue={setValue}
+      min={min}
+      max={max}
+      step={step}
+      accent={accent}
+      displayValue={displayMm(value, unitMode)}
+      displayUnit={unitSuffix(unitMode)}
+      displayDigits={unitDigits(unitMode, step)}
+    />
   )
 }
 
@@ -925,7 +982,7 @@ function PTFELayerCard({ layer, index, canRemove, onUpdate, onReplay, onRemove }
   )
 }
 
-function ShieldLayerCard({ layer, index, onUpdate, onRemove }) {
+function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
   const type = layer.type || 'spiral'
   const isFlatwire = type === 'spiral' || type === 'flatwire'
   const accent = type === 'braid' ? C.braid : type === 'foil' ? C.foil : type === 'flatwire' ? C.sky : C.amber
@@ -933,6 +990,11 @@ function ShieldLayerCard({ layer, index, onUpdate, onRemove }) {
     : type === 'flatwire' ? 'SPC flatwire helical'
       : type === 'foil' ? 'Foil shield'
         : 'Braid shield'
+  const width = Number(layer.width) || 1
+  const spiralPitch = Number(layer.pitch) || spiralPitchFromGap(Number(layer.gap) || 10, width)
+  const spiralGap = spiralGapFromPitch(spiralPitch, width)
+  const helicalPitch = Number(layer.pitch) || helicalPitchFromOverlap(Number(layer.overlap) || 45, width)
+  const helicalOverlap = helicalOverlapFromPitch(helicalPitch, width)
   return (
     <div style={{ ...S.shieldLayerCard, border: `1px solid ${accent}66` }}>
       <div style={S.ptfeLayerTop}>
@@ -966,10 +1028,32 @@ function ShieldLayerCard({ layer, index, onUpdate, onRemove }) {
             Spiral starts with separated SPC flatwire bobbins; 8 bobbins and 8-13% gap is the normal window.
           </div>
           <div style={S.ptfeLayerGrid}>
-            <Slider label="Spiral length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unit=" mm" accent={accent} />
-            <Slider label="Flatwire width" value={layer.width} setValue={(value) => onUpdate({ width: value })} min={0.35} max={3.2} step={0.05} unit=" mm" accent={accent} />
+            <DimensionSlider label="Spiral length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unitMode={unitMode} accent={accent} />
+            <DimensionSlider
+              label="Flatwire width"
+              value={layer.width}
+              setValue={(value) => {
+                const nextGap = spiralGapFromPitch(spiralPitch, value)
+                onUpdate({ width: value, gap: nextGap, pitch: spiralPitchFromGap(nextGap, value) })
+              }}
+              min={0.35}
+              max={10}
+              step={0.05}
+              unitMode={unitMode}
+              accent={accent}
+            />
+            <DimensionSlider
+              label="Pitch"
+              value={spiralPitch}
+              setValue={(value) => onUpdate({ pitch: value, gap: spiralGapFromPitch(value, width) })}
+              min={1}
+              max={140}
+              step={0.1}
+              unitMode={unitMode}
+              accent={C.teal}
+            />
             <Slider label="Bobbins" value={layer.bobbins} setValue={(value) => onUpdate({ bobbins: Math.round(value) })} min={1} max={16} step={1} accent={accent} />
-            <Slider label="Gap" value={layer.gap} setValue={(value) => onUpdate({ gap: value })} min={0} max={28} step={1} unit="%" accent={layer.gap >= 8 && layer.gap <= 13 ? C.teal : C.amber} />
+            <Slider label="Gap" value={spiralGap} setValue={(value) => onUpdate({ gap: value, pitch: spiralPitchFromGap(value, width) })} min={0} max={28} step={1} unit="%" accent={spiralGap >= 8 && spiralGap <= 13 ? C.teal : C.amber} />
           </div>
         </>
       )}
@@ -977,26 +1061,48 @@ function ShieldLayerCard({ layer, index, onUpdate, onRemove }) {
       {type === 'flatwire' && (
         <>
           <div style={S.shieldHint}>
-            Helical flatwire is controlled by overlap, not gap; higher overlap makes the shield more continuous.
+            Pitch controls tapping spin: lower pitch closes the overlap, higher pitch opens it up.
           </div>
           <div style={S.ptfeLayerGrid}>
-            <Slider label="Helical length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unit=" mm" accent={accent} />
-            <Slider label="Flatwire width" value={layer.width} setValue={(value) => onUpdate({ width: value })} min={0.35} max={3.2} step={0.05} unit=" mm" accent={accent} />
-            <Slider label="Overlap" value={layer.overlap ?? 45} setValue={(value) => onUpdate({ overlap: value })} min={0} max={80} step={1} unit="%" accent={(layer.overlap ?? 45) >= 35 ? C.teal : C.amber} />
+            <DimensionSlider label="Helical length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unitMode={unitMode} accent={accent} />
+            <DimensionSlider
+              label="Flatwire width"
+              value={layer.width}
+              setValue={(value) => {
+                const nextOverlap = helicalOverlapFromPitch(helicalPitch, value)
+                onUpdate({ width: value, overlap: nextOverlap, pitch: helicalPitchFromOverlap(nextOverlap, value) })
+              }}
+              min={0.35}
+              max={10}
+              step={0.05}
+              unitMode={unitMode}
+              accent={accent}
+            />
+            <DimensionSlider
+              label="Pitch"
+              value={helicalPitch}
+              setValue={(value) => onUpdate({ pitch: value, overlap: helicalOverlapFromPitch(value, width) })}
+              min={0.8}
+              max={140}
+              step={0.1}
+              unitMode={unitMode}
+              accent={C.teal}
+            />
+            <Slider label="Overlap" value={helicalOverlap} setValue={(value) => onUpdate({ overlap: value, pitch: helicalPitchFromOverlap(value, width) })} min={0} max={80} step={1} unit="%" accent={helicalOverlap >= 35 ? C.teal : C.amber} />
           </div>
         </>
       )}
 
       {type === 'foil' && (
         <div style={S.ptfeLayerGrid}>
-          <Slider label="Foil length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unit=" mm" accent={accent} />
+          <DimensionSlider label="Foil length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unitMode={unitMode} accent={accent} />
           <Slider label="Overlap" value={layer.overlap} setValue={(value) => onUpdate({ overlap: value })} min={0} max={70} step={1} unit="%" accent={accent} />
         </div>
       )}
 
       {type === 'braid' && (
         <div style={S.ptfeLayerGrid}>
-          <Slider label="Braid length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unit=" mm" accent={accent} />
+          <DimensionSlider label="Braid length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unitMode={unitMode} accent={accent} />
           <Slider label="Carriers" value={layer.carriers} setValue={(value) => onUpdate({ carriers: Math.round(value) })} min={8} max={32} step={2} accent={accent} />
           <Slider label="Ends" value={layer.ends} setValue={(value) => onUpdate({ ends: Math.round(value) })} min={2} max={8} step={1} accent={accent} />
           <Slider label="Picks" value={layer.picks} setValue={(value) => onUpdate({ picks: value })} min={12} max={72} step={1} unit="/in" accent={C.sky} />
@@ -1013,6 +1119,7 @@ export default function RFStackLab() {
   const [ptfeStack, setPtfeStack] = useState([])
   const [shieldStack, setShieldStack] = useState([])
   const [activePreset, setActivePreset] = useState('')
+  const [unitMode, setUnitMode] = useState('mm')
   const modelConfig = useMemo(() => ({
     ptfeStack,
     shieldStack,
@@ -1135,9 +1242,11 @@ export default function RFStackLab() {
     const braidLayer = shieldStack.find((layer) => layer.type === 'braid')
     const spiralWidth = Number(spiralLayer?.width ?? params.spiralWidth)
     const spiralBobbins = Math.round(Number(spiralLayer?.bobbins ?? params.spiralBobbins))
-    const spiralGapPct = Number(spiralLayer?.gap ?? params.spiralGap)
+    const spiralPitchMm = Number(spiralLayer?.pitch ?? spiralPitchFromGap(Number(spiralLayer?.gap ?? params.spiralGap), spiralWidth))
+    const spiralGapPct = spiralLayer ? spiralGapFromPitch(spiralPitchMm, spiralWidth) : Number(params.spiralGap)
     const helicalWidth = Number(helicalLayer?.width ?? params.helicalWidth)
-    const helicalOverlapPct = Number(helicalLayer?.overlap ?? params.helicalOverlap ?? 45)
+    const helicalPitchMm = Number(helicalLayer?.pitch ?? helicalPitchFromOverlap(Number(helicalLayer?.overlap ?? params.helicalOverlap ?? 45), helicalWidth))
+    const helicalOverlapPct = helicalLayer ? helicalOverlapFromPitch(helicalPitchMm, helicalWidth) : Number(params.helicalOverlap ?? 45)
     const foilOverlap = Number(foilLayer?.overlap ?? params.foilOverlap)
     const braidCoverage = Number(braidLayer?.coverage ?? params.braidCoverage)
     const braidCarriers = Math.round(Number(braidLayer?.carriers ?? 16))
@@ -1177,8 +1286,8 @@ export default function RFStackLab() {
     const pitchTape = ptfeNotches[0]?.pitch || pitchFrom(summary.avgWidth, summary.avgOverlap, dielectricOD, 1)
     const tapeNotch = ptfeNotches.length ? Math.min(...ptfeNotches.map((item) => item.freq)) : notchGHz(pitchTape, vp)
     const spiralGap = -Math.abs(spiralGapPct)
-    const pitchSpiral = pitchFrom(spiralWidth, spiralGap, dielectricOD + 0.25, spiralBobbins)
-    const pitchHelical = pitchFrom(helicalWidth, helicalOverlapPct, dielectricOD + 0.48, 1)
+    const pitchSpiral = spiralLayer ? Math.max(0.01, spiralPitchMm / Math.max(1, spiralBobbins)) : pitchFrom(spiralWidth, spiralGap, dielectricOD + 0.25, spiralBobbins)
+    const pitchHelical = helicalLayer ? Math.max(0.01, helicalPitchMm) : pitchFrom(helicalWidth, helicalOverlapPct, dielectricOD + 0.48, 1)
     const spiralNotch = notchGHz(pitchSpiral, vp)
     const helicalNotch = notchGHz(pitchHelical, vp)
     const circ = Math.PI * (dielectricOD + 0.3)
@@ -1213,9 +1322,11 @@ export default function RFStackLab() {
       vp,
       z0,
       spiralWidth,
+      spiralPitch: spiralPitchMm,
       spiralGap: spiralGapPct,
       spiralBobbins,
       helicalWidth,
+      helicalPitch: helicalPitchMm,
       helicalOverlap: helicalOverlapPct,
       foilOverlap,
       braidCoverage: braidCoverageEffective,
@@ -1359,7 +1470,21 @@ export default function RFStackLab() {
             </div>
 
             <div style={S.controlBlock}>
-              <div style={S.blockTitle}><ShieldCheck size={13} /> Shields</div>
+              <div style={S.blockTitleRow}>
+                <div style={S.blockTitle}><ShieldCheck size={13} /> Shields</div>
+                <div style={S.unitToggle} aria-label="Shield units">
+                  {['mm', 'inch'].map((unit) => (
+                    <button
+                      key={unit}
+                      type="button"
+                      onClick={() => setUnitMode(unit)}
+                      style={{ ...S.unitBtn, ...(unitMode === unit ? S.unitBtnActive : {}) }}
+                    >
+                      {unit === 'mm' ? 'MM' : 'IN'}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div style={S.shieldToolbar}>
                 <button type="button" style={S.toolBtn} onClick={() => addShieldLayer('spiral')}>
                   <Plus size={13} /> SPC spiral
@@ -1383,6 +1508,7 @@ export default function RFStackLab() {
                     key={layer.id}
                     layer={layer}
                     index={index}
+                    unitMode={unitMode}
                     onUpdate={(patch) => updateShieldLayer(layer.id, patch)}
                     onRemove={() => removeShieldLayer(layer.id)}
                   />
@@ -1489,7 +1615,11 @@ const S = {
   resetBtn: { display: 'inline-flex', alignItems: 'center', gap: 6, background: '#070b0c', border: `1px solid ${C.borderHi}`, color: C.dim, padding: '7px 10px', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', cursor: 'pointer' },
   controlSections: { display: 'grid', gap: 12 },
   controlBlock: { border: `1px solid rgba(167,176,182,0.13)`, background: '#080d0f', padding: 12, display: 'grid', gap: 11 },
+  blockTitleRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   blockTitle: { display: 'flex', alignItems: 'center', gap: 8, color: C.amber, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 2 },
+  unitToggle: { display: 'inline-grid', gridTemplateColumns: 'repeat(2, minmax(38px, 1fr))', border: `1px solid ${C.borderHi}`, background: '#070b0c' },
+  unitBtn: { border: 0, borderRight: `1px solid ${C.borderHi}`, background: 'transparent', color: C.muted, minHeight: 26, padding: '0 8px', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 1.2, cursor: 'pointer' },
+  unitBtnActive: { color: C.teal, background: 'rgba(94,234,212,0.12)' },
   ptfeToolbar: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 },
   shieldToolbar: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(126px, 1fr))', gap: 8 },
   toolBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 32, background: '#070b0c', border: `1px solid ${C.borderHi}`, color: C.amber, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer' },
