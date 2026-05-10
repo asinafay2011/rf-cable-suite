@@ -18,7 +18,7 @@ const C = {
   sky: '#7dd3fc',
   red: '#f87171',
   purple: '#a78bfa',
-  foil: '#d9d3bf',
+  foil: '#d4a02f',
   braid: '#c8c0aa',
 }
 
@@ -192,9 +192,9 @@ function makeShieldLayer(type, source = PRESETS.phaseStable) {
       id: makeShieldId(),
       type,
       label: 'Outer jacket',
-      length: 128,
+      length: 190,
       od: source.jacketOD ?? 6.6,
-      opacity: 72,
+      opacity: 82,
       animateKey: makeAnimationKey('shield'),
     }
   }
@@ -441,7 +441,7 @@ function useRfStackModel(config) {
           return mesh
         }
 
-        const makeCutawaySleeveMesh = ({ name, x0, x1, radius, innerRadius, material, progress = 1, openCenter = Math.PI / 2, openAngle = Math.PI * 0.56 }) => {
+        const makeCutawaySleeveMesh = ({ name, x0, x1, radius, innerRadius, material, progress = 1, openCenter = Math.PI / 2, openAngle = Math.PI * 0.36 }) => {
           const p = clamp(progress, 0.015, 1)
           const xEnd = x0 + (x1 - x0) * p
           const radialSegments = 72
@@ -614,8 +614,8 @@ function useRfStackModel(config) {
           const copperMat = new THREE.MeshStandardMaterial({ name: 'live polished copper conductor', color: 0xd77828, roughness: 0.16, metalness: 0.9 })
           const flatwireMat = new THREE.MeshStandardMaterial({ name: 'live SPC flatwire shield', color: 0xf2f1e8, roughness: 0.14, metalness: 0.94, side: THREE.DoubleSide })
           const flatwireDark = new THREE.MeshStandardMaterial({ name: 'live SPC flatwire shadow', color: 0xa9adad, roughness: 0.28, metalness: 0.82, side: THREE.DoubleSide })
-          const foilMat = new THREE.MeshStandardMaterial({ name: 'live bright foil shield', color: 0xdedbd0, roughness: 0.16, metalness: 0.92, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: true })
-          const foilSeamMat = new THREE.MeshStandardMaterial({ name: 'live foil overlap seam', color: 0xffffff, roughness: 0.26, metalness: 0.74, transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false })
+          const foilMat = new THREE.MeshStandardMaterial({ name: 'live deep golden foil shield', color: 0xd39a22, roughness: 0.2, metalness: 0.94, transparent: true, opacity: 0.94, side: THREE.DoubleSide, depthWrite: true })
+          const foilSeamMat = new THREE.MeshStandardMaterial({ name: 'live golden foil overlap seam', color: 0xffcf57, roughness: 0.22, metalness: 0.82, transparent: true, opacity: 0.88, side: THREE.DoubleSide, depthWrite: false })
           const braidBright = new THREE.MeshStandardMaterial({ name: 'live braid bright carrier', color: 0xd8d2bd, roughness: 0.24, metalness: 0.82 })
           const braidDark = new THREE.MeshStandardMaterial({ name: 'live braid shadow carrier', color: 0x807a69, roughness: 0.36, metalness: 0.72 })
           const braidCopper = new THREE.MeshStandardMaterial({ name: 'live warm braid carrier', color: 0xb77939, roughness: 0.26, metalness: 0.8 })
@@ -714,6 +714,25 @@ function useRfStackModel(config) {
                 side: THREE.DoubleSide,
                 depthWrite: opacity > 0.86,
               })
+              const jacketGhostMat = new THREE.MeshStandardMaterial({
+                name: 'live translucent full jacket wall',
+                color: 0x171b1d,
+                roughness: 0.72,
+                metalness: 0.01,
+                transparent: true,
+                opacity: clamp(opacity * 0.22, 0.14, 0.32),
+                side: THREE.DoubleSide,
+                depthWrite: false,
+              })
+              dynamicGroup.add(makeSleeveMesh({
+                name: `live continuous outer jacket wall ${shieldIndex + 1}`,
+                x0: jacketX0,
+                x1: jacketX1,
+                radius: jacketRadius,
+                innerRadius: Math.max(radius + 0.035, jacketRadius - 0.095),
+                material: jacketGhostMat,
+                progress: layerProgress,
+              }))
               dynamicGroup.add(makeCutawaySleeveMesh({
                 name: `live final outer jacket layer ${shieldIndex + 1}`,
                 x0: jacketX0,
@@ -722,6 +741,7 @@ function useRfStackModel(config) {
                 innerRadius: Math.max(radius + 0.035, jacketRadius - 0.095),
                 material: jacketMat,
                 progress: layerProgress,
+                openAngle: Math.PI * 0.36,
               }))
               return
             }
