@@ -187,6 +187,17 @@ function makeAnimationKey(prefix) {
 }
 
 function makeShieldLayer(type, source = PRESETS.phaseStable) {
+  if (type === 'jacket') {
+    return {
+      id: makeShieldId(),
+      type,
+      label: 'Outer jacket',
+      length: 128,
+      od: source.jacketOD ?? 6.6,
+      opacity: 72,
+      animateKey: makeAnimationKey('shield'),
+    }
+  }
   if (type === 'flatwire') {
     const width = source.helicalWidth ?? 1.4
     const overlap = source.helicalOverlap ?? 45
@@ -248,6 +259,7 @@ function makePresetShieldStack(preset) {
     makeShieldLayer('flatwire', preset),
     makeShieldLayer('foil', preset),
     makeShieldLayer('braid', preset),
+    makeShieldLayer('jacket', preset),
   ]
 }
 
@@ -429,6 +441,86 @@ function useRfStackModel(config) {
           return mesh
         }
 
+        const makeCutawaySleeveMesh = ({ name, x0, x1, radius, innerRadius, material, progress = 1, openCenter = Math.PI / 2, openAngle = Math.PI * 0.56 }) => {
+          const p = clamp(progress, 0.015, 1)
+          const xEnd = x0 + (x1 - x0) * p
+          const radialSegments = 72
+          const lengthSegments = Math.max(2, Math.round(16 * p))
+          const start = openCenter + openAngle / 2
+          const span = Math.PI * 2 - openAngle
+          const stride = (radialSegments + 1) * 2
+          const verts = []
+          const faces = []
+
+          for (let ix = 0; ix <= lengthSegments; ix++) {
+            const t = ix / lengthSegments
+            const x = x0 + (xEnd - x0) * t
+            for (let ia = 0; ia <= radialSegments; ia++) {
+              const angle = start + (span * ia) / radialSegments
+              verts.push(x, radius * Math.cos(angle), radius * Math.sin(angle))
+              verts.push(x, innerRadius * Math.cos(angle), innerRadius * Math.sin(angle))
+            }
+          }
+
+          for (let ix = 0; ix < lengthSegments; ix++) {
+            const row = ix * stride
+            const nextRow = (ix + 1) * stride
+            for (let ia = 0; ia < radialSegments; ia++) {
+              const outer = row + ia * 2
+              const inner = outer + 1
+              const outerNext = row + (ia + 1) * 2
+              const innerNext = outerNext + 1
+              const outerUp = nextRow + ia * 2
+              const innerUp = outerUp + 1
+              const outerNextUp = nextRow + (ia + 1) * 2
+              const innerNextUp = outerNextUp + 1
+              faces.push(outer, outerNext, outerNextUp)
+              faces.push(outer, outerNextUp, outerUp)
+              faces.push(inner, innerUp, innerNextUp)
+              faces.push(inner, innerNextUp, innerNext)
+            }
+          }
+
+          const firstRow = 0
+          const lastRow = lengthSegments * stride
+          for (let ia = 0; ia < radialSegments; ia++) {
+            const outer = firstRow + ia * 2
+            const inner = outer + 1
+            const outerNext = firstRow + (ia + 1) * 2
+            const innerNext = outerNext + 1
+            const outerEnd = lastRow + ia * 2
+            const innerEnd = outerEnd + 1
+            const outerNextEnd = lastRow + (ia + 1) * 2
+            const innerNextEnd = outerNextEnd + 1
+            faces.push(outer, inner, innerNext)
+            faces.push(outer, innerNext, outerNext)
+            faces.push(outerEnd, outerNextEnd, innerNextEnd)
+            faces.push(outerEnd, innerNextEnd, innerEnd)
+          }
+
+          for (let ix = 0; ix < lengthSegments; ix++) {
+            const row = ix * stride
+            const nextRow = (ix + 1) * stride
+            for (const ia of [0, radialSegments]) {
+              const outer = row + ia * 2
+              const inner = outer + 1
+              const outerUp = nextRow + ia * 2
+              const innerUp = outerUp + 1
+              faces.push(outer, outerUp, innerUp)
+              faces.push(outer, innerUp, inner)
+            }
+          }
+
+          const geometry = new THREE.BufferGeometry()
+          geometry.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+          geometry.setIndex(faces)
+          geometry.computeVertexNormals()
+          const mesh = new THREE.Mesh(geometry, material)
+          mesh.name = name
+          mesh.renderOrder = 7
+          return mesh
+        }
+
         const makeCylinderX = ({ name, x0, x1, radius, material, radialSegments = 64 }) => {
           const geometry = new THREE.CylinderGeometry(radius, radius, x1 - x0, radialSegments, 1, false)
           const mesh = new THREE.Mesh(geometry, material)
@@ -604,6 +696,35 @@ function useRfStackModel(config) {
             const availableSpan = Math.max(0.6, buildX1 - x0 - 0.24)
             const x1 = Math.min(buildX1 - 0.08, x0 + availableSpan * lengthRatio)
             const radius = shieldRadius + shieldIndex * 0.055
+
+            if (type === 'jacket') {
+              const od = clamp(Number(layer.od) || Number(nextConfig.jacketOD) || 6.6, 2.4, 14)
+              const opacity = clamp(Number(layer.opacity) || 72, 35, 100) / 100
+              const jacketRadius = Math.max(radius + 0.1, 0.42 + od * 0.032)
+              const jacketX0 = buildX0 - 0.32
+              const jacketSpan = buildX1 - jacketX0 - 0.18
+              const jacketX1 = Math.min(buildX1 - 0.04, jacketX0 + jacketSpan * lengthRatio)
+              const jacketMat = new THREE.MeshStandardMaterial({
+                name: 'live cutaway outer jacket',
+                color: 0x202426,
+                roughness: 0.66,
+                metalness: 0.02,
+                transparent: opacity < 0.98,
+                opacity,
+                side: THREE.DoubleSide,
+                depthWrite: opacity > 0.86,
+              })
+              dynamicGroup.add(makeCutawaySleeveMesh({
+                name: `live final outer jacket layer ${shieldIndex + 1}`,
+                x0: jacketX0,
+                x1: jacketX1,
+                radius: jacketRadius,
+                innerRadius: Math.max(radius + 0.035, jacketRadius - 0.095),
+                material: jacketMat,
+                progress: layerProgress,
+              }))
+              return
+            }
 
             if (type === 'foil') {
               const overlap = clamp(Number(layer.overlap) || 25, 0, 70)
@@ -926,7 +1047,7 @@ function LayerRail({ computed }) {
     ['04', 'SPC helical', `${fmt(computed.helicalOverlap, 0)}% overlap`, C.sky],
     ['05', 'Foil shield', `${fmt(computed.foilCoverage, 0)}% seam`, C.foil],
     ['06', 'Braid', `${fmt(computed.braidCoverage, 0)}% coverage`, C.braid],
-    ['07', 'Jacket', `${fmt(computed.jacketOD, 1)} mm OD`, C.sky],
+    ['07', 'Jacket', computed.jacketInstalled ? `${fmt(computed.jacketOD, 1)} mm OD` : 'add final sleeve', C.sky],
   ]
   return (
     <div style={S.layerRail}>
@@ -985,11 +1106,12 @@ function PTFELayerCard({ layer, index, canRemove, onUpdate, onReplay, onRemove }
 function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
   const type = layer.type || 'spiral'
   const isFlatwire = type === 'spiral' || type === 'flatwire'
-  const accent = type === 'braid' ? C.braid : type === 'foil' ? C.foil : type === 'flatwire' ? C.sky : C.amber
+  const accent = type === 'jacket' ? C.sky : type === 'braid' ? C.braid : type === 'foil' ? C.foil : type === 'flatwire' ? C.sky : C.amber
   const title = type === 'spiral' ? 'SPC flatwire spiral'
     : type === 'flatwire' ? 'SPC flatwire helical'
       : type === 'foil' ? 'Foil shield'
-        : 'Braid shield'
+        : type === 'braid' ? 'Braid shield'
+          : 'Outer jacket'
   const width = Number(layer.width) || 1
   const spiralPitch = Number(layer.pitch) || spiralPitchFromGap(Number(layer.gap) || 10, width)
   const spiralGap = spiralGapFromPitch(spiralPitch, width)
@@ -1110,6 +1232,19 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
           <Slider label="Coverage" value={layer.coverage} setValue={(value) => onUpdate({ coverage: value })} min={65} max={99} step={1} unit="%" accent={accent} />
         </div>
       )}
+
+      {type === 'jacket' && (
+        <>
+          <div style={S.shieldHint}>
+            Jacket is the final outer sleeve. The render keeps a cutaway window so the shield stack stays visible.
+          </div>
+          <div style={S.ptfeLayerGrid}>
+            <DimensionSlider label="Jacket length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unitMode={unitMode} accent={accent} />
+            <DimensionSlider label="Jacket OD" value={layer.od} setValue={(value) => onUpdate({ od: value })} min={2.4} max={14} step={0.1} unitMode={unitMode} accent={accent} />
+            <Slider label="Opacity" value={layer.opacity} setValue={(value) => onUpdate({ opacity: value })} min={35} max={100} step={1} unit="%" accent={accent} />
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -1180,6 +1315,8 @@ export default function RFStackLab() {
     setShieldStack((current) => [...current, layer].slice(0, 8))
     if (type === 'braid') {
       setParams((current) => ({ ...current, braidCoverage: layer.coverage }))
+    } else if (type === 'jacket') {
+      setParams((current) => ({ ...current, jacketOD: layer.od }))
     }
     setActivePreset('')
   }
@@ -1188,6 +1325,9 @@ export default function RFStackLab() {
     setShieldStack((current) => current.map((layer) => layer.id === id ? { ...layer, ...patch } : layer))
     if (patch.coverage != null) {
       setParams((current) => ({ ...current, braidCoverage: patch.coverage }))
+    }
+    if (patch.od != null) {
+      setParams((current) => ({ ...current, jacketOD: patch.od }))
     }
     setActivePreset('')
   }
@@ -1240,6 +1380,7 @@ export default function RFStackLab() {
     const helicalLayer = shieldStack.find((layer) => layer.type === 'flatwire')
     const foilLayer = shieldStack.find((layer) => layer.type === 'foil')
     const braidLayer = shieldStack.find((layer) => layer.type === 'braid')
+    const jacketLayer = shieldStack.find((layer) => layer.type === 'jacket')
     const spiralWidth = Number(spiralLayer?.width ?? params.spiralWidth)
     const spiralBobbins = Math.round(Number(spiralLayer?.bobbins ?? params.spiralBobbins))
     const spiralPitchMm = Number(spiralLayer?.pitch ?? spiralPitchFromGap(Number(spiralLayer?.gap ?? params.spiralGap), spiralWidth))
@@ -1253,6 +1394,7 @@ export default function RFStackLab() {
     const braidEnds = Math.round(Number(braidLayer?.ends ?? 4))
     const braidPicks = Number(braidLayer?.picks ?? 38)
     const braidGauge = Number(braidLayer?.gauge ?? 36)
+    const jacketOD = Number(jacketLayer?.od ?? params.jacketOD)
     const summary = stackSummary(ptfeStack, params.suckout)
     const tension = 1 - params.suckout / 180
     const layerBuilds = ptfeStack.map((layer) => {
@@ -1334,6 +1476,8 @@ export default function RFStackLab() {
       braidEnds,
       braidPicks,
       braidGauge,
+      jacketOD,
+      jacketInstalled: Boolean(jacketLayer),
       pitchTape,
       pitchSpiral,
       pitchHelical,
@@ -1403,7 +1547,7 @@ export default function RFStackLab() {
           <div style={S.cardHead}>
             <div>
               <div style={S.cardEyebrow}>Macro GLB / Three.js</div>
-              <h2 style={S.cardTitle}>Conductor → PTFE → flatwire → foil → braid</h2>
+              <h2 style={S.cardTitle}>Conductor → PTFE → flatwire → foil → braid → jacket</h2>
             </div>
             <div style={S.liveBadge}>live model</div>
           </div>
@@ -1498,10 +1642,13 @@ export default function RFStackLab() {
                 <button type="button" style={S.toolBtn} onClick={() => addShieldLayer('braid')}>
                   <Plus size={13} /> Braid
                 </button>
+                <button type="button" style={S.toolBtn} onClick={() => addShieldLayer('jacket')}>
+                  <Plus size={13} /> Jacket
+                </button>
               </div>
               <div style={S.ptfeStackList}>
                 {shieldStack.length === 0 && (
-                  <div style={S.emptyState}>Add SPC spiral, flatwire, foil, then braid to build a real RF shield stack.</div>
+                  <div style={S.emptyState}>Add SPC spiral, flatwire, foil, braid, then jacket to build a complete RF cable stack.</div>
                 )}
                 {shieldStack.map((layer, index) => (
                   <ShieldLayerCard
@@ -1538,7 +1685,7 @@ export default function RFStackLab() {
       <div style={S.notes}>
         <div style={S.noteTitle}><Activity size={13} /> Interpretation</div>
         <p>
-          PTFE is the dielectric wrap, not a shield. The RF shields start at SPC flatwire spiral/helical layers, then foil, then braid. Coverage is compounded as independent leak paths, so foil + braid + flatwire rapidly pushes shielding effectiveness up.
+          PTFE is the dielectric wrap, not a shield. The RF shields start at SPC flatwire spiral/helical layers, then foil, then braid; jacket is the final mechanical sleeve. Coverage is compounded as independent leak paths, so foil + braid + flatwire rapidly pushes shielding effectiveness up.
         </p>
         <p>
           Tape suckout is still here, but now it is tied to the same build recipe: changing PTFE overlap, suckout, flatwire pitch, or braid coverage updates Z0, TDR, insertion loss, return loss, VSWR, and coverage together.
