@@ -231,6 +231,7 @@ const CABLES = {
     d: 2.26, D: 7.24, shield: 8.23, OD: 10.29, flex: "low", outdoor: true, power: "high", complexity: "medium",
     render: "/cable-renders/rf-rg213-heavy.png",
     model: "/models/rf-rg213.glb",
+    macroModel: "/models/rf-rg213-macro.glb",
     atten: [[30, 2.5], [100, 4.6], [450, 10.5], [1000, 16.1]],
     cons: { conductor: "7-strand bare copper, 0.75mm", dielectric: "Solid PE, εr 2.30", shield: "Bare copper braid, 97% coverage", jacket: "Non-contaminating PVC, 1.03mm" },
     proc: ["Strand 7 bare Cu wires in concentric lay", "PE extrusion to 7.24mm OD", "High-coverage Cu braid 97%", "Non-contaminating PVC jacket", "Impulse voltage test 10kV"],
@@ -357,6 +358,7 @@ const CABLES = {
     d: 2.74, D: 7.24, shield: 8.13, OD: 10.29, flex: "medium", outdoor: true, power: "high", complexity: "medium",
     render: "/cable-renders/rf-lmr-flex.png",
     model: "/models/rf-lmr400.glb",
+    macroModel: "/models/rf-lmr400-macro.glb",
     atten: [[30, 2.2], [150, 5.1], [450, 8.9], [900, 12.8], [1800, 18.5], [2400, 21.6], [5800, 35.1]],
     cons: { conductor: "Solid bare Cu, 2.74mm", dielectric: "Foam PE with PE skin, gas-foamed", shield: "Al foil 100% + tinned Cu braid 92%", jacket: "Black UV PE, 1.45mm" },
     proc: ["Cu to 2.74mm ±0.01mm", "Co-extrude foam PE + skin, ~0.30 g/cc", "Al-polymer foil 100%", "Tinned Cu braid 92%", "Sweep to 6GHz VSWR <1.15"],
@@ -432,6 +434,7 @@ const CABLES = {
     d: 1.02, D: 4.60, shield: 5.46, OD: 6.99, flex: "medium", outdoor: false, power: "low", complexity: "medium",
     render: "/cable-renders/rf-belden1694a-broadcast.png",
     model: "/models/rf-belden1694a.glb",
+    macroModel: "/models/rf-belden1694a-macro.glb",
     atten: [[135, 4.6], [540, 9.5], [1485, 16.4], [2970, 23.6]],
     cons: { conductor: "Solid bare Cu, 18 AWG", dielectric: "Gas-injected foam HDPE", shield: "Duobond II foil 100% + tinned Cu braid 95%", jacket: "Matte black PVC, 0.76mm" },
     proc: ["Annealed solid Cu", "Gas-foam HDPE with tight VP", "Duobond II foil 100%", "Tinned Cu braid 95%", "Matte PVC, sweep 3GHz"],
@@ -907,6 +910,7 @@ const cableIdToModelSlug = (id) => `rf-${String(id)
   .replace(/_/g, "-")
   .toLowerCase()}`;
 const getCableModelPath = (id, cable = CABLES[id]) => cable?.model || `/models/${cableIdToModelSlug(id)}.glb`;
+const getCableMacroModelPath = (id, cable = CABLES[id]) => cable?.macroModel || "";
 const withCableModel = (id, cable = CABLES[id]) => cable ? { ...cable, model: getCableModelPath(id, cable) } : cable;
 
 // ═══════════════════════════════════════════════════════════════
@@ -5732,6 +5736,7 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
   const [visualOnly, setVisualOnly] = useState(false);
   const [detailId, setDetailId] = useState(activeCable || null);
   const [renderModalId, setRenderModalId] = useState(null);
+  const [renderModalInitialMode, setRenderModalInitialMode] = useState("standard");
   const savedScrollY = useRef(0);
 
   // Auto-open detail when activeCable changes from outside the library
@@ -5753,6 +5758,10 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
     if (typeof window !== "undefined") {
       requestAnimationFrame(() => window.scrollTo({ top: savedScrollY.current, behavior: "instant" }));
     }
+  };
+  const openRenderModal = (id, mode = "standard") => {
+    setRenderModalInitialMode(mode);
+    setRenderModalId(id);
   };
 
   const filtered = useMemo(() => {
@@ -5798,6 +5807,7 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
     <CableRenderModal
       id={renderModalId}
       cable={renderModalCable}
+      initialMode={renderModalInitialMode}
       onClose={() => setRenderModalId(null)}
     />
   ) : null;
@@ -5815,7 +5825,8 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
           compared={comparedCables?.includes(detailId)}
           toggleCompare={toggleCompare}
           onPrint={onPrint ? () => onPrint(detailId) : undefined}
-          onViewRender={getCableModelPath(detailId, CABLES[detailId]) ? () => setRenderModalId(detailId) : undefined}
+          onViewRender={getCableModelPath(detailId, CABLES[detailId]) ? () => openRenderModal(detailId, "standard") : undefined}
+          onViewMacro={getCableMacroModelPath(detailId, CABLES[detailId]) ? () => openRenderModal(detailId, "macro") : undefined}
         />
         {renderModal}
       </>
@@ -5984,7 +5995,8 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
               id={id}
               cable={c}
               onOpen={() => openDetail(id)}
-              onViewRender={getCableModelPath(id, c) ? () => setRenderModalId(id) : undefined}
+              onViewRender={getCableModelPath(id, c) ? () => openRenderModal(id, "standard") : undefined}
+              onViewMacro={getCableMacroModelPath(id, c) ? () => openRenderModal(id, "macro") : undefined}
               compared={comparedCables?.includes(id)}
               isMobile={isMobile}
             />
@@ -6325,37 +6337,68 @@ function ShieldCoveragePanel({ cable, freqGHz, onFreq }) {
   );
 }
 
-function CableRenderModal({ id, cable: c, onClose }) {
+function CableRenderModal({ id, cable: c, initialMode = "standard", onClose }) {
   const layers = useMemo(() => getRfRenderLayers(c), [c]);
+  const hasMacro = Boolean(c.macroModel);
+  const [viewMode, setViewMode] = useState(initialMode === "macro" && hasMacro ? "macro" : "standard");
   const [pinnedLayer, setPinnedLayer] = useState(null);
   const [hoverLayer, setHoverLayer] = useState(null);
   const activeLayer = hoverLayer || pinnedLayer;
   const [bendMultiplier, setBendMultiplier] = useState(c.flex === "high" ? 8 : c.flex === "low" ? 16 : 10);
   const [shieldFreq, setShieldFreq] = useState(2.4);
+  const renderCable = useMemo(
+    () => (viewMode === "macro" && c.macroModel ? { ...c, model: c.macroModel } : c),
+    [c, viewMode]
+  );
+  const isMacro = viewMode === "macro" && hasMacro;
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+  useEffect(() => {
+    setViewMode(initialMode === "macro" && hasMacro ? "macro" : "standard");
+    setPinnedLayer(null);
+    setHoverLayer(null);
+  }, [id, initialMode, hasMacro]);
 
   return (
     <div style={S.renderModalOverlay} onClick={onClose}>
       <div style={S.renderModalCard} onClick={(e) => e.stopPropagation()} data-testid="rf-glb-render-modal">
         <div style={S.renderModalHeader}>
           <div>
-            <div style={S.renderModalEyebrow}>◆ GLB / Three.js render</div>
+            <div style={S.renderModalEyebrow}>{isMacro ? "◆ Macro GLB / Three.js render" : "◆ GLB / Three.js render"}</div>
             <div style={S.renderModalTitle}>{c.name}</div>
           </div>
-          <button type="button" onClick={onClose} style={S.renderModalClose} title="Close">
-            <XIcon size={18} />
-          </button>
+          <div style={S.renderModalHeaderTools}>
+            {hasMacro && (
+              <div style={S.renderModeSwitch} aria-label="Render fidelity">
+                {[
+                  ["standard", "Standard"],
+                  ["macro", "Macro"],
+                ].map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setViewMode(mode)}
+                    style={{ ...S.renderModeButton, ...(viewMode === mode ? S.renderModeButtonActive : {}) }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button type="button" onClick={onClose} style={S.renderModalClose} title="Close">
+              <XIcon size={18} />
+            </button>
+          </div>
         </div>
         <div style={S.renderModalBody}>
           <div style={S.renderModalViewerPane}>
-            <CableGlbViewer cable={c} activeLayer={activeLayer} />
+            <CableGlbViewer cable={renderCable} activeLayer={activeLayer} />
             <div style={S.renderModalStats}>
-              <RfFailureMetric label="Model" value={id} sub="runtime GLB" accent="#5eead4" />
+              <RfFailureMetric label="Model" value={isMacro ? `${id}-macro` : id} sub={isMacro ? "hero macro GLB" : "runtime GLB"} accent="#5eead4" />
               <RfFailureMetric label="OD" value={`${fmt(c.OD, 1)} mm`} sub={`${fmt(c.OD / MM_PER_IN, 2)} in`} accent="#fbbf24" />
               <RfFailureMetric label="VP" value={`${c.vp}%`} sub={`${c.z} Ω`} accent="#38bdf8" />
             </div>
@@ -6638,7 +6681,7 @@ function CableGlbViewer({ cable: c, activeLayer }) {
 }
 
 // Slim list-item card: just the head row, taps open the detail page.
-function CableCard({ id, cable: c, onOpen, onViewRender, compared, isMobile = false }) {
+function CableCard({ id, cable: c, onOpen, onViewRender, onViewMacro, compared, isMobile = false }) {
   const { units } = useContext(SettingsContext);
   const cat = CATEGORIES[c.cat];
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity];
@@ -6682,6 +6725,17 @@ function CableCard({ id, cable: c, onOpen, onViewRender, compared, isMobile = fa
                 >
                   <Sparkles size={12} />
                   <span>View Render</span>
+                </button>
+              )}
+              {onViewMacro && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onViewMacro(); }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  style={{ ...S.cableRenderBtn, ...S.cableMacroBtn }}
+                >
+                  <Sparkles size={12} />
+                  <span>Macro</span>
                 </button>
               )}
             </div>
@@ -6744,7 +6798,7 @@ function CablePreviewThumb({ c, isMobile = false }) {
 // Tabs: Overview · Construction · Performance · Engineering. Each tab
 // owns one focused job — no more atten/material lists duplicated across
 // the poster and the Full Cable Data accordion.
-function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, toggleCompare, onPrint, onViewRender }) {
+function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, toggleCompare, onPrint, onViewRender, onViewMacro }) {
   const { units } = useContext(SettingsContext);
   const cat = CATEGORIES[c.cat] || { label: c.cat, color: "#d97706" };
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity] || "#fbbf24";
@@ -6806,6 +6860,11 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
           {onViewRender && (
             <button onClick={onViewRender} style={{ ...S.actionBtn, ...S.actionBtn3d }}>
               <Sparkles size={12} /> View Render
+            </button>
+          )}
+          {onViewMacro && (
+            <button onClick={onViewMacro} style={{ ...S.actionBtn, ...S.actionBtnMacro }}>
+              <Sparkles size={12} /> Macro Render
             </button>
           )}
           <button onClick={onDesign} style={S.actionBtn}>→ Load into Designer</button>
@@ -10687,6 +10746,40 @@ const S = {
     padding: "14px 16px",
     borderBottom: "1px solid rgba(168,162,158,0.14)",
   },
+  renderModalHeaderTools: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 10,
+    flex: "0 0 auto",
+  },
+  renderModeSwitch: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 2,
+    padding: 3,
+    background: "rgba(3,7,8,0.72)",
+    border: "1px solid rgba(168,162,158,0.16)",
+    borderRadius: 4,
+  },
+  renderModeButton: {
+    minHeight: 28,
+    padding: "6px 10px",
+    border: "1px solid transparent",
+    background: "transparent",
+    color: "#a8a29e",
+    borderRadius: 3,
+    cursor: "pointer",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    fontWeight: 800,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+  },
+  renderModeButtonActive: {
+    color: "#050505",
+    background: "linear-gradient(135deg, #5eead4, #f59e0b)",
+    borderColor: "rgba(255,255,255,0.16)",
+  },
   renderModalEyebrow: {
     color: "#5eead4",
     fontFamily: "'JetBrains Mono', monospace",
@@ -11155,6 +11248,11 @@ const S = {
     cursor: "pointer",
     whiteSpace: "nowrap",
     boxShadow: "0 0 0 1px rgba(94,234,212,0.08), 0 8px 20px rgba(0,0,0,0.26)",
+  },
+  cableMacroBtn: {
+    borderColor: "rgba(251,191,36,0.72)",
+    color: "#fff7d6",
+    background: "linear-gradient(135deg, rgba(251,191,36,0.22), rgba(94,234,212,0.10))",
   },
   compareDot: {
     color: "#34d399",
@@ -11661,6 +11759,7 @@ const S = {
   actionRow: { display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" },
   actionBtn: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 14px", background: "#d97706", color: "#0a0705", border: "none", borderRadius: 2, fontFamily: "inherit", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600 },
   actionBtn3d: { background: "linear-gradient(135deg, #5eead4, #f59e0b)", color: "#050505", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 12px 24px rgba(0,0,0,0.28)" },
+  actionBtnMacro: { background: "linear-gradient(135deg, #fbbf24, #5eead4)", color: "#050505", border: "1px solid rgba(255,255,255,0.14)", boxShadow: "0 12px 24px rgba(0,0,0,0.28)" },
   actionBtnSecondary: { background: "transparent", border: "1px solid #d97706", color: "#fbbf24" },
   sectionFrame: { padding: "14px 0 18px", borderBottom: "1px solid rgba(217,119,6,0.12)", marginBottom: 14 },
   libraryDisclosure: { borderTop: "1px solid rgba(168,162,158,0.14)" },
