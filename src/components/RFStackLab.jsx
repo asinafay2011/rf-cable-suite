@@ -238,22 +238,30 @@ function useRfStackModel(config) {
 
         scene = new THREE.Scene()
         modelGroup = new THREE.Group()
-        modelGroup.rotation.set(-0.15, 0.18, 0.02)
+        modelGroup.rotation.set(-0.12, -0.2, 0.01)
         scene.add(modelGroup)
 
-        const makeRibbonMesh = ({ name, x0, x1, radius, turns, phase, widthAngle, handedness, material, progress = 1 }) => {
+        const makeRibbonMesh = ({ name, x0, x1, radius, turns, phase, tapeWidth, handedness, material, progress = 1, thickness = 0.004 }) => {
           const p = clamp(progress, 0.02, 1)
-          const segments = Math.max(8, Math.round(170 * p))
+          const segments = Math.max(10, Math.round(220 * p))
           const verts = []
           const faces = []
+          const length = x1 - x0
+          const thetaTotal = handedness * turns * Math.PI * 2
+          const normalLen = Math.hypot(radius * thetaTotal, length) || 1
+          const normalX = -(radius * thetaTotal) / normalLen
+          const normalV = length / normalLen
+          const halfTape = tapeWidth * 0.5
           for (let i = 0; i <= segments; i++) {
             const t = (i / segments) * p
             const x = x0 + (x1 - x0) * t
             const center = phase + handedness * turns * Math.PI * 2 * t
-            const lift = 1 + 0.012 * Math.sin(t * Math.PI * 2 * 7 + phase)
+            const lift = 1 + 0.003 * Math.sin(t * Math.PI * 2 * 2 + phase)
             for (const edge of [-0.5, 0.5]) {
-              const a = center + edge * widthAngle
-              verts.push(x, radius * lift * Math.cos(a), radius * lift * Math.sin(a))
+              const offset = edge * halfTape
+              const edgeX = x + normalX * offset
+              const edgeAngle = center + (normalV * offset) / Math.max(radius, 0.001)
+              verts.push(edgeX, (radius + thickness) * lift * Math.cos(edgeAngle), (radius + thickness) * lift * Math.sin(edgeAngle))
             }
           }
           for (let i = 0; i < segments; i++) {
@@ -267,7 +275,7 @@ function useRfStackModel(config) {
           geometry.computeVertexNormals()
           const mesh = new THREE.Mesh(geometry, material)
           mesh.name = name
-          mesh.renderOrder = 4
+          mesh.renderOrder = 8
           return mesh
         }
 
@@ -313,61 +321,61 @@ function useRfStackModel(config) {
           dynamicGroup = new THREE.Group()
           dynamicGroup.name = 'live PTFE and braid coverage overlay'
 
-          const ptfeA = new THREE.MeshStandardMaterial({ name: 'live PTFE tape warm', color: 0xfff1bd, roughness: 0.34, metalness: 0.02, transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: true })
-          const ptfeB = new THREE.MeshStandardMaterial({ name: 'live PTFE tape cool', color: 0xf6e7bd, roughness: 0.42, metalness: 0.02, transparent: true, opacity: 0.68, side: THREE.DoubleSide, depthWrite: true })
+          const ptfeA = new THREE.MeshStandardMaterial({ name: 'live PTFE tape satin white', color: 0xfff9e8, roughness: 0.26, metalness: 0.0, transparent: false, opacity: 1, side: THREE.DoubleSide, depthWrite: true })
+          const ptfeB = new THREE.MeshStandardMaterial({ name: 'live PTFE tape edge shade', color: 0xf6ecd0, roughness: 0.34, metalness: 0.0, transparent: false, opacity: 1, side: THREE.DoubleSide, depthWrite: true })
           const braidBright = new THREE.MeshStandardMaterial({ name: 'live braid bright carrier', color: 0xd8d2bd, roughness: 0.24, metalness: 0.82 })
           const braidDark = new THREE.MeshStandardMaterial({ name: 'live braid shadow carrier', color: 0x807a69, roughness: 0.36, metalness: 0.72 })
 
           const stack = Array.isArray(nextConfig.ptfeStack) ? nextConfig.ptfeStack : []
           stack.forEach((layer, layerIndex) => {
             const passes = clamp(Math.round(layer.passes || 1), 1, 12)
-            const passCount = Math.min(4, passes)
             const width = clamp(Number(layer.width) || 6, 2, 14)
             const direction = layer.direction === 'S' ? 'S' : 'Z'
             const handedness = direction === 'Z' ? 1 : -1
-            const widthAngle = clamp(width / 42, 0.055, 0.22)
-            const turns = clamp(12.5 / width + 2.2 + passes * 0.06, 2.8, 8.2)
-            const layerProgress = elapsed < 3.2 ? clamp((elapsed - layerIndex * 0.42) / 0.95, 0, 1) : 1
-            for (let pass = 0; pass < passCount; pass++) {
-              const phase = layerIndex * 0.9 + pass * Math.PI * 0.54
-              const radius = 0.352 + layerIndex * 0.035 + pass * 0.006
-              const mesh = makeRibbonMesh({
-                name: `live PTFE ${direction} wrap L${layerIndex + 1} P${pass + 1}`,
-                x0: -0.52,
-                x1: 1.62,
-                radius,
-                turns,
-                phase,
-                widthAngle,
-                handedness,
-                material: pass % 2 ? ptfeB : ptfeA,
-                progress: layerProgress,
-              })
-              dynamicGroup.add(mesh)
-            }
+            const tapeWidth = clamp(width * 0.07, 0.18, 0.72)
+            const turns = clamp(18 / width + 1.65 + passes * 0.035, 2.6, 7.2)
+            const layerProgress = elapsed < 4 ? clamp((elapsed - layerIndex * 0.48) / 1.25, 0, 1) : 1
+            const phase = layerIndex * 1.1
+            const radius = 0.245 + layerIndex * 0.046
+            const mesh = makeRibbonMesh({
+              name: `live wide PTFE ${direction} tape layer ${layerIndex + 1}`,
+              x0: -1.12,
+              x1: 2.72,
+              radius,
+              turns,
+              phase,
+              tapeWidth,
+              handedness,
+              material: layerIndex % 2 ? ptfeB : ptfeA,
+              progress: layerProgress,
+              thickness: 0.01 + passes * 0.0015,
+            })
+            dynamicGroup.add(mesh)
           })
 
-          const coverage = clamp(Number(nextConfig.braidCoverage) || 92, 65, 99)
-          let carrierCount = Math.round(10 + ((coverage - 65) / 34) * 14)
-          if (carrierCount % 2) carrierCount += 1
-          const strandRadius = 0.0048 + ((coverage - 65) / 34) * 0.0045
-          const turns = 4.2 + ((coverage - 65) / 34) * 1.9
-          for (const handedness of [1, -1]) {
-            const material = handedness === 1 ? braidBright : braidDark
-            for (let carrier = 0; carrier < carrierCount; carrier++) {
-              const phase = (Math.PI * 2 * carrier) / carrierCount + (handedness === 1 ? 0.15 : 0.52)
-              dynamicGroup.add(makeBraidStrand({
-                name: `live braid ${coverage.toFixed(0)}pct ${handedness > 0 ? 'Z' : 'S'} carrier ${carrier + 1}`,
-                x0: -1.28,
-                x1: 0.34,
-                radius: 0.585,
-                turns,
-                phase,
-                handedness,
-                material,
-                strandRadius,
-                carrierCount,
-              }))
+          if (nextConfig.showBraidPreview && stack.length > 0) {
+            const coverage = clamp(Number(nextConfig.braidCoverage) || 92, 65, 99)
+            let carrierCount = Math.round(8 + ((coverage - 65) / 34) * 12)
+            if (carrierCount % 2) carrierCount += 1
+            const strandRadius = 0.0045 + ((coverage - 65) / 34) * 0.0042
+            const turns = 3.2 + ((coverage - 65) / 34) * 1.7
+            for (const handedness of [1, -1]) {
+              const material = handedness === 1 ? braidBright : braidDark
+              for (let carrier = 0; carrier < carrierCount; carrier++) {
+                const phase = (Math.PI * 2 * carrier) / carrierCount + (handedness === 1 ? 0.15 : 0.52)
+                dynamicGroup.add(makeBraidStrand({
+                  name: `live braid ${coverage.toFixed(0)}pct ${handedness > 0 ? 'Z' : 'S'} carrier ${carrier + 1}`,
+                  x0: -1.82,
+                  x1: -0.68,
+                  radius: 0.55,
+                  turns,
+                  phase,
+                  handedness,
+                  material,
+                  strandRadius,
+                  carrierCount,
+                }))
+              }
             }
           }
 
@@ -376,8 +384,8 @@ function useRfStackModel(config) {
         runtimeRef.current.rebuildDynamic = rebuildDynamic
         rebuildDynamic(runtimeRef.current.config || config || {}, true)
 
-        camera = new THREE.PerspectiveCamera(32, 1, 0.01, 120)
-        camera.position.set(0, 0.18, 6.35)
+        camera = new THREE.PerspectiveCamera(30, 1, 0.01, 120)
+        camera.position.set(0, 0.14, 8.25)
         scene.add(camera)
 
         const ambient = new THREE.HemisphereLight(0xf4eadc, 0x11191b, 1.55)
@@ -433,6 +441,10 @@ function useRfStackModel(config) {
             const root = gltf.scene
             root.traverse((node) => {
               if (!node.isMesh || !node.material) return
+              const nodeLabel = `${node.name} ${Array.isArray(node.material) ? node.material.map((mat) => mat.name).join(' ') : node.material.name}`.toLowerCase()
+              const isConductor = /conductor|copper/.test(nodeLabel)
+              const isReferenceSurface = /table/.test(nodeLabel)
+              if (!isConductor && !isReferenceSurface) node.visible = false
               node.castShadow = true
               node.receiveShadow = true
               const mats = Array.isArray(node.material) ? node.material : [node.material]
@@ -451,7 +463,7 @@ function useRfStackModel(config) {
             const center = box.getCenter(new THREE.Vector3())
             const size = box.getSize(new THREE.Vector3())
             root.position.sub(center)
-            const scale = 3.9 / Math.max(size.x, size.y, size.z, 0.001)
+            const scale = 4.45 / Math.max(size.x, size.y, size.z, 0.001)
             root.scale.setScalar(scale)
             modelGroup.add(root)
             setStatus('')
@@ -462,9 +474,8 @@ function useRfStackModel(config) {
 
         const animate = () => {
           if (!alive || !renderer || !scene || !camera) return
-          if (modelGroup && !pointer.down) modelGroup.rotation.y += 0.0015
           const liveConfig = runtimeRef.current.config
-          if (liveConfig?.animateToken && performance.now() - animationStart < 3300) {
+          if (liveConfig?.animateToken && performance.now() - animationStart < 4300) {
             rebuildDynamic(liveConfig)
           }
           renderer.render(scene, camera)
@@ -590,18 +601,21 @@ function PTFELayerCard({ layer, index, canRemove, onUpdate, onRemove }) {
 
 export default function RFStackLab() {
   const [params, setParams] = useState(PRESETS.phaseStable)
-  const [ptfeStack, setPtfeStack] = useState(() => makePresetStack(PRESETS.phaseStable))
-  const [activePreset, setActivePreset] = useState('phaseStable')
+  const [ptfeStack, setPtfeStack] = useState([])
+  const [activePreset, setActivePreset] = useState('')
   const [animationToken, setAnimationToken] = useState(1)
+  const [showBraidPreview, setShowBraidPreview] = useState(false)
   const modelConfig = useMemo(() => ({
     ptfeStack,
     braidCoverage: params.braidCoverage,
+    showBraidPreview,
     animateToken: animationToken,
-  }), [animationToken, params.braidCoverage, ptfeStack])
+  }), [animationToken, params.braidCoverage, ptfeStack, showBraidPreview])
   const { mountRef, status } = useRfStackModel(modelConfig)
 
   const setParam = (key) => (value) => {
     setParams((current) => ({ ...current, [key]: value }))
+    if (key === 'braidCoverage') setShowBraidPreview(true)
     setActivePreset('')
   }
 
@@ -609,12 +623,14 @@ export default function RFStackLab() {
     setActivePreset(key)
     setParams(PRESETS[key])
     setPtfeStack(makePresetStack(PRESETS[key]))
+    setShowBraidPreview(false)
     setAnimationToken((token) => token + 1)
   }
 
   const updatePtfeLayer = (id, patch) => {
     setPtfeStack((current) => current.map((layer) => layer.id === id ? { ...layer, ...patch } : layer))
     setActivePreset('')
+    setShowBraidPreview(false)
   }
 
   const addPtfeLayer = (direction) => {
@@ -635,12 +651,14 @@ export default function RFStackLab() {
       ].slice(0, 8)
     })
     setActivePreset('')
+    setShowBraidPreview(false)
     setAnimationToken((token) => token + 1)
   }
 
   const removePtfeLayer = (id) => {
     setPtfeStack((current) => current.length <= 1 ? current : current.filter((layer) => layer.id !== id))
     setActivePreset('')
+    setShowBraidPreview(false)
     setAnimationToken((token) => token + 1)
   }
 
@@ -665,6 +683,7 @@ export default function RFStackLab() {
           density: clamp(Number(layer.density) || avgDensity || 0.78, 0.45, 1.65),
           direction: index % 2 ? 'S' : 'Z',
         })))
+        setShowBraidPreview(false)
         setAnimationToken((token) => token + 1)
       }
       setParams((current) => ({
@@ -692,11 +711,12 @@ export default function RFStackLab() {
       const radial = passes * mil * MIL_TO_MM * (1 + clamp(overlap / 100, 0, 0.9)) * tension
       return { ...layer, passes, mil, overlap, radial, eps: densityToEps(Number(layer.density) || summary.avgDensity) }
     })
-    const dielectricWall = layerBuilds.reduce((sum, layer) => sum + layer.radial, 0)
+    const rawDielectricWall = layerBuilds.reduce((sum, layer) => sum + layer.radial, 0)
+    const dielectricWall = rawDielectricWall || 0.12
     const dielectricOD = params.conductorOD + 2 * dielectricWall
     const epsBase = layerBuilds.length && dielectricWall > 0
-      ? layerBuilds.reduce((sum, layer) => sum + layer.eps * layer.radial, 0) / dielectricWall
-      : densityToEps(summary.avgDensity)
+      ? layerBuilds.reduce((sum, layer) => sum + layer.eps * layer.radial, 0) / rawDielectricWall
+      : 1.02
     const eps = epsBase * (1 + params.suckout * 0.0018)
     const vp = 1 / Math.sqrt(eps)
     const z0 = z0From(params.conductorOD, dielectricOD, eps)
@@ -854,10 +874,10 @@ export default function RFStackLab() {
               <Slider label="Conductor OD" value={params.conductorOD} setValue={setParam('conductorOD')} min={0.2} max={2.2} step={0.01} unit=" mm" accent={C.copperHi} />
               <div style={S.ptfeToolbar}>
                 <button type="button" style={S.toolBtn} onClick={() => addPtfeLayer('Z')}>
-                  <Plus size={13} /> Add Z
+                  <Plus size={13} /> Add tape Z
                 </button>
                 <button type="button" style={S.toolBtn} onClick={() => addPtfeLayer('S')}>
-                  <Plus size={13} /> Add S
+                  <Plus size={13} /> Add tape S
                 </button>
                 <button type="button" style={{ ...S.toolBtn, color: C.teal, border: `1px solid ${C.teal}66` }} onClick={() => setAnimationToken((token) => token + 1)}>
                   <Play size={13} /> Play wrap
