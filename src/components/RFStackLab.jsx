@@ -152,6 +152,74 @@ function makePtfeId() {
   return `ptfe-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
+function makeShieldId() {
+  return `shield-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+}
+
+function makeAnimationKey(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+function makeShieldLayer(type, source = PRESETS.phaseStable) {
+  if (type === 'flatwire') {
+    return {
+      id: makeShieldId(),
+      type,
+      label: 'SPC flatwire helical',
+      direction: 'S',
+      length: 150,
+      width: source.helicalWidth ?? 1.4,
+      bobbins: source.helicalBobbins ?? 8,
+      gap: source.helicalGap ?? 10,
+      animateKey: makeAnimationKey('shield'),
+    }
+  }
+  if (type === 'foil') {
+    return {
+      id: makeShieldId(),
+      type,
+      label: 'Foil shield',
+      length: 152,
+      overlap: source.foilOverlap ?? 25,
+      animateKey: makeAnimationKey('shield'),
+    }
+  }
+  if (type === 'braid') {
+    return {
+      id: makeShieldId(),
+      type,
+      label: 'SPC braid',
+      length: 142,
+      carriers: 16,
+      ends: 4,
+      picks: 38,
+      gauge: 36,
+      coverage: source.braidCoverage ?? 92,
+      animateKey: makeAnimationKey('shield'),
+    }
+  }
+  return {
+    id: makeShieldId(),
+    type: 'spiral',
+    label: 'SPC flatwire spiral',
+    direction: 'Z',
+    length: 155,
+    width: source.spiralWidth ?? 1.0,
+    bobbins: source.spiralBobbins ?? 8,
+    gap: source.spiralGap ?? 10,
+    animateKey: makeAnimationKey('shield'),
+  }
+}
+
+function makePresetShieldStack(preset) {
+  return [
+    makeShieldLayer('spiral', preset),
+    makeShieldLayer('flatwire', preset),
+    makeShieldLayer('foil', preset),
+    makeShieldLayer('braid', preset),
+  ]
+}
+
 function makePresetStack(preset) {
   const source = Array.isArray(preset.ptfeStack) && preset.ptfeStack.length
     ? preset.ptfeStack
@@ -164,6 +232,7 @@ function makePresetStack(preset) {
     overlap: clamp(Number(layer.overlap ?? preset.ptfeOverlap ?? 50), 0, 80),
     density: clamp(Number(layer.density ?? preset.ptfeDensity ?? 0.78), 0.45, 1.65),
     direction: layer.direction === 'S' || index % 2 ? 'S' : 'Z',
+    animateKey: makeAnimationKey('ptfe'),
   }))
 }
 
@@ -196,11 +265,37 @@ function useRfStackModel(config) {
     let camera = null
     let modelGroup = null
     let dynamicGroup = null
-    let lastAnimationToken = null
-    let animationStart = 0
+    const layerAnimationStarts = new Map()
     let resizeObserver = null
     const disposables = []
     const pointer = { down: false, x: 0, y: 0 }
+
+    const layerAnimationKey = (layer) => (layer?.animateKey ? `${layer.id}:${layer.animateKey}` : '')
+
+    const ensureLayerAnimationStart = (layer, now = performance.now()) => {
+      const key = layerAnimationKey(layer)
+      if (!key) return null
+      if (!layerAnimationStarts.has(key)) layerAnimationStarts.set(key, now)
+      return layerAnimationStarts.get(key)
+    }
+
+    const getLayerAnimationProgress = (layer, durationMs = 1450) => {
+      const start = ensureLayerAnimationStart(layer)
+      if (start == null) return 1
+      return clamp((performance.now() - start) / durationMs, 0, 1)
+    }
+
+    const hasRunningLayerAnimation = (nextConfig = runtimeRef.current.config || {}) => {
+      const now = performance.now()
+      const layers = [
+        ...(Array.isArray(nextConfig.ptfeStack) ? nextConfig.ptfeStack : []),
+        ...(Array.isArray(nextConfig.shieldStack) ? nextConfig.shieldStack : []),
+      ]
+      return layers.some((layer) => {
+        const start = ensureLayerAnimationStart(layer, now)
+        return start != null && now - start < 1900
+      })
+    }
 
     const disposeMaterial = (material) => {
       if (!material) return
@@ -351,10 +446,12 @@ function useRfStackModel(config) {
           return mesh
         }
 
-        const makeBraidStrand = ({ name, x0, x1, radius, turns, phase, handedness, material, strandRadius, carrierCount }) => {
+        const makeBraidStrand = ({ name, x0, x1, radius, turns, phase, handedness, material, strandRadius, carrierCount, progress = 1 }) => {
           const points = []
-          for (let i = 0; i < 72; i++) {
-            const t = i / 71
+          const p = clamp(progress, 0.025, 1)
+          const segments = Math.max(12, Math.round(72 * p))
+          for (let i = 0; i < segments; i++) {
+            const t = (i / Math.max(1, segments - 1)) * p
             const x = x0 + (x1 - x0) * t
             const weave = 0.5 + 0.5 * Math.sin((t * carrierCount * 2 + phase) * Math.PI * 2)
             const angle = phase + handedness * turns * Math.PI * 2 * t
@@ -371,18 +468,11 @@ function useRfStackModel(config) {
 
         const rebuildDynamic = (nextConfig = runtimeRef.current.config || {}, force = false) => {
           if (!modelGroup) return
-          const animationChanged = lastAnimationToken !== nextConfig.animateToken
-          if (animationChanged) {
-            lastAnimationToken = nextConfig.animateToken
-            animationStart = performance.now()
-          }
-          const elapsed = nextConfig.animateToken ? (performance.now() - animationStart) / 1000 : 999
+          const activeAnimation = hasRunningLayerAnimation(nextConfig)
           const signature = JSON.stringify({
             ptfeStack: nextConfig.ptfeStack,
-            braidCoverage: nextConfig.braidCoverage,
-            showBraidPreview: nextConfig.showBraidPreview,
-            animateToken: nextConfig.animateToken,
-            frame: elapsed < 4.2 ? Math.floor(elapsed * 30) : 'done',
+            shieldStack: nextConfig.shieldStack,
+            frame: activeAnimation ? Math.floor(performance.now() / 33) : 'done',
           })
           if (!force && runtimeRef.current.lastSignature === signature) return
           runtimeRef.current.lastSignature = signature
@@ -399,18 +489,28 @@ function useRfStackModel(config) {
           const seamMat = new THREE.MeshStandardMaterial({ name: 'live PTFE faint tape seam', color: 0xcfc5a4, roughness: 0.68, metalness: 0.0, transparent: true, opacity: 0.62, side: THREE.DoubleSide, depthWrite: false })
           const leadTapeMat = new THREE.MeshStandardMaterial({ name: 'live PTFE leading wrap lip', color: 0xffffff, roughness: 0.22, metalness: 0.0, transparent: false, opacity: 1, side: THREE.DoubleSide, depthWrite: true })
           const copperMat = new THREE.MeshStandardMaterial({ name: 'live polished copper conductor', color: 0xd77828, roughness: 0.16, metalness: 0.9 })
+          const flatwireMat = new THREE.MeshStandardMaterial({ name: 'live SPC flatwire shield', color: 0xd8d2bd, roughness: 0.2, metalness: 0.88, side: THREE.DoubleSide })
+          const flatwireDark = new THREE.MeshStandardMaterial({ name: 'live SPC flatwire shadow', color: 0x7f7868, roughness: 0.34, metalness: 0.72, side: THREE.DoubleSide })
+          const foilMat = new THREE.MeshStandardMaterial({ name: 'live bright foil shield', color: 0xdedbd0, roughness: 0.16, metalness: 0.92, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: true })
+          const foilSeamMat = new THREE.MeshStandardMaterial({ name: 'live foil overlap seam', color: 0xffffff, roughness: 0.26, metalness: 0.74, transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false })
           const braidBright = new THREE.MeshStandardMaterial({ name: 'live braid bright carrier', color: 0xd8d2bd, roughness: 0.24, metalness: 0.82 })
           const braidDark = new THREE.MeshStandardMaterial({ name: 'live braid shadow carrier', color: 0x807a69, roughness: 0.36, metalness: 0.72 })
+          const braidCopper = new THREE.MeshStandardMaterial({ name: 'live warm braid carrier', color: 0xb77939, roughness: 0.26, metalness: 0.8 })
 
+          const buildX0 = -2.35
+          const buildX1 = 3.12
+          const conductorX0 = -2.82
+          const conductorX1 = 3.55
           dynamicGroup.add(makeCylinderX({
             name: 'live continuous copper conductor',
-            x0: -1.72,
-            x1: 2.92,
+            x0: conductorX0,
+            x1: conductorX1,
             radius: 0.072,
             material: copperMat,
           }))
 
           const stack = Array.isArray(nextConfig.ptfeStack) ? nextConfig.ptfeStack : []
+          const shieldStack = Array.isArray(nextConfig.shieldStack) ? nextConfig.shieldStack : []
           stack.forEach((layer, layerIndex) => {
             const passes = clamp(Math.round(layer.passes || 1), 1, 12)
             const width = clamp(Number(layer.width) || 6, 2, 14)
@@ -418,11 +518,11 @@ function useRfStackModel(config) {
             const handedness = direction === 'Z' ? 1 : -1
             const tapeWidth = clamp(width * 0.052, 0.16, 0.54)
             const turns = clamp(18 / width + 1.65 + passes * 0.035, 2.6, 7.2)
-            const layerProgress = elapsed < 4 ? clamp((elapsed - layerIndex * 0.48) / 1.25, 0, 1) : 1
+            const layerProgress = getLayerAnimationProgress(layer, 1450)
             const phase = layerIndex * 1.1
             const radius = 0.255 + layerIndex * 0.055
-            const x0 = -1.45
-            const x1 = 2.34
+            const x0 = buildX0 + 0.1
+            const x1 = buildX1 - 0.1
             dynamicGroup.add(makeSleeveMesh({
               name: `live full PTFE sleeve layer ${layerIndex + 1}`,
               x0,
@@ -464,31 +564,100 @@ function useRfStackModel(config) {
             }
           })
 
-          if (nextConfig.showBraidPreview && stack.length > 0) {
-            const coverage = clamp(Number(nextConfig.braidCoverage) || 92, 65, 99)
-            let carrierCount = Math.round(8 + ((coverage - 65) / 34) * 12)
-            if (carrierCount % 2) carrierCount += 1
-            const strandRadius = 0.0045 + ((coverage - 65) / 34) * 0.0042
-            const turns = 3.2 + ((coverage - 65) / 34) * 1.7
-            for (const handedness of [1, -1]) {
-              const material = handedness === 1 ? braidBright : braidDark
-              for (let carrier = 0; carrier < carrierCount; carrier++) {
-                const phase = (Math.PI * 2 * carrier) / carrierCount + (handedness === 1 ? 0.15 : 0.52)
-                dynamicGroup.add(makeBraidStrand({
-                  name: `live braid ${coverage.toFixed(0)}pct ${handedness > 0 ? 'Z' : 'S'} carrier ${carrier + 1}`,
-                  x0: -1.82,
-                  x1: -0.68,
-                  radius: 0.55,
-                  turns,
-                  phase,
-                  handedness,
-                  material,
-                  strandRadius,
-                  carrierCount,
-                }))
-              }
+          let shieldRadius = 0.255 + Math.max(0, stack.length - 1) * 0.055 + 0.082
+          shieldStack.forEach((layer, shieldIndex) => {
+            const type = layer.type || 'spiral'
+            const layerProgress = getLayerAnimationProgress(layer, type === 'braid' ? 1700 : 1450)
+            const lengthRatio = clamp((Number(layer.length) || 140) / 150, 0.55, 1.32)
+            const x0 = buildX0 + shieldIndex * 0.035
+            const x1 = x0 + (buildX1 - buildX0 - 0.28) * lengthRatio
+            const radius = shieldRadius + shieldIndex * 0.055
+
+            if (type === 'foil') {
+              const overlap = clamp(Number(layer.overlap) || 25, 0, 70)
+              dynamicGroup.add(makeSleeveMesh({
+                name: `live foil shield layer ${shieldIndex + 1}`,
+                x0,
+                x1,
+                radius,
+                innerRadius: radius - 0.018,
+                material: foilMat,
+                progress: layerProgress,
+              }))
+              dynamicGroup.add(makeRibbonMesh({
+                name: `live foil overlap seam ${shieldIndex + 1}`,
+                x0: x0 + 0.04,
+                x1: x1 - 0.04,
+                radius: radius + 0.01,
+                turns: clamp(1.4 + overlap / 24, 1.4, 4.3),
+                phase: shieldIndex * 0.5,
+                tapeWidth: clamp(0.045 + overlap * 0.002, 0.045, 0.18),
+                handedness: 1,
+                material: foilSeamMat,
+                progress: layerProgress,
+                thickness: 0.009,
+              }))
+              return
             }
-          }
+
+            if (type === 'braid') {
+              const carriers = clamp(Math.round(Number(layer.carriers) || 16), 8, 32)
+              const carrierCount = carriers % 2 ? carriers + 1 : carriers
+              const ends = clamp(Math.round(Number(layer.ends) || 4), 2, 8)
+              const picks = clamp(Number(layer.picks) || 38, 12, 72)
+              const gauge = clamp(Number(layer.gauge) || 36, 30, 42)
+              const coverage = clamp(Number(layer.coverage) || 92, 65, 99)
+              const strandRadius = clamp(0.0028 + (42 - gauge) * 0.00058 + (coverage - 88) * 0.00012, 0.0028, 0.011)
+              const turns = clamp(picks / 9.2, 2.2, 8.6)
+              for (const handedness of [1, -1]) {
+                const material = handedness === 1 ? braidBright : braidDark
+                for (let carrier = 0; carrier < carrierCount; carrier++) {
+                  const carrierPhase = (Math.PI * 2 * carrier) / carrierCount + (handedness === 1 ? 0.16 : 0.54)
+                  for (let end = 0; end < ends; end++) {
+                    const phase = carrierPhase + end * 0.018
+                    dynamicGroup.add(makeBraidStrand({
+                      name: `live braid ${carrierCount}c ${ends}e ${handedness > 0 ? 'Z' : 'S'} carrier ${carrier + 1}`,
+                      x0,
+                      x1,
+                      radius,
+                      turns,
+                      phase,
+                      handedness,
+                      material: end % 3 === 0 ? braidCopper : material,
+                      strandRadius,
+                      carrierCount,
+                      progress: layerProgress,
+                    }))
+                  }
+                }
+              }
+              return
+            }
+
+            const isHelical = type === 'flatwire'
+            const bobbins = clamp(Math.round(Number(layer.bobbins) || 8), 1, 16)
+            const gap = clamp(Number(layer.gap) || 10, 0, 28)
+            const width = clamp(Number(layer.width) || 1.2, 0.35, 3.2)
+            const handedness = (layer.direction || (isHelical ? 'S' : 'Z')) === 'S' ? -1 : 1
+            const tapeWidth = clamp(width * 0.052, 0.035, 0.19)
+            const turns = clamp(3.4 + (1 - gap / 34) * 1.7 + lengthRatio * 0.8, 2.4, 7.6)
+            for (let bobbin = 0; bobbin < bobbins; bobbin++) {
+              const phase = (Math.PI * 2 * bobbin) / bobbins + shieldIndex * 0.33
+              dynamicGroup.add(makeRibbonMesh({
+                name: `live ${type === 'spiral' ? 'SPC flatwire spiral' : 'SPC flatwire shield'} bobbin ${bobbin + 1}`,
+                x0,
+                x1,
+                radius,
+                turns,
+                phase,
+                tapeWidth,
+                handedness,
+                material: bobbin % 2 ? flatwireDark : flatwireMat,
+                progress: layerProgress,
+                thickness: 0.012,
+              }))
+            }
+          })
 
           modelGroup.add(dynamicGroup)
         }
@@ -496,7 +665,7 @@ function useRfStackModel(config) {
         rebuildDynamic(runtimeRef.current.config || config || {}, true)
 
         camera = new THREE.PerspectiveCamera(30, 1, 0.01, 120)
-        camera.position.set(0, 0.14, 8.25)
+        camera.position.set(0, 0.16, 9.35)
         scene.add(camera)
 
         const ambient = new THREE.HemisphereLight(0xf4eadc, 0x11191b, 1.55)
@@ -587,7 +756,7 @@ function useRfStackModel(config) {
         const animate = () => {
           if (!alive || !renderer || !scene || !camera) return
           const liveConfig = runtimeRef.current.config
-          if (liveConfig?.animateToken && performance.now() - animationStart < 4300) {
+          if (hasRunningLayerAnimation(liveConfig)) {
             rebuildDynamic(liveConfig)
           }
           renderer.render(scene, camera)
@@ -676,7 +845,7 @@ function LayerRail({ computed }) {
   )
 }
 
-function PTFELayerCard({ layer, index, canRemove, onUpdate, onRemove }) {
+function PTFELayerCard({ layer, index, canRemove, onUpdate, onReplay, onRemove }) {
   const direction = layer.direction === 'S' ? 'S' : 'Z'
   const accent = direction === 'Z' ? C.amber : C.sky
   return (
@@ -688,6 +857,9 @@ function PTFELayerCard({ layer, index, canRemove, onUpdate, onRemove }) {
           <small>{direction}-wrap · {fmt(layer.width, 1)} mm tape</small>
         </div>
         <div style={S.ptfeLayerActions}>
+          <button type="button" aria-label={`Replay PTFE layer ${index + 1}`} title={`Replay PTFE layer ${index + 1}`} onClick={onReplay} style={{ ...S.iconBtn, color: C.teal }}>
+            <Play size={12} />
+          </button>
           <button
             type="button"
             onClick={() => onUpdate({ direction: direction === 'Z' ? 'S' : 'Z' })}
@@ -695,7 +867,7 @@ function PTFELayerCard({ layer, index, canRemove, onUpdate, onRemove }) {
           >
             {direction}
           </button>
-          <button type="button" onClick={onRemove} disabled={!canRemove} style={{ ...S.iconBtn, opacity: canRemove ? 1 : 0.35 }}>
+          <button type="button" aria-label={`Remove PTFE layer ${index + 1}`} title={`Remove PTFE layer ${index + 1}`} onClick={onRemove} disabled={!canRemove} style={{ ...S.iconBtn, opacity: canRemove ? 1 : 0.35 }}>
             <Trash2 size={12} />
           </button>
         </div>
@@ -711,23 +883,89 @@ function PTFELayerCard({ layer, index, canRemove, onUpdate, onRemove }) {
   )
 }
 
+function ShieldLayerCard({ layer, index, onUpdate, onRemove }) {
+  const type = layer.type || 'spiral'
+  const isFlatwire = type === 'spiral' || type === 'flatwire'
+  const accent = type === 'braid' ? C.braid : type === 'foil' ? C.foil : type === 'flatwire' ? C.sky : C.amber
+  const title = type === 'spiral' ? 'SPC flatwire spiral'
+    : type === 'flatwire' ? 'SPC flatwire shield'
+      : type === 'foil' ? 'Foil shield'
+        : 'Braid shield'
+  return (
+    <div style={{ ...S.shieldLayerCard, border: `1px solid ${accent}66` }}>
+      <div style={S.ptfeLayerTop}>
+        <div style={S.ptfeLayerTitle}>
+          <span style={{ ...S.layerDot, background: accent }} />
+          <strong>Shield L{index + 1}</strong>
+          <small>{title}</small>
+        </div>
+        <div style={S.ptfeLayerActions}>
+          {isFlatwire && (
+            <button
+              type="button"
+              onClick={() => onUpdate({ direction: (layer.direction === 'S' ? 'Z' : 'S') })}
+              style={{ ...S.directionBtn, border: `1px solid ${accent}88`, color: accent }}
+            >
+              {layer.direction === 'S' ? 'S' : 'Z'}
+            </button>
+          )}
+          <button type="button" aria-label={`Replay shield layer ${index + 1}`} title={`Replay shield layer ${index + 1}`} onClick={() => onUpdate({ animateKey: makeAnimationKey('shield') })} style={{ ...S.iconBtn, color: C.teal }}>
+            <Play size={12} />
+          </button>
+          <button type="button" aria-label={`Remove shield layer ${index + 1}`} title={`Remove shield layer ${index + 1}`} onClick={onRemove} style={S.iconBtn}>
+            <Trash2 size={12} />
+          </button>
+        </div>
+      </div>
+
+      {isFlatwire && (
+        <>
+          <div style={S.shieldHint}>
+            Spiral build usually starts at 8 bobbins with 8-13% gap; length controls how far that shield runs before the next layer takes over.
+          </div>
+          <div style={S.ptfeLayerGrid}>
+            <Slider label="Spiral length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unit=" mm" accent={accent} />
+            <Slider label="Flatwire width" value={layer.width} setValue={(value) => onUpdate({ width: value })} min={0.35} max={3.2} step={0.05} unit=" mm" accent={accent} />
+            <Slider label="Bobbins" value={layer.bobbins} setValue={(value) => onUpdate({ bobbins: Math.round(value) })} min={1} max={16} step={1} accent={accent} />
+            <Slider label="Gap" value={layer.gap} setValue={(value) => onUpdate({ gap: value })} min={0} max={28} step={1} unit="%" accent={layer.gap >= 8 && layer.gap <= 13 ? C.teal : C.amber} />
+          </div>
+        </>
+      )}
+
+      {type === 'foil' && (
+        <div style={S.ptfeLayerGrid}>
+          <Slider label="Foil length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unit=" mm" accent={accent} />
+          <Slider label="Overlap" value={layer.overlap} setValue={(value) => onUpdate({ overlap: value })} min={0} max={70} step={1} unit="%" accent={accent} />
+        </div>
+      )}
+
+      {type === 'braid' && (
+        <div style={S.ptfeLayerGrid}>
+          <Slider label="Braid length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unit=" mm" accent={accent} />
+          <Slider label="Carriers" value={layer.carriers} setValue={(value) => onUpdate({ carriers: Math.round(value) })} min={8} max={32} step={2} accent={accent} />
+          <Slider label="Ends" value={layer.ends} setValue={(value) => onUpdate({ ends: Math.round(value) })} min={2} max={8} step={1} accent={accent} />
+          <Slider label="Picks" value={layer.picks} setValue={(value) => onUpdate({ picks: value })} min={12} max={72} step={1} unit="/in" accent={C.sky} />
+          <Slider label="Gauge" value={layer.gauge} setValue={(value) => onUpdate({ gauge: value })} min={30} max={42} step={1} unit=" AWG" accent={C.foil} />
+          <Slider label="Coverage" value={layer.coverage} setValue={(value) => onUpdate({ coverage: value })} min={65} max={99} step={1} unit="%" accent={accent} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function RFStackLab() {
   const [params, setParams] = useState(PRESETS.phaseStable)
   const [ptfeStack, setPtfeStack] = useState([])
+  const [shieldStack, setShieldStack] = useState([])
   const [activePreset, setActivePreset] = useState('')
-  const [animationToken, setAnimationToken] = useState(1)
-  const [showBraidPreview, setShowBraidPreview] = useState(false)
   const modelConfig = useMemo(() => ({
     ptfeStack,
-    braidCoverage: params.braidCoverage,
-    showBraidPreview,
-    animateToken: animationToken,
-  }), [animationToken, params.braidCoverage, ptfeStack, showBraidPreview])
+    shieldStack,
+  }), [ptfeStack, shieldStack])
   const { mountRef, status } = useRfStackModel(modelConfig)
 
   const setParam = (key) => (value) => {
     setParams((current) => ({ ...current, [key]: value }))
-    if (key === 'braidCoverage') setShowBraidPreview(true)
     setActivePreset('')
   }
 
@@ -735,14 +973,12 @@ export default function RFStackLab() {
     setActivePreset(key)
     setParams(PRESETS[key])
     setPtfeStack(makePresetStack(PRESETS[key]))
-    setShowBraidPreview(false)
-    setAnimationToken((token) => token + 1)
+    setShieldStack(makePresetShieldStack(PRESETS[key]))
   }
 
   const updatePtfeLayer = (id, patch) => {
     setPtfeStack((current) => current.map((layer) => layer.id === id ? { ...layer, ...patch } : layer))
     setActivePreset('')
-    setShowBraidPreview(false)
   }
 
   const addPtfeLayer = (direction) => {
@@ -759,19 +995,44 @@ export default function RFStackLab() {
           overlap: clamp(last.overlap + (nextDirection === 'S' ? 4 : -3), 0, 80),
           density: clamp(last.density + 0.02, 0.45, 1.65),
           direction: nextDirection,
+          animateKey: makeAnimationKey('ptfe'),
         },
       ].slice(0, 8)
     })
     setActivePreset('')
-    setShowBraidPreview(false)
-    setAnimationToken((token) => token + 1)
   }
 
   const removePtfeLayer = (id) => {
     setPtfeStack((current) => current.length <= 1 ? current : current.filter((layer) => layer.id !== id))
     setActivePreset('')
-    setShowBraidPreview(false)
-    setAnimationToken((token) => token + 1)
+  }
+
+  const replayLastPtfeLayer = () => {
+    setPtfeStack((current) => current.map((layer, index) => (
+      index === current.length - 1 ? { ...layer, animateKey: makeAnimationKey('ptfe') } : layer
+    )))
+  }
+
+  const addShieldLayer = (type) => {
+    const layer = makeShieldLayer(type, params)
+    setShieldStack((current) => [...current, layer].slice(0, 8))
+    if (type === 'braid') {
+      setParams((current) => ({ ...current, braidCoverage: layer.coverage }))
+    }
+    setActivePreset('')
+  }
+
+  const updateShieldLayer = (id, patch) => {
+    setShieldStack((current) => current.map((layer) => layer.id === id ? { ...layer, ...patch } : layer))
+    if (patch.coverage != null) {
+      setParams((current) => ({ ...current, braidCoverage: patch.coverage }))
+    }
+    setActivePreset('')
+  }
+
+  const removeShieldLayer = (id) => {
+    setShieldStack((current) => current.filter((layer) => layer.id !== id))
+    setActivePreset('')
   }
 
   useEffect(() => {
@@ -794,9 +1055,8 @@ export default function RFStackLab() {
           overlap: clamp(overlapToPct(layer.overlap), 0, 80),
           density: clamp(Number(layer.density) || avgDensity || 0.78, 0.45, 1.65),
           direction: index % 2 ? 'S' : 'Z',
+          animateKey: makeAnimationKey('ptfe'),
         })))
-        setShowBraidPreview(false)
-        setAnimationToken((token) => token + 1)
       }
       setParams((current) => ({
         ...current,
@@ -814,6 +1074,22 @@ export default function RFStackLab() {
   }, [])
 
   const computed = useMemo(() => {
+    const spiralLayer = shieldStack.find((layer) => layer.type === 'spiral')
+    const helicalLayer = shieldStack.find((layer) => layer.type === 'flatwire')
+    const foilLayer = shieldStack.find((layer) => layer.type === 'foil')
+    const braidLayer = shieldStack.find((layer) => layer.type === 'braid')
+    const spiralWidth = Number(spiralLayer?.width ?? params.spiralWidth)
+    const spiralBobbins = Math.round(Number(spiralLayer?.bobbins ?? params.spiralBobbins))
+    const spiralGapPct = Number(spiralLayer?.gap ?? params.spiralGap)
+    const helicalWidth = Number(helicalLayer?.width ?? params.helicalWidth)
+    const helicalBobbins = Math.round(Number(helicalLayer?.bobbins ?? params.helicalBobbins))
+    const helicalGapPct = Number(helicalLayer?.gap ?? params.helicalGap)
+    const foilOverlap = Number(foilLayer?.overlap ?? params.foilOverlap)
+    const braidCoverage = Number(braidLayer?.coverage ?? params.braidCoverage)
+    const braidCarriers = Math.round(Number(braidLayer?.carriers ?? 16))
+    const braidEnds = Math.round(Number(braidLayer?.ends ?? 4))
+    const braidPicks = Number(braidLayer?.picks ?? 38)
+    const braidGauge = Number(braidLayer?.gauge ?? 36)
     const summary = stackSummary(ptfeStack, params.suckout)
     const tension = 1 - params.suckout / 180
     const layerBuilds = ptfeStack.map((layer) => {
@@ -826,7 +1102,7 @@ export default function RFStackLab() {
     const rawDielectricWall = layerBuilds.reduce((sum, layer) => sum + layer.radial, 0)
     const dielectricWall = rawDielectricWall || 0.12
     const dielectricOD = params.conductorOD + 2 * dielectricWall
-    const epsBase = layerBuilds.length && dielectricWall > 0
+    const epsBase = layerBuilds.length && rawDielectricWall > 0
       ? layerBuilds.reduce((sum, layer) => sum + layer.eps * layer.radial, 0) / rawDielectricWall
       : 1.02
     const eps = epsBase * (1 + params.suckout * 0.0018)
@@ -846,17 +1122,18 @@ export default function RFStackLab() {
     })
     const pitchTape = ptfeNotches[0]?.pitch || pitchFrom(summary.avgWidth, summary.avgOverlap, dielectricOD, 1)
     const tapeNotch = ptfeNotches.length ? Math.min(...ptfeNotches.map((item) => item.freq)) : notchGHz(pitchTape, vp)
-    const spiralGap = -Math.abs(params.spiralGap)
-    const helicalGap = -Math.abs(params.helicalGap)
-    const pitchSpiral = pitchFrom(params.spiralWidth, spiralGap, dielectricOD + 0.25, params.spiralBobbins)
-    const pitchHelical = pitchFrom(params.helicalWidth, helicalGap, dielectricOD + 0.48, params.helicalBobbins)
+    const spiralGap = -Math.abs(spiralGapPct)
+    const helicalGap = -Math.abs(helicalGapPct)
+    const pitchSpiral = pitchFrom(spiralWidth, spiralGap, dielectricOD + 0.25, spiralBobbins)
+    const pitchHelical = pitchFrom(helicalWidth, helicalGap, dielectricOD + 0.48, helicalBobbins)
     const spiralNotch = notchGHz(pitchSpiral, vp)
     const helicalNotch = notchGHz(pitchHelical, vp)
     const circ = Math.PI * (dielectricOD + 0.3)
-    const spiralCoverage = clamp((params.spiralBobbins * params.spiralWidth * (1 - params.spiralGap / 160)) / circ * 100, 0, 100)
-    const helicalCoverage = clamp((params.helicalBobbins * params.helicalWidth * (1 - params.helicalGap / 170)) / circ * 100, 0, 100)
-    const foilCoverage = clamp(100 - Math.max(0, 18 - params.foilOverlap) * 1.6, 82, 100)
-    const shieldCoverage = clamp(100 * (1 - (1 - spiralCoverage / 100) * (1 - helicalCoverage / 100) * (1 - foilCoverage / 100) * (1 - params.braidCoverage / 100)), 0, 100)
+    const spiralCoverage = spiralLayer ? clamp((spiralBobbins * spiralWidth * (1 - spiralGapPct / 160)) / circ * 100, 0, 100) : 0
+    const helicalCoverage = helicalLayer ? clamp((helicalBobbins * helicalWidth * (1 - helicalGapPct / 170)) / circ * 100, 0, 100) : 0
+    const foilCoverage = foilLayer ? clamp(100 - Math.max(0, 18 - foilOverlap) * 1.6, 82, 100) : 0
+    const braidCoverageEffective = braidLayer ? clamp(braidCoverage, 65, 99) : 0
+    const shieldCoverage = clamp(100 * (1 - (1 - spiralCoverage / 100) * (1 - helicalCoverage / 100) * (1 - foilCoverage / 100) * (1 - braidCoverageEffective / 100)), 0, 100)
     const shieldDb = 24 + shieldCoverage * 0.82 + Math.log10(Math.max(1, params.freqGHz)) * 4
     const zError = Math.abs(z0 - 50)
     const worstRl = clamp(34 - zError * 1.7 - params.suckout * 0.26 - Math.max(0, 92 - shieldCoverage) * 0.08, 6, 42)
@@ -875,11 +1152,24 @@ export default function RFStackLab() {
       ptfeOverlap: summary.avgOverlap,
       ptfeDensity: summary.avgDensity,
       ptfeLayerCount: ptfeStack.length,
+      shieldLayerCount: shieldStack.length,
       ptfeNotches,
       dielectricOD,
       eps,
       vp,
       z0,
+      spiralWidth,
+      spiralGap: spiralGapPct,
+      spiralBobbins,
+      helicalWidth,
+      helicalGap: helicalGapPct,
+      helicalBobbins,
+      foilOverlap,
+      braidCoverage: braidCoverageEffective,
+      braidCarriers,
+      braidEnds,
+      braidPicks,
+      braidGauge,
       pitchTape,
       pitchSpiral,
       pitchHelical,
@@ -896,7 +1186,7 @@ export default function RFStackLab() {
       baseLoss,
       suckoutDepth,
     }
-  }, [params, ptfeStack])
+  }, [params, ptfeStack, shieldStack])
 
   const traces = useMemo(() => {
     const rl = []
@@ -905,7 +1195,11 @@ export default function RFStackLab() {
     for (let i = 0; i < 180; i++) {
       const t = i / 179
       const f = 0.2 * (params.freqGHz * 2 / 0.2) ** t
-      const notchSources = [...computed.ptfeNotches.map((item) => item.freq), computed.spiralNotch, computed.helicalNotch]
+      const notchSources = [
+        ...computed.ptfeNotches.map((item) => item.freq),
+        ...(computed.spiralCoverage > 0 ? [computed.spiralNotch] : []),
+        ...(computed.helicalCoverage > 0 ? [computed.helicalNotch] : []),
+      ]
       const notch = notchSources.reduce((sum, nf, index) => {
         const sigma = Math.max(0.08, nf * (index ? 0.045 : 0.035))
         const dx = (f - nf) / sigma
@@ -991,8 +1285,8 @@ export default function RFStackLab() {
                 <button type="button" style={S.toolBtn} onClick={() => addPtfeLayer('S')}>
                   <Plus size={13} /> Add tape S
                 </button>
-                <button type="button" style={{ ...S.toolBtn, color: C.teal, border: `1px solid ${C.teal}66` }} onClick={() => setAnimationToken((token) => token + 1)}>
-                  <Play size={13} /> Play wrap
+                <button type="button" style={{ ...S.toolBtn, color: C.teal, border: `1px solid ${C.teal}66` }} onClick={replayLastPtfeLayer}>
+                  <Play size={13} /> Replay last
                 </button>
               </div>
               <div style={S.ptfeStackList}>
@@ -1003,6 +1297,7 @@ export default function RFStackLab() {
                     index={index}
                     canRemove={ptfeStack.length > 1}
                     onUpdate={(patch) => updatePtfeLayer(layer.id, patch)}
+                    onReplay={() => updatePtfeLayer(layer.id, { animateKey: makeAnimationKey('ptfe') })}
                     onRemove={() => removePtfeLayer(layer.id)}
                   />
                 ))}
@@ -1012,14 +1307,34 @@ export default function RFStackLab() {
 
             <div style={S.controlBlock}>
               <div style={S.blockTitle}><ShieldCheck size={13} /> Shields</div>
-              <Slider label="SPC spiral width" value={params.spiralWidth} setValue={setParam('spiralWidth')} min={0.4} max={2.2} step={0.05} unit=" mm" accent={C.foil} />
-              <Slider label="Spiral bobbins" value={params.spiralBobbins} setValue={setParam('spiralBobbins')} min={1} max={12} step={1} accent={C.foil} />
-              <Slider label="Spiral gap" value={params.spiralGap} setValue={setParam('spiralGap')} min={0} max={28} step={1} unit="%" accent={C.sky} />
-              <Slider label="SPC helical width" value={params.helicalWidth} setValue={setParam('helicalWidth')} min={0.4} max={2.6} step={0.05} unit=" mm" accent={C.foil} />
-              <Slider label="Helical bobbins" value={params.helicalBobbins} setValue={setParam('helicalBobbins')} min={1} max={12} step={1} accent={C.sky} />
-              <Slider label="Helical gap" value={params.helicalGap} setValue={setParam('helicalGap')} min={0} max={28} step={1} unit="%" accent={C.sky} />
-              <Slider label="Foil overlap" value={params.foilOverlap} setValue={setParam('foilOverlap')} min={0} max={55} step={1} unit="%" accent={C.foil} />
-              <Slider label="Braid coverage" value={params.braidCoverage} setValue={setParam('braidCoverage')} min={65} max={99} step={1} unit="%" accent={C.braid} />
+              <div style={S.shieldToolbar}>
+                <button type="button" style={S.toolBtn} onClick={() => addShieldLayer('spiral')}>
+                  <Plus size={13} /> SPC spiral
+                </button>
+                <button type="button" style={S.toolBtn} onClick={() => addShieldLayer('flatwire')}>
+                  <Plus size={13} /> Flatwire
+                </button>
+                <button type="button" style={S.toolBtn} onClick={() => addShieldLayer('foil')}>
+                  <Plus size={13} /> Foil
+                </button>
+                <button type="button" style={S.toolBtn} onClick={() => addShieldLayer('braid')}>
+                  <Plus size={13} /> Braid
+                </button>
+              </div>
+              <div style={S.ptfeStackList}>
+                {shieldStack.length === 0 && (
+                  <div style={S.emptyState}>Add SPC spiral, flatwire, foil, then braid to build a real RF shield stack.</div>
+                )}
+                {shieldStack.map((layer, index) => (
+                  <ShieldLayerCard
+                    key={layer.id}
+                    layer={layer}
+                    index={index}
+                    onUpdate={(patch) => updateShieldLayer(layer.id, patch)}
+                    onRemove={() => removeShieldLayer(layer.id)}
+                  />
+                ))}
+              </div>
               <Slider label="Test frequency" value={params.freqGHz} setValue={setParam('freqGHz')} min={0.9} max={40} step={0.1} unit=" GHz" accent={C.teal} />
             </div>
           </div>
@@ -1032,7 +1347,7 @@ export default function RFStackLab() {
         <Metric label="Worst RL" value={`${fmt(computed.worstRl, 1)} dB`} sub={`VSWR ${fmt(computed.vswr, 2)}`} accent={computed.worstRl < 14 ? C.red : C.amber} />
         <Metric label="Insertion loss" value={`${fmt(computed.baseLoss, 2)} dB/m`} sub={`at ${fmt(params.freqGHz, 1)} GHz`} accent={C.amber} />
         <Metric label="Shield coverage" value={`${fmt(computed.shieldCoverage, 1)}%`} sub={`${fmt(computed.shieldDb, 0)} dB est. SE`} accent={computed.shieldCoverage < 94 ? C.red : C.teal} />
-        <Metric label="Primary suckout" value={`${fmt(Math.min(computed.tapeNotch, computed.spiralNotch, computed.helicalNotch), 2)} GHz`} sub="first Bragg marker" accent={C.purple} />
+        <Metric label="Primary suckout" value={`${fmt(Math.min(computed.tapeNotch, computed.spiralCoverage ? computed.spiralNotch : Infinity, computed.helicalCoverage ? computed.helicalNotch : Infinity), 2)} GHz`} sub="first Bragg marker" accent={C.purple} />
       </div>
 
       <div style={S.chartGrid}>
@@ -1123,9 +1438,13 @@ const S = {
   controlBlock: { border: `1px solid rgba(167,176,182,0.13)`, background: '#080d0f', padding: 12, display: 'grid', gap: 11 },
   blockTitle: { display: 'flex', alignItems: 'center', gap: 8, color: C.amber, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 2 },
   ptfeToolbar: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 },
+  shieldToolbar: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(126px, 1fr))', gap: 8 },
   toolBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 32, background: '#070b0c', border: `1px solid ${C.borderHi}`, color: C.amber, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer' },
   ptfeStackList: { display: 'grid', gap: 9 },
   ptfeLayerCard: { border: '1px solid', background: 'linear-gradient(135deg, rgba(255,242,196,0.06), rgba(7,11,12,0.98))', padding: 10, display: 'grid', gap: 9 },
+  shieldLayerCard: { border: '1px solid', background: 'linear-gradient(135deg, rgba(216,211,191,0.06), rgba(7,11,12,0.98))', padding: 10, display: 'grid', gap: 9 },
+  shieldHint: { color: C.muted, fontSize: 11, lineHeight: 1.45 },
+  emptyState: { border: `1px dashed ${C.borderHi}`, color: C.muted, padding: 10, fontSize: 11, lineHeight: 1.5, background: 'rgba(94,234,212,0.035)' },
   ptfeLayerTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   ptfeLayerTitle: { display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, color: C.text, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
   ptfeLayerActions: { display: 'flex', gap: 6, alignItems: 'center', flex: '0 0 auto' },
