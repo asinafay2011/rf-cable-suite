@@ -71,6 +71,49 @@ export default function FloatingAgent({
     try { localStorage.setItem(sizeKey, JSON.stringify(size)) } catch {}
   }, [sizeKey, size])
   const [resizing, setResizing] = useState(false)
+  const [panelPosition, setPanelPosition] = useState(null)
+  const clampPanelPosition = (pos, panelSize = size) => {
+    if (typeof window === 'undefined') return pos
+    const margin = 12
+    const panelW = Math.min(panelSize.w, window.innerWidth - margin * 2)
+    const panelH = Math.min(panelSize.h, window.innerHeight - margin * 2)
+    return {
+      x: Math.min(Math.max(margin, pos.x), Math.max(margin, window.innerWidth - panelW - margin)),
+      y: Math.min(Math.max(margin, pos.y), Math.max(margin, window.innerHeight - panelH - margin)),
+    }
+  }
+  const positionPanelNearLauncher = (anchorRect) => {
+    if (typeof window === 'undefined') return { x: 16, y: 16 }
+    if (!anchorRect) {
+      return clampPanelPosition({ x: 16, y: window.innerHeight - size.h - 16 })
+    }
+    const margin = 12
+    const gap = 12
+    const panelW = Math.min(size.w, window.innerWidth - margin * 2)
+    const panelH = Math.min(size.h, window.innerHeight - margin * 2)
+    const roomRight = window.innerWidth - anchorRect.right
+    const preferRight = roomRight >= panelW + gap || anchorRect.left < window.innerWidth / 2
+    let x = preferRight ? anchorRect.right + gap : anchorRect.left - panelW - gap
+    if (x + panelW > window.innerWidth - margin) x = anchorRect.left - panelW - gap
+    if (x < margin) x = anchorRect.left
+    const y = anchorRect.top + anchorRect.height / 2 - panelH / 2
+    return clampPanelPosition({ x, y })
+  }
+  const openAtLauncher = (anchorRect) => {
+    if (!isMobile) setPanelPosition(positionPanelNearLauncher(anchorRect))
+    setOpen(true)
+  }
+  const syncPanelToLauncher = (anchorRect) => {
+    if (!isMobile && open && anchorRect) setPanelPosition(positionPanelNearLauncher(anchorRect))
+  }
+  useEffect(() => {
+    if (isMobile || !panelPosition) return undefined
+    const handleResize = () => {
+      setPanelPosition((current) => (current ? clampPanelPosition(current) : current))
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [isMobile, panelPosition, size.w, size.h])
   const [pendingImage, setPendingImage] = useState(null) // { mediaType, data, dataUrl }
   const [pendingPdf, setPendingPdf] = useState(null)     // { name, sizeKB, data }  PDF base64 sent as document block
   const [pendingData, setPendingData] = useState(null)   // { summary, chip: { name, info } }
@@ -119,17 +162,22 @@ export default function FloatingAgent({
     const startY = e.clientY
     const startW = size.w
     const startH = size.h
+    const startPanelPosition = panelPosition
     setResizing(true)
     const onMove = (ev) => {
       let w = startW
       let h = startH
       if (edges.includes('right')) {
-        w = Math.max(280, Math.min(window.innerWidth - 32, startW + (ev.clientX - startX)))
+        const left = startPanelPosition?.x ?? 16
+        w = Math.max(280, Math.min(window.innerWidth - left - 12, startW + (ev.clientX - startX)))
       }
       if (edges.includes('top')) {
         h = Math.max(280, Math.min(window.innerHeight - 32, startH - (ev.clientY - startY)))
       }
       setSize({ w, h })
+      if (edges.includes('top') && startPanelPosition) {
+        setPanelPosition(clampPanelPosition({ ...startPanelPosition, y: startPanelPosition.y + startH - h }, { w, h }))
+      }
     }
     const onUp = () => {
       setResizing(false)
@@ -772,24 +820,31 @@ export default function FloatingAgent({
     lastSpokenIndexRef.current = lastIdx
   }, [messages, loading, phoneMode])
 
-  if (!open) {
-    return (
-      <CorgiChatLauncher
-        accent={accent}
-        accentBright={accentBright}
-        count={messages.length > 0 ? visibleCount(messages) : 0}
-        isMobile={isMobile}
-        busy={loading || toolStatus === 'executing'}
-        onOpen={() => setOpen(true)}
-      />
-    )
-  }
+  const launcher = (
+    <CorgiChatLauncher
+      accent={accent}
+      accentBright={accentBright}
+      count={messages.length > 0 ? visibleCount(messages) : 0}
+      isMobile={isMobile}
+      busy={loading || toolStatus === 'executing'}
+      storageKey={storageKey}
+      active={open}
+      onOpen={openAtLauncher}
+      onMove={syncPanelToLauncher}
+    />
+  )
+
+  if (!open) return <>{launcher}</>
 
   // Visual messages — collapse user tool_results into the previous assistant's tool_use blocks
   const view = buildView(messages, streamBlocks)
+  const desktopPanelPosition = !isMobile && typeof window !== 'undefined'
+    ? (panelPosition || clampPanelPosition({ x: 16, y: window.innerHeight - size.h - 16 }))
+    : { x: 16, y: 16 }
 
   return (
     <>
+      {!isMobile && launcher}
       {/* Mobile backdrop — tap to dismiss. Page peeks through above the sheet. */}
       {isMobile && (
         <div
@@ -809,11 +864,11 @@ export default function FloatingAgent({
       className={`fixed z-[90] flex flex-col bg-[#0a0d0f] border-[#252e33] shadow-2xl overflow-hidden ${
         isMobile
           ? 'left-0 right-0 bottom-0 rounded-t-2xl border-t border-l border-r'  // bottom-sheet on mobile
-          : 'bottom-4 left-4 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] rounded-md border'
+          : 'max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] rounded-md border'
       }`}
       style={isMobile
         ? { fontFamily, top: 'max(env(safe-area-inset-top, 0px), 56px)', animation: 'agentSheetUp 0.28s cubic-bezier(0.32, 0.72, 0.0, 1)' }
-        : { fontFamily, width: size.w, height: size.h, userSelect: resizing ? 'none' : undefined }
+        : { fontFamily, width: size.w, height: size.h, left: `${desktopPanelPosition.x}px`, top: `${desktopPanelPosition.y}px`, userSelect: resizing ? 'none' : undefined }
       }
     >
       {/* Mobile drag handle — visual cue + tap-to-dismiss */}
@@ -1189,8 +1244,131 @@ export default function FloatingAgent({
   )
 }
 
-function CorgiChatLauncher({ accent, accentBright, count, isMobile, busy, onOpen }) {
+function CorgiChatLauncher({ accent, accentBright, count, isMobile, busy, storageKey, active, onOpen, onMove }) {
   const [modelReady, setModelReady] = useState(false)
+  const launcherRef = useRef(null)
+  const dragKey = storageKey ? `${storageKey}-corgi-launcher-position` : 'cable-suite-corgi-launcher-position'
+  const [position, setPosition] = useState(() => {
+    try {
+      const raw = localStorage.getItem(dragKey)
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      if (Number.isFinite(parsed?.x) && Number.isFinite(parsed?.y)) return parsed
+    } catch {}
+    return null
+  })
+  const [dragging, setDragging] = useState(false)
+  const dragRef = useRef({
+    active: false,
+    moved: false,
+    justDragged: false,
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
+    width: 204,
+    height: 146,
+  })
+
+  const clampPosition = (x, y, width = dragRef.current.width, height = dragRef.current.height) => {
+    if (typeof window === 'undefined') return { x, y }
+    const margin = isMobile ? 8 : 12
+    const maxX = Math.max(margin, window.innerWidth - width - margin)
+    const maxY = Math.max(margin, window.innerHeight - height - margin)
+    return {
+      x: Math.min(Math.max(margin, x), maxX),
+      y: Math.min(Math.max(margin, y), maxY),
+    }
+  }
+
+  const rectFromPosition = (next, width = dragRef.current.width, height = dragRef.current.height) => ({
+    left: next.x,
+    top: next.y,
+    right: next.x + width,
+    bottom: next.y + height,
+    width,
+    height,
+  })
+
+  useEffect(() => {
+    if (!position) return
+    try { localStorage.setItem(dragKey, JSON.stringify(position)) } catch {}
+  }, [dragKey, position])
+
+  useEffect(() => {
+    if (!position) return undefined
+    const handleResize = () => {
+      const rect = launcherRef.current?.getBoundingClientRect()
+      setPosition((current) => {
+        if (!current) return current
+        const next = clampPosition(current.x, current.y, rect?.width || dragRef.current.width, rect?.height || dragRef.current.height)
+        if (active) onMove?.(rectFromPosition(next, rect?.width || dragRef.current.width, rect?.height || dragRef.current.height))
+        return next
+      })
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [position, isMobile, active, onMove])
+
+  const handlePointerDown = (event) => {
+    if (event.button != null && event.button !== 0) return
+    const rect = launcherRef.current?.getBoundingClientRect()
+    if (!rect) return
+    dragRef.current.active = true
+    dragRef.current.moved = false
+    dragRef.current.pointerId = event.pointerId
+    dragRef.current.startX = event.clientX
+    dragRef.current.startY = event.clientY
+    dragRef.current.originX = rect.left
+    dragRef.current.originY = rect.top
+    dragRef.current.width = rect.width
+    dragRef.current.height = rect.height
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }
+
+  const handlePointerMove = (event) => {
+    const drag = dragRef.current
+    if (!drag.active || drag.pointerId !== event.pointerId) return
+    const dx = event.clientX - drag.startX
+    const dy = event.clientY - drag.startY
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return
+    drag.moved = true
+    setDragging(true)
+    const next = clampPosition(drag.originX + dx, drag.originY + dy, drag.width, drag.height)
+    setPosition(next)
+    if (active) onMove?.(rectFromPosition(next, drag.width, drag.height))
+    event.preventDefault()
+  }
+
+  const finishDrag = (event) => {
+    const drag = dragRef.current
+    if (!drag.active || drag.pointerId !== event.pointerId) return
+    event.currentTarget.releasePointerCapture?.(event.pointerId)
+    drag.active = false
+    drag.pointerId = null
+    setDragging(false)
+    if (drag.moved) {
+      event.currentTarget.blur?.()
+      drag.justDragged = true
+      window.setTimeout(() => {
+        dragRef.current.justDragged = false
+      }, 120)
+    }
+  }
+
+  const handleClick = (event) => {
+    if (dragRef.current.justDragged) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    const rect = launcherRef.current?.getBoundingClientRect()
+    onOpen(rect
+      ? { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }
+      : null)
+  }
+
   return (
     <>
       <style>{`
@@ -1215,27 +1393,40 @@ function CorgiChatLauncher({ accent, accentBright, count, isMobile, busy, onOpen
           left: 16px;
           bottom: 14px;
           z-index: 90;
-          width: 148px;
-          height: 110px;
+          width: 204px;
+          height: 146px;
           border: 0;
           background: transparent;
           padding: 0;
-          cursor: pointer;
+          cursor: grab;
+          touch-action: none;
           isolation: isolate;
           filter: drop-shadow(0 16px 24px rgba(0, 0, 0, 0.45));
+        }
+        .agent-corgi-launcher-dragging {
+          cursor: grabbing;
+        }
+        .agent-corgi-launcher-open {
+          z-index: 91;
+        }
+        .agent-corgi-launcher:focus {
+          outline: none;
+        }
+        .agent-corgi-launcher:focus-visible {
+          outline: none;
         }
         .agent-corgi-launcher-mobile {
           left: 10px;
           bottom: 8px;
-          width: 128px;
-          height: 96px;
+          width: 182px;
+          height: 132px;
         }
         .agent-corgi-stage {
           position: absolute;
           left: 0;
           bottom: 6px;
-          width: 108px;
-          height: 90px;
+          width: 138px;
+          height: 126px;
           transform-origin: 50% 100%;
           transition: transform 0.18s ease;
           animation: corgiFloat 4.6s ease-in-out infinite;
@@ -1248,10 +1439,10 @@ function CorgiChatLauncher({ accent, accentBright, count, isMobile, busy, onOpen
         }
         .agent-corgi-model {
           position: absolute;
-          left: -10px;
-          top: -12px;
-          width: 124px;
-          height: 102px;
+          left: -26px;
+          top: -42px;
+          width: 184px;
+          height: 166px;
           opacity: 0;
           pointer-events: none;
           transition: opacity 0.22s ease;
@@ -1268,7 +1459,7 @@ function CorgiChatLauncher({ accent, accentBright, count, isMobile, busy, onOpen
         .agent-corgi-shadow {
           position: absolute;
           left: 14px;
-          right: 30px;
+          width: 112px;
           bottom: 4px;
           height: 13px;
           border-radius: 999px;
@@ -1392,8 +1583,8 @@ function CorgiChatLauncher({ accent, accentBright, count, isMobile, busy, onOpen
         }
         .agent-corgi-tag {
           position: absolute;
-          right: 0;
-          bottom: 17px;
+          left: 136px;
+          bottom: 24px;
           display: inline-flex;
           align-items: center;
           gap: 6px;
@@ -1427,14 +1618,21 @@ function CorgiChatLauncher({ accent, accentBright, count, isMobile, busy, onOpen
         }
       `}</style>
       <button
+        ref={launcherRef}
         type="button"
-        onClick={onOpen}
-        className={`agent-corgi-launcher ${isMobile ? 'agent-corgi-launcher-mobile' : ''} ${busy ? 'agent-corgi-launcher-busy' : ''}`}
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
+        className={`agent-corgi-launcher ${isMobile ? 'agent-corgi-launcher-mobile' : ''} ${busy ? 'agent-corgi-launcher-busy' : ''} ${dragging ? 'agent-corgi-launcher-dragging' : ''} ${active ? 'agent-corgi-launcher-open' : ''}`}
         style={{
           '--agent-accent': accent,
           '--agent-accent-bright': accentBright,
+          ...(position ? { left: `${position.x}px`, top: `${position.y}px`, bottom: 'auto' } : null),
         }}
         aria-label="Open chat"
+        title="Drag to move. Click to ask."
       >
         <span className="agent-corgi-shadow" aria-hidden="true" />
         <span className="agent-corgi-stage" aria-hidden="true">
@@ -1530,8 +1728,8 @@ function CorgiModelPreview({ assetUrl, onReady }) {
         mount.appendChild(renderer.domElement)
 
         scene = new THREE.Scene()
-        camera = new THREE.PerspectiveCamera(30, 1, 0.01, 80)
-        camera.position.set(0, 0.02, 3.85)
+        camera = new THREE.PerspectiveCamera(31, 1, 0.01, 80)
+        camera.position.set(0, 0.04, 4.75)
         scene.add(camera)
 
         const ambient = new THREE.HemisphereLight(0xfff0d4, 0x182022, 2.8)
@@ -1565,7 +1763,7 @@ function CorgiModelPreview({ assetUrl, onReady }) {
             model.position.sub(center)
             const maxDim = Math.max(size.x, size.y, size.z, 0.001)
             model.scale.setScalar(1.72 / maxDim)
-            model.rotation.set(-0.08, -1.05, 0.02)
+            model.rotation.set(-0.06, -1.62, 0.02)
             model.traverse((node) => {
               if (!node.isMesh || !node.material) return
               node.castShadow = false
@@ -1591,8 +1789,8 @@ function CorgiModelPreview({ assetUrl, onReady }) {
           if (!alive || !renderer || !scene || !camera) return
           const t = performance.now() / 1000
           if (model) {
-            model.position.y = -0.14 + Math.sin(t * 2.1) * 0.018
-            model.rotation.y = -1.05 + Math.sin(t * 0.9) * 0.05
+            model.position.y = -0.56 + Math.sin(t * 2.1) * 0.014
+            model.rotation.y = -1.62 + Math.sin(t * 0.9) * 0.035
             model.rotation.z = 0.02 + Math.sin(t * 1.4) * 0.025
           }
           renderer.render(scene, camera)
