@@ -849,6 +849,65 @@ def helical_ribbon(
     return obj
 
 
+def woven_braid_ribbon(
+    name: str,
+    x0: float,
+    x1: float,
+    radius: float,
+    turns: float,
+    phase: float,
+    width: float,
+    mat: bpy.types.Material,
+    *,
+    handedness: int = 1,
+    carriers: int = 16,
+    over_amplitude: float = 0.006,
+    over_phase: float = 0,
+    segments: int = 168,
+    width_steps: int = 1,
+) -> bpy.types.Object:
+    """A flat woven braid band on a cylinder, offset across the helix on the unwrapped surface."""
+    verts: list[tuple[float, float, float]] = []
+    faces: list[list[int]] = []
+    length = x1 - x0
+    circumferential_slope = handedness * radius * turns * math.tau
+    tangent_len = math.hypot(length, circumferential_slope) or 1
+    normal_x = -circumferential_slope / tangent_len
+    normal_v = length / tangent_len
+    weave_cycles = max(4.0, min(12.0, turns * carriers * 0.16))
+
+    for i in range(segments + 1):
+        t = i / segments
+        center_x = x0 + length * t
+        center_angle = phase + handedness * turns * math.tau * t
+        weave = math.sin(weave_cycles * math.tau * t + phase * 2.0 + over_phase)
+        radial_lift = over_amplitude * 0.08 * weave
+        for j in range(width_steps + 1):
+            u = (j / width_steps - 0.5) * width
+            x = center_x + normal_x * u
+            angle = center_angle + (normal_v * u) / max(radius, 0.001)
+            strand_rib = over_amplitude * 0.03 * math.cos(j * math.tau / max(width_steps, 1))
+            r = radius + radial_lift + strand_rib
+            verts.append((x, r * math.cos(angle), r * math.sin(angle)))
+
+    row_width = width_steps + 1
+    for i in range(segments):
+        row = i * row_width
+        next_row = (i + 1) * row_width
+        for j in range(width_steps):
+            faces.append([row + j, row + j + 1, next_row + j + 1, next_row + j])
+
+    mesh = bpy.data.meshes.new(f"{name}_Mesh")
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    for polygon in mesh.polygons:
+        polygon.use_smooth = False
+    obj = bpy.data.objects.new(name, mesh)
+    obj.data.materials.append(mat)
+    bpy.context.collection.objects.link(obj)
+    return obj
+
+
 def conductor_offsets(strands: int, radius: float) -> tuple[float, list[tuple[float, float]]]:
     if strands >= 19:
         strand_r = radius * 0.155
@@ -921,9 +980,9 @@ def conductor_material_color(kind: str) -> tuple[float, float, float, float]:
 
 def braid_material_color(kind: str) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
     palettes = {
-        "bare_copper": ((0.82, 0.42, 0.16, 1), (0.30, 0.14, 0.07, 1)),
-        "silver": ((0.86, 0.86, 0.80, 1), (0.34, 0.34, 0.31, 1)),
-        "tinned_copper": ((0.76, 0.77, 0.72, 1), (0.24, 0.25, 0.24, 1)),
+        "bare_copper": ((0.78, 0.38, 0.14, 1), (0.38, 0.17, 0.06, 1)),
+        "silver": ((0.82, 0.82, 0.76, 1), (0.42, 0.42, 0.37, 1)),
+        "tinned_copper": ((0.74, 0.73, 0.65, 1), (0.38, 0.37, 0.31, 1)),
     }
     return palettes.get(kind, palettes["tinned_copper"])
 
@@ -1069,9 +1128,15 @@ def build_video_coax_model(spec: dict) -> None:
     foam_skin = make_material("foam skin highlight", (0.98, 0.95, 0.82, 1), roughness=0.34, alpha=0.34)
     foil = make_material("duobond aluminum foil", (0.88, 0.89, 0.84, 1), metallic=0.38, roughness=0.34)
     foil_edge = make_material("foil lap edge", (0.98, 0.98, 0.92, 1), metallic=0.32, roughness=0.28)
-    braid = make_material(f"{braid_kind.replace('_', ' ')} braid", braid_color, metallic=0.84, roughness=0.22)
-    braid_shadow = make_material("braid shadow pass", braid_shadow_color, metallic=0.55, roughness=0.4, alpha=0.46)
-    inner_braid = make_material(f"inner {braid_kind.replace('_', ' ')} braid", tuple(min(c * 1.08, 1) for c in braid_color[:3]) + (1,), metallic=0.78, roughness=0.27)
+    braid = make_material(f"{braid_kind.replace('_', ' ')} braid", braid_color, metallic=0.72, roughness=0.38)
+    braid_shadow = make_material("braid shadow pass", braid_shadow_color, metallic=0.62, roughness=0.48)
+    braid_recess = make_material(
+        "dark braid interstitial recess",
+        tuple(max(c * 0.46, 0.035) for c in braid_shadow_color[:3]) + (1,),
+        metallic=0.28,
+        roughness=0.72,
+    )
+    inner_braid = make_material(f"inner {braid_kind.replace('_', ' ')} braid", tuple(min(c * 1.08, 1) for c in braid_color[:3]) + (1,), metallic=0.68, roughness=0.42)
     jacket = make_material("matte black pvc jacket", spec["jacket_color"], roughness=0.86)
     jacket_edge = make_material("fresh jacket cut edge", jacket_cut_color(spec["jacket_color"]), roughness=0.74)
 
@@ -1142,34 +1207,50 @@ def build_video_coax_model(spec: dict) -> None:
     turns = spec["braid_turns"]
     braid_depth = max(0.0045, outer_r * 0.0065)
     def add_braid_layer(label: str, radius: float, x_end: float, turns_value: float, material: bpy.types.Material, shadow: bpy.types.Material, phase_offset: float = 0) -> None:
-        for i in range(carriers):
-            phase = phase_offset + math.tau * i / carriers
+        display_turns = max(1.25, min(2.45, turns_value * 0.30))
+        objects.append(
+            tube_surface(
+                f"{label} dark diamond recess",
+                braid_start,
+                x_end,
+                radius - braid_depth * 1.15,
+                braid_recess,
+                radial_segments=96,
+                length_segments=16,
+            )
+        )
+        visible_carriers = max(10, min(16, int(round(carriers * 0.75))))
+        if visible_carriers % 2:
+            visible_carriers += 1
+        band_width_angle = max(math.radians(7.0), (math.tau / visible_carriers) * 0.30)
+        for i in range(visible_carriers):
+            phase = phase_offset + math.tau * i / visible_carriers
             objects.append(
-                helical_rib(
-                    f"{label} right hand carrier {i + 1:02d}",
+                helical_ribbon(
+                    f"{label} right hand woven carrier {i + 1:02d}",
                     braid_start,
                     x_end,
-                    radius,
-                    turns_value,
+                    radius + braid_depth * 1.15,
+                    display_turns,
                     phase,
+                    band_width_angle,
                     material,
-                    bevel_depth=braid_depth,
                     handedness=1,
-                    points=118,
+                    segments=168,
                 )
             )
             objects.append(
-                helical_rib(
-                    f"{label} left hand carrier {i + 1:02d}",
+                helical_ribbon(
+                    f"{label} left hand woven carrier {i + 1:02d}",
                     braid_start,
                     x_end,
-                    radius * 1.006,
-                    turns_value,
-                    phase + math.tau / (carriers * 2),
-                    shadow if i % 3 == 0 else material,
-                    bevel_depth=braid_depth * (0.85 if i % 3 == 0 else 1.0),
+                    radius + braid_depth * 2.35,
+                    display_turns,
+                    phase + math.tau / (visible_carriers * 2),
+                    band_width_angle,
+                    shadow,
                     handedness=-1,
-                    points=118,
+                    segments=168,
                 )
             )
 
