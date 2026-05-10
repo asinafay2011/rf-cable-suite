@@ -1530,8 +1530,8 @@ function CorgiModelPreview({ assetUrl, onReady }) {
         mount.appendChild(renderer.domElement)
 
         scene = new THREE.Scene()
-        camera = new THREE.PerspectiveCamera(28, 1, 0.01, 80)
-        camera.position.set(0, 0.06, 3.45)
+        camera = new THREE.PerspectiveCamera(30, 1, 0.01, 80)
+        camera.position.set(0, 0.02, 3.85)
         scene.add(camera)
 
         const ambient = new THREE.HemisphereLight(0xfff0d4, 0x182022, 2.8)
@@ -1564,8 +1564,8 @@ function CorgiModelPreview({ assetUrl, onReady }) {
             const size = box.getSize(new THREE.Vector3())
             model.position.sub(center)
             const maxDim = Math.max(size.x, size.y, size.z, 0.001)
-            model.scale.setScalar(2.05 / maxDim)
-            model.rotation.set(-0.06, 0.42, 0.02)
+            model.scale.setScalar(1.72 / maxDim)
+            model.rotation.set(-0.08, -1.05, 0.02)
             model.traverse((node) => {
               if (!node.isMesh || !node.material) return
               node.castShadow = false
@@ -1591,8 +1591,8 @@ function CorgiModelPreview({ assetUrl, onReady }) {
           if (!alive || !renderer || !scene || !camera) return
           const t = performance.now() / 1000
           if (model) {
-            model.position.y = -0.08 + Math.sin(t * 2.1) * 0.025
-            model.rotation.y = 0.42 + Math.sin(t * 0.9) * 0.07
+            model.position.y = -0.14 + Math.sin(t * 2.1) * 0.018
+            model.rotation.y = -1.05 + Math.sin(t * 0.9) * 0.05
             model.rotation.z = 0.02 + Math.sin(t * 1.4) * 0.025
           }
           renderer.render(scene, camera)
