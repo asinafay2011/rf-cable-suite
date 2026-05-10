@@ -42,7 +42,6 @@ const PRESETS = {
     spiralBobbins: 8,
     helicalWidth: 1.4,
     helicalOverlap: 45,
-    helicalBobbins: 6,
     foilOverlap: 25,
     braidCoverage: 92,
     jacketOD: 6.6,
@@ -67,7 +66,6 @@ const PRESETS = {
     spiralBobbins: 8,
     helicalWidth: 1.2,
     helicalOverlap: 50,
-    helicalBobbins: 8,
     foilOverlap: 32,
     braidCoverage: 95,
     jacketOD: 6.3,
@@ -92,7 +90,6 @@ const PRESETS = {
     spiralBobbins: 8,
     helicalWidth: 1.6,
     helicalOverlap: 55,
-    helicalBobbins: 8,
     foilOverlap: 35,
     braidCoverage: 97,
     jacketOD: 7.2,
@@ -166,13 +163,12 @@ function makeShieldLayer(type, source = PRESETS.phaseStable) {
       id: makeShieldId(),
       type,
       label: 'SPC flatwire helical',
-      direction: 'S',
-      length: 150,
-      width: source.helicalWidth ?? 1.4,
-      bobbins: source.helicalBobbins ?? 8,
-      overlap: source.helicalOverlap ?? 45,
-      animateKey: makeAnimationKey('shield'),
-    }
+    direction: 'S',
+    length: 150,
+    width: source.helicalWidth ?? 1.4,
+    overlap: source.helicalOverlap ?? 45,
+    animateKey: makeAnimationKey('shield'),
+  }
   }
   if (type === 'foil') {
     return {
@@ -570,7 +566,8 @@ function useRfStackModel(config) {
             const layerProgress = getLayerAnimationProgress(layer, type === 'braid' ? 1700 : 1450)
             const lengthRatio = clamp((Number(layer.length) || 140) / 150, 0.55, 1.32)
             const x0 = buildX0 + shieldIndex * 0.035
-            const x1 = x0 + (buildX1 - buildX0 - 0.28) * lengthRatio
+            const availableSpan = Math.max(0.6, buildX1 - x0 - 0.24)
+            const x1 = Math.min(buildX1 - 0.08, x0 + availableSpan * lengthRatio)
             const radius = shieldRadius + shieldIndex * 0.055
 
             if (type === 'foil') {
@@ -634,11 +631,11 @@ function useRfStackModel(config) {
               return
             }
 
-            const bobbins = clamp(Math.round(Number(layer.bobbins) || 8), 1, 16)
             const width = clamp(Number(layer.width) || 1.2, 0.35, 3.2)
             const handedness = (layer.direction || (type === 'flatwire' ? 'S' : 'Z')) === 'S' ? -1 : 1
 
             if (type === 'spiral') {
+              const bobbins = clamp(Math.round(Number(layer.bobbins) || 8), 1, 16)
               const gap = clamp(Number(layer.gap) || 10, 0, 28)
               const tapeWidth = clamp(width * 0.018, 0.012, 0.055)
               const turns = clamp(2.7 + lengthRatio * 1.5 + (13 - gap) * 0.035, 2.2, 5.4)
@@ -675,22 +672,32 @@ function useRfStackModel(config) {
               const overlap = clamp(Number(layer.overlap) || 45, 0, 80)
               const tapeWidth = clamp(width * 0.064, 0.055, 0.22)
               const turns = clamp(2.8 + overlap / 18 + lengthRatio * 0.65, 3.0, 8.2)
-              for (let bobbin = 0; bobbin < bobbins; bobbin++) {
-                const phase = (Math.PI * 2 * bobbin) / bobbins + shieldIndex * 0.33
-                dynamicGroup.add(makeRibbonMesh({
-                  name: `live SPC flatwire helical overlap bobbin ${bobbin + 1}`,
-                  x0,
-                  x1,
-                  radius,
-                  turns,
-                  phase,
-                  tapeWidth,
-                  handedness,
-                  material: bobbin % 2 ? flatwireDark : flatwireMat,
-                  progress: layerProgress,
-                  thickness: 0.012,
-                }))
-              }
+              dynamicGroup.add(makeRibbonMesh({
+                name: 'live SPC flatwire helical overlap wrap',
+                x0,
+                x1,
+                radius,
+                turns,
+                phase: shieldIndex * 0.33,
+                tapeWidth,
+                handedness,
+                material: flatwireMat,
+                progress: layerProgress,
+                thickness: 0.012,
+              }))
+              dynamicGroup.add(makeRibbonMesh({
+                name: 'live SPC flatwire helical edge shadow',
+                x0,
+                x1,
+                radius: radius + 0.007,
+                turns,
+                phase: shieldIndex * 0.33 + 0.032,
+                tapeWidth: tapeWidth * 0.18,
+                handedness,
+                material: flatwireDark,
+                progress: layerProgress,
+                thickness: 0.014,
+              }))
             }
           })
 
@@ -859,7 +866,7 @@ function LayerRail({ computed }) {
     ['01', 'Conductor', `${fmt(computed.conductorOD, 2)} mm Cu`, C.copperHi],
     ['02', 'PTFE stack', `${computed.ptfeLayerCount} layers · ${computed.ptfeLayers} passes`, '#fff2c4'],
     ['03', 'SPC spiral', `${computed.spiralBobbins} bobbins · ${fmt(computed.spiralGap, 0)}% gap`, C.foil],
-    ['04', 'SPC helical', `${computed.helicalBobbins} bobbins · ${fmt(computed.helicalOverlap, 0)}% overlap`, C.sky],
+    ['04', 'SPC helical', `${fmt(computed.helicalOverlap, 0)}% overlap`, C.sky],
     ['05', 'Foil shield', `${fmt(computed.foilCoverage, 0)}% seam`, C.foil],
     ['06', 'Braid', `${fmt(computed.braidCoverage, 0)}% coverage`, C.braid],
     ['07', 'Jacket', `${fmt(computed.jacketOD, 1)} mm OD`, C.sky],
@@ -975,7 +982,6 @@ function ShieldLayerCard({ layer, index, onUpdate, onRemove }) {
           <div style={S.ptfeLayerGrid}>
             <Slider label="Helical length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unit=" mm" accent={accent} />
             <Slider label="Flatwire width" value={layer.width} setValue={(value) => onUpdate({ width: value })} min={0.35} max={3.2} step={0.05} unit=" mm" accent={accent} />
-            <Slider label="Bobbins" value={layer.bobbins} setValue={(value) => onUpdate({ bobbins: Math.round(value) })} min={1} max={16} step={1} accent={accent} />
             <Slider label="Overlap" value={layer.overlap ?? 45} setValue={(value) => onUpdate({ overlap: value })} min={0} max={80} step={1} unit="%" accent={(layer.overlap ?? 45) >= 35 ? C.teal : C.amber} />
           </div>
         </>
@@ -1131,7 +1137,6 @@ export default function RFStackLab() {
     const spiralBobbins = Math.round(Number(spiralLayer?.bobbins ?? params.spiralBobbins))
     const spiralGapPct = Number(spiralLayer?.gap ?? params.spiralGap)
     const helicalWidth = Number(helicalLayer?.width ?? params.helicalWidth)
-    const helicalBobbins = Math.round(Number(helicalLayer?.bobbins ?? params.helicalBobbins))
     const helicalOverlapPct = Number(helicalLayer?.overlap ?? params.helicalOverlap ?? 45)
     const foilOverlap = Number(foilLayer?.overlap ?? params.foilOverlap)
     const braidCoverage = Number(braidLayer?.coverage ?? params.braidCoverage)
@@ -1173,13 +1178,13 @@ export default function RFStackLab() {
     const tapeNotch = ptfeNotches.length ? Math.min(...ptfeNotches.map((item) => item.freq)) : notchGHz(pitchTape, vp)
     const spiralGap = -Math.abs(spiralGapPct)
     const pitchSpiral = pitchFrom(spiralWidth, spiralGap, dielectricOD + 0.25, spiralBobbins)
-    const pitchHelical = pitchFrom(helicalWidth, helicalOverlapPct, dielectricOD + 0.48, helicalBobbins)
+    const pitchHelical = pitchFrom(helicalWidth, helicalOverlapPct, dielectricOD + 0.48, 1)
     const spiralNotch = notchGHz(pitchSpiral, vp)
     const helicalNotch = notchGHz(pitchHelical, vp)
     const circ = Math.PI * (dielectricOD + 0.3)
     const spiralRawCoverage = clamp((spiralBobbins * spiralWidth) / circ * 100, 0, 100)
     const spiralCoverage = spiralLayer ? clamp(Math.min(100 - spiralGapPct, spiralRawCoverage), 0, 100) : 0
-    const helicalCoverage = helicalLayer ? clamp((helicalBobbins * helicalWidth * (1 + helicalOverlapPct / 180)) / circ * 100, 0, 100) : 0
+    const helicalCoverage = helicalLayer ? clamp((helicalWidth * (1 + helicalOverlapPct / 80)) / circ * 100, 0, 100) : 0
     const foilCoverage = foilLayer ? clamp(100 - Math.max(0, 18 - foilOverlap) * 1.6, 82, 100) : 0
     const braidCoverageEffective = braidLayer ? clamp(braidCoverage, 65, 99) : 0
     const shieldCoverage = clamp(100 * (1 - (1 - spiralCoverage / 100) * (1 - helicalCoverage / 100) * (1 - foilCoverage / 100) * (1 - braidCoverageEffective / 100)), 0, 100)
@@ -1212,7 +1217,6 @@ export default function RFStackLab() {
       spiralBobbins,
       helicalWidth,
       helicalOverlap: helicalOverlapPct,
-      helicalBobbins,
       foilOverlap,
       braidCoverage: braidCoverageEffective,
       braidCarriers,
