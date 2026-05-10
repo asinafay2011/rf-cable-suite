@@ -623,6 +623,14 @@ def build_macro_hardline_model(spec: dict) -> None:
     root = add_label_empty(f"{spec['name']} macro hardline GLB root")
 
     scale = 0.18 if spec["od_mm"] >= 18 else 0.24
+    length_scale = max(1.8, min(5.2, spec["od_mm"] / 9.5))
+
+    def sx(value: float) -> float:
+        return value * length_scale
+
+    def sl(value: float) -> float:
+        return value * length_scale
+
     outer_r = spec["od_mm"] * 0.5 * scale
     shield_r = spec["shield_mm"] * 0.5 * scale
     dielectric_r = spec["dielectric_mm"] * 0.5 * scale
@@ -640,13 +648,13 @@ def build_macro_hardline_model(spec: dict) -> None:
     jacket_edge = make_material("hardline jacket cut wall", jacket_cut_color(spec["jacket_color"]), roughness=0.82)
 
     objects: list[bpy.types.Object] = []
-    objects.append(cylinder_x("macro hardline jacket body", -1.72, 3.05, outer_r, jacket, vertices=128))
-    objects.append(cylinder_x("hardline jacket cut wall", -0.18, 0.20, outer_r * 1.012, jacket_edge, vertices=128))
+    objects.append(cylinder_x("macro hardline jacket body", sx(-1.72), sl(3.05), outer_r, jacket, vertices=128))
+    objects.append(cylinder_x("hardline jacket cut wall", sx(-0.18), sl(0.20), outer_r * 1.012, jacket_edge, vertices=128))
     add_jacket_detail(
         objects,
-        x0=-3.18,
-        x1=-0.34,
-        cut_x=-0.19,
+        x0=sx(-3.18),
+        x1=sx(-0.34),
+        cut_x=sx(-0.19),
         radius=outer_r,
         jacket_color=spec["jacket_color"],
         body_mat=jacket,
@@ -655,50 +663,50 @@ def build_macro_hardline_model(spec: dict) -> None:
     objects.append(
         tube_surface(
             "annular corrugated solid shield",
-            -0.26,
-            1.52,
+            sx(-0.26),
+            sx(1.52),
             shield_r,
             copper,
             corrugation_amp=max(0.018, min(0.07, shield_r * 0.035)),
-            corrugation_count=spec.get("corrugation_count", 18),
+            corrugation_count=spec.get("corrugation_count", 18) * length_scale,
             radial_segments=128,
-            length_segments=96,
+            length_segments=max(96, int(68 * length_scale)),
         )
     )
     add_axial_surface_lines(
         objects,
         label="corrugated shield",
-        x0=-0.20,
-        x1=1.46,
+        x0=sx(-0.20),
+        x1=sx(1.46),
         radius=shield_r * 1.028,
         mat=copper_shadow,
         count=8,
         bevel_depth=max(0.003, shield_r * 0.0026),
         phase_offset=math.radians(9),
         wobble=0.01,
-        points=24,
+        points=max(24, int(12 * length_scale)),
     )
 
     if spec.get("air_dielectric"):
-        objects.append(cylinder_x("air dielectric visual envelope", 1.88, 1.54, dielectric_r, make_material("clear air dielectric silhouette", (0.78, 0.86, 0.84, 1), roughness=0.1, alpha=0.18), vertices=96))
+        objects.append(cylinder_x("air dielectric visual envelope", sx(1.88), sl(1.54), dielectric_r, make_material("clear air dielectric silhouette", (0.78, 0.86, 0.84, 1), roughness=0.1, alpha=0.18), vertices=96))
         objects.append(
             helical_ribbon(
                 "continuous PE helical air spacer",
-                1.08,
-                2.66,
+                sx(1.08),
+                sx(2.66),
                 max(conductor_r * 1.55, dielectric_r * 0.62),
-                3.25,
+                3.25 * length_scale,
                 math.radians(22),
                 math.radians(10),
                 spacer,
-                segments=120,
+                segments=max(120, int(64 * length_scale)),
             )
         )
     else:
-        objects.append(cylinder_x("macro foam dielectric exposed core", 1.88, 1.54, dielectric_r, dielectric, vertices=128))
-        add_dielectric_detail(objects, kind=dielectric_kind, x0=1.14, x1=2.62, radius=dielectric_r, base_color=dielectric_color)
+        objects.append(cylinder_x("macro foam dielectric exposed core", sx(1.88), sl(1.54), dielectric_r, dielectric, vertices=128))
+        add_dielectric_detail(objects, kind=dielectric_kind, x0=sx(1.14), x1=sx(2.62), radius=dielectric_r, base_color=dielectric_color)
 
-    add_macro_conductor(objects, x0=0.12, x1=3.18, radius=conductor_r, mat=center, strands=spec.get("conductor_strands", 1))
+    add_macro_conductor(objects, x0=sx(0.12), x1=sx(3.18), radius=conductor_r, mat=center, strands=spec.get("conductor_strands", 1))
     finish_and_export(root, objects, spec)
 
 
