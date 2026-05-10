@@ -924,8 +924,7 @@ function useRfStackModel(config) {
               const objectLabel = `${node.name}`.toLowerCase()
               const materialLabel = `${Array.isArray(node.material) ? node.material.map((mat) => mat.name).join(' ') : node.material.name}`.toLowerCase()
               const nodeLabel = `${objectLabel} ${materialLabel}`
-              const isReferenceSurface = /table/.test(nodeLabel)
-              if (!isReferenceSurface) node.visible = false
+              node.visible = false
               node.castShadow = true
               node.receiveShadow = true
               const mats = Array.isArray(node.material) ? node.material : [node.material]
