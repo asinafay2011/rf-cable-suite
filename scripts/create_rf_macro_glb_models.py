@@ -22,6 +22,7 @@ from create_rf_library_glb_models import (
     extract_js_object,
     iter_top_level_entries,
     jacket_cut_color,
+    js_string,
     make_material,
     reset_scene,
     spec_from_catalog_entry,
@@ -31,7 +32,7 @@ from create_rf_library_glb_models import (
 )
 
 
-TARGET_IDS = ("rg213", "lmr400", "belden1694a")
+TARGET_IDS: tuple[str, ...] = ()
 
 
 def scale_color(
@@ -86,8 +87,8 @@ def add_macro_braid(
     filaments: int,
     phase_offset: float = 0,
 ) -> None:
-    carrier_count = max(12, min(22, carriers if carriers % 2 == 0 else carriers + 1))
-    points = 132
+    carrier_count = max(10, min(18, carriers if carriers % 2 == 0 else carriers + 1))
+    points = 104
     filament_spacing = math.radians(1.1)
 
     for handedness, material, lift, material_name in (
@@ -417,18 +418,40 @@ def add_macro_conductor(
         )
 
 
+def finish_and_export(root: bpy.types.Object, objects: list[bpy.types.Object], spec: dict) -> None:
+    for obj in objects:
+        obj.parent = root
+
+    root.rotation_euler = (math.radians(-5.5), 0, math.radians(-2.5))
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in [root, *objects]:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = root
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+
+    bpy.ops.export_scene.gltf(
+        filepath=str(MODELS_DIR / f"{spec['macro_slug']}.glb"),
+        export_format="GLB",
+        export_apply=True,
+        export_yup=True,
+        export_animations=False,
+        export_current_frame=True,
+    )
+
+
 def load_target_specs() -> dict[str, dict]:
     source = (ROOT / "src" / "pages" / "RFApp.jsx").read_text(encoding="utf-8")
     block = extract_js_object(source, "const CABLES =")
     targets = set(TARGET_IDS)
     specs: dict[str, dict] = {}
     for cable_id, entry in iter_top_level_entries(block):
-        if cable_id in targets:
+        if not targets or cable_id in targets:
             spec = spec_from_catalog_entry(cable_id, entry)
             spec["id"] = cable_id
             spec["macro_slug"] = f"{spec['slug']}-macro"
+            spec["jacket_text"] = js_string(entry, "jacket")
             specs[cable_id] = spec
-    missing = targets - set(specs)
+    missing = targets - set(specs) if targets else set()
     if missing:
         raise RuntimeError(f"Missing macro cable specs: {', '.join(sorted(missing))}")
     return specs
@@ -476,8 +499,8 @@ def build_macro_video_coax_model(spec: dict) -> None:
     braid_end = 1.26
     foil_end = 1.74
 
-    objects.append(cylinder_x("macro jacket body", -1.72, 3.05, outer_r, jacket, vertices=160))
-    objects.append(cylinder_x("thick jacket cut wall", -0.16, 0.22, outer_r * 1.012, jacket_edge, vertices=160))
+    objects.append(cylinder_x("macro jacket body", -1.72, 3.05, outer_r, jacket, vertices=128))
+    objects.append(cylinder_x("thick jacket cut wall", -0.16, 0.22, outer_r * 1.012, jacket_edge, vertices=128))
     add_jacket_detail(
         objects,
         x0=-3.18,
@@ -498,8 +521,8 @@ def build_macro_video_coax_model(spec: dict) -> None:
                 foil_end,
                 foil_r,
                 foil,
-                radial_segments=144,
-                length_segments=80,
+                radial_segments=112,
+                length_segments=64,
             )
         )
         objects.append(
@@ -525,16 +548,31 @@ def build_macro_video_coax_model(spec: dict) -> None:
             braid_r * 0.992,
             braid_recess,
             radial_segments=120,
-            length_segments=20,
+            length_segments=18,
         )
     )
 
-    carrier_count = max(14, min(20, int(round(spec.get("braid_carriers", 16) * 0.82))))
+    carrier_count = max(12, min(16, int(round(spec.get("braid_carriers", 16) * 0.72))))
     if carrier_count % 2:
         carrier_count += 1
     strand_radius = max(0.0065, outer_r * 0.0068)
-    filaments = 4 if spec["od_mm"] >= 7 else 3
+    filaments = 3 if spec["od_mm"] >= 7 else 2
     display_turns = 2.1 if spec["od_mm"] >= 9 else 2.35
+    if spec.get("double_braid") or spec.get("quad_shield"):
+        add_macro_braid(
+            objects,
+            label="inner macro braid",
+            x0=braid_start + 0.06,
+            x1=braid_end + 0.18,
+            radius=braid_r * 0.925,
+            turns=display_turns * 0.92,
+            carriers=max(10, carrier_count - 2),
+            light=braid_dark,
+            dark=braid_light,
+            strand_radius=strand_radius * 0.74,
+            filaments=max(2, filaments - 1),
+            phase_offset=math.radians(18),
+        )
     add_macro_braid(
         objects,
         label="macro braid",
@@ -555,10 +593,10 @@ def build_macro_video_coax_model(spec: dict) -> None:
         radius=braid_r + strand_radius * 2.2,
         mat=braid_light,
         strand_radius=strand_radius,
-        count=28 if spec["od_mm"] >= 7 else 20,
+        count=20 if spec["od_mm"] >= 7 else 14,
     )
 
-    objects.append(cylinder_x("macro dielectric exposed core", 1.88, 1.56, dielectric_r, dielectric, vertices=160))
+    objects.append(cylinder_x("macro dielectric exposed core", 1.88, 1.56, dielectric_r, dielectric, vertices=128))
     add_dielectric_detail(
         objects,
         kind=dielectric_kind,
@@ -577,31 +615,153 @@ def build_macro_video_coax_model(spec: dict) -> None:
         strands=spec.get("conductor_strands", 1),
     )
 
-    for obj in objects:
-        obj.parent = root
+    finish_and_export(root, objects, spec)
 
-    root.rotation_euler = (math.radians(-5.5), 0, math.radians(-2.5))
-    bpy.ops.object.select_all(action="DESELECT")
-    for obj in [root, *objects]:
-        obj.select_set(True)
-    bpy.context.view_layer.objects.active = root
-    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
 
-    bpy.ops.export_scene.gltf(
-        filepath=str(MODELS_DIR / f"{spec['macro_slug']}.glb"),
-        export_format="GLB",
-        export_apply=True,
-        export_yup=True,
-        export_animations=False,
-        export_current_frame=True,
+def build_macro_hardline_model(spec: dict) -> None:
+    reset_scene()
+    root = add_label_empty(f"{spec['name']} macro hardline GLB root")
+
+    scale = 0.18 if spec["od_mm"] >= 18 else 0.24
+    outer_r = spec["od_mm"] * 0.5 * scale
+    shield_r = spec["shield_mm"] * 0.5 * scale
+    dielectric_r = spec["dielectric_mm"] * 0.5 * scale
+    conductor_r = spec["d_mm"] * 0.5 * scale
+
+    conductor_kind = spec.get("conductor_material", "bare_copper")
+    dielectric_kind = spec.get("dielectric_material", "foam_pe")
+    dielectric_name, dielectric_color, _ = dielectric_material_color(dielectric_kind)
+    copper = make_material("corrugated copper outer conductor", (0.82, 0.40, 0.16, 1), metallic=0.9, roughness=0.2)
+    copper_shadow = make_material("corrugation valley copper shadow", (0.36, 0.16, 0.05, 1), metallic=0.75, roughness=0.36)
+    center = make_material(f"{conductor_kind.replace('_', ' ')} macro conductor", conductor_material_color(conductor_kind), metallic=0.92, roughness=0.14)
+    dielectric = make_material(dielectric_name, dielectric_color, roughness=0.66, alpha=1)
+    spacer = make_material("low loss PE air spacer", (0.90, 0.88, 0.74, 1), roughness=0.54)
+    jacket = make_material("hardline matte jacket", spec["jacket_color"], roughness=0.9)
+    jacket_edge = make_material("hardline jacket cut wall", jacket_cut_color(spec["jacket_color"]), roughness=0.82)
+
+    objects: list[bpy.types.Object] = []
+    objects.append(cylinder_x("macro hardline jacket body", -1.72, 3.05, outer_r, jacket, vertices=128))
+    objects.append(cylinder_x("hardline jacket cut wall", -0.18, 0.20, outer_r * 1.012, jacket_edge, vertices=128))
+    add_jacket_detail(
+        objects,
+        x0=-3.18,
+        x1=-0.34,
+        cut_x=-0.19,
+        radius=outer_r,
+        jacket_color=spec["jacket_color"],
+        body_mat=jacket,
+        edge_mat=jacket_edge,
     )
+    objects.append(
+        tube_surface(
+            "annular corrugated solid shield",
+            -0.26,
+            1.52,
+            shield_r,
+            copper,
+            corrugation_amp=max(0.018, min(0.07, shield_r * 0.035)),
+            corrugation_count=spec.get("corrugation_count", 18),
+            radial_segments=128,
+            length_segments=96,
+        )
+    )
+    add_axial_surface_lines(
+        objects,
+        label="corrugated shield",
+        x0=-0.20,
+        x1=1.46,
+        radius=shield_r * 1.028,
+        mat=copper_shadow,
+        count=8,
+        bevel_depth=max(0.003, shield_r * 0.0026),
+        phase_offset=math.radians(9),
+        wobble=0.01,
+        points=24,
+    )
+
+    if spec.get("air_dielectric"):
+        objects.append(cylinder_x("air dielectric visual envelope", 1.88, 1.54, dielectric_r, make_material("clear air dielectric silhouette", (0.78, 0.86, 0.84, 1), roughness=0.1, alpha=0.18), vertices=96))
+        objects.append(
+            helical_ribbon(
+                "continuous PE helical air spacer",
+                1.08,
+                2.66,
+                max(conductor_r * 1.55, dielectric_r * 0.62),
+                3.25,
+                math.radians(22),
+                math.radians(10),
+                spacer,
+                segments=120,
+            )
+        )
+    else:
+        objects.append(cylinder_x("macro foam dielectric exposed core", 1.88, 1.54, dielectric_r, dielectric, vertices=128))
+        add_dielectric_detail(objects, kind=dielectric_kind, x0=1.14, x1=2.62, radius=dielectric_r, base_color=dielectric_color)
+
+    add_macro_conductor(objects, x0=0.12, x1=3.18, radius=conductor_r, mat=center, strands=spec.get("conductor_strands", 1))
+    finish_and_export(root, objects, spec)
+
+
+def build_macro_semi_rigid_model(spec: dict) -> None:
+    reset_scene()
+    root = add_label_empty(f"{spec['name']} macro semi-rigid GLB root")
+
+    scale = 0.34 if spec["od_mm"] <= 4 else 0.28
+    outer_r = spec["od_mm"] * 0.5 * scale
+    shield_r = spec["shield_mm"] * 0.5 * scale
+    dielectric_r = spec["dielectric_mm"] * 0.5 * scale
+    conductor_r = spec["d_mm"] * 0.5 * scale
+
+    conductor_kind = spec.get("conductor_material", "silver")
+    dielectric_kind = spec.get("dielectric_material", "ptfe")
+    dielectric_name, dielectric_color, _ = dielectric_material_color(dielectric_kind)
+    tube_color = (0.82, 0.58, 0.34, 1) if spec.get("outer_tube_material") == "bare_copper" else (0.82, 0.80, 0.72, 1)
+    tube = make_material("semi rigid outer tube", tube_color, metallic=0.9, roughness=0.22)
+    tube_edge = make_material("semi rigid bright tube edge", scale_color(tube_color, 1.18), metallic=0.95, roughness=0.16)
+    center = make_material(f"{conductor_kind.replace('_', ' ')} macro conductor", conductor_material_color(conductor_kind), metallic=0.9, roughness=0.14)
+    dielectric = make_material(dielectric_name, dielectric_color, roughness=0.52, alpha=1)
+    jacket = make_material("thin optional FEP jacket", spec["jacket_color"], roughness=0.76, alpha=0.72)
+
+    objects: list[bpy.types.Object] = []
+    jacket_text = spec.get("jacket_text", "").lower()
+    has_jacket = "fep" in jacket_text and "none" not in jacket_text
+    if has_jacket:
+        objects.append(cylinder_x("thin FEP rear jacket", -1.70, 2.65, outer_r, jacket, vertices=112))
+    corrugation_amp = max(0.0, shield_r * 0.025) if spec.get("corrugated") else 0
+    objects.append(
+        tube_surface(
+            "macro semi rigid tube shield",
+            -0.42,
+            1.48,
+            shield_r,
+            tube,
+            corrugation_amp=corrugation_amp,
+            corrugation_count=18 if spec.get("corrugated") else 1,
+            radial_segments=128,
+            length_segments=72,
+        )
+    )
+    objects.append(cylinder_x("semi rigid tube cut rim", 1.42, 0.08, shield_r * 1.018, tube_edge, vertices=128))
+    objects.append(cylinder_x("macro PTFE dielectric core", 1.88, 1.54, dielectric_r, dielectric, vertices=128))
+    add_dielectric_detail(objects, kind=dielectric_kind, x0=1.14, x1=2.62, radius=dielectric_r, base_color=dielectric_color)
+    add_macro_conductor(objects, x0=0.12, x1=3.18, radius=conductor_r, mat=center, strands=spec.get("conductor_strands", 1))
+    finish_and_export(root, objects, spec)
+
+
+def build_macro_model(spec: dict) -> None:
+    if spec["family"] == "ava_hardline":
+        build_macro_hardline_model(spec)
+    elif spec["family"] == "semi_rigid":
+        build_macro_semi_rigid_model(spec)
+    else:
+        build_macro_video_coax_model(spec)
 
 
 def main() -> None:
     ensure_dirs()
     specs = load_target_specs()
-    for cable_id in TARGET_IDS:
-        build_macro_video_coax_model(specs[cable_id])
+    for cable_id in specs:
+        build_macro_model(specs[cable_id])
 
 
 if __name__ == "__main__":

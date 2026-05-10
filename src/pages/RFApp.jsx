@@ -910,8 +910,8 @@ const cableIdToModelSlug = (id) => `rf-${String(id)
   .replace(/_/g, "-")
   .toLowerCase()}`;
 const getCableModelPath = (id, cable = CABLES[id]) => cable?.model || `/models/${cableIdToModelSlug(id)}.glb`;
-const getCableMacroModelPath = (id, cable = CABLES[id]) => cable?.macroModel || "";
-const withCableModel = (id, cable = CABLES[id]) => cable ? { ...cable, model: getCableModelPath(id, cable) } : cable;
+const getCableMacroModelPath = (id, cable = CABLES[id]) => cable?.macroModel || getCableModelPath(id, cable).replace(/\.glb$/, "-macro.glb");
+const withCableModel = (id, cable = CABLES[id]) => cable ? { ...cable, model: getCableModelPath(id, cable), macroModel: getCableMacroModelPath(id, cable) } : cable;
 
 // ═══════════════════════════════════════════════════════════════
 // RF CONNECTOR DATABASE
@@ -5825,8 +5825,8 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
           compared={comparedCables?.includes(detailId)}
           toggleCompare={toggleCompare}
           onPrint={onPrint ? () => onPrint(detailId) : undefined}
-          onViewRender={getCableModelPath(detailId, CABLES[detailId]) ? () => openRenderModal(detailId, "standard") : undefined}
           onViewMacro={getCableMacroModelPath(detailId, CABLES[detailId]) ? () => openRenderModal(detailId, "macro") : undefined}
+          onViewRender={!getCableMacroModelPath(detailId, CABLES[detailId]) && getCableModelPath(detailId, CABLES[detailId]) ? () => openRenderModal(detailId, "standard") : undefined}
         />
         {renderModal}
       </>
@@ -5995,8 +5995,8 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
               id={id}
               cable={c}
               onOpen={() => openDetail(id)}
-              onViewRender={getCableModelPath(id, c) ? () => openRenderModal(id, "standard") : undefined}
               onViewMacro={getCableMacroModelPath(id, c) ? () => openRenderModal(id, "macro") : undefined}
+              onViewRender={!getCableMacroModelPath(id, c) && getCableModelPath(id, c) ? () => openRenderModal(id, "standard") : undefined}
               compared={comparedCables?.includes(id)}
               isMobile={isMobile}
             />
@@ -6340,17 +6340,16 @@ function ShieldCoveragePanel({ cable, freqGHz, onFreq }) {
 function CableRenderModal({ id, cable: c, initialMode = "standard", onClose }) {
   const layers = useMemo(() => getRfRenderLayers(c), [c]);
   const hasMacro = Boolean(c.macroModel);
-  const [viewMode, setViewMode] = useState(initialMode === "macro" && hasMacro ? "macro" : "standard");
   const [pinnedLayer, setPinnedLayer] = useState(null);
   const [hoverLayer, setHoverLayer] = useState(null);
   const activeLayer = hoverLayer || pinnedLayer;
   const [bendMultiplier, setBendMultiplier] = useState(c.flex === "high" ? 8 : c.flex === "low" ? 16 : 10);
   const [shieldFreq, setShieldFreq] = useState(2.4);
   const renderCable = useMemo(
-    () => (viewMode === "macro" && c.macroModel ? { ...c, model: c.macroModel } : c),
-    [c, viewMode]
+    () => (c.macroModel ? { ...c, model: c.macroModel } : c),
+    [c]
   );
-  const isMacro = viewMode === "macro" && hasMacro;
+  const isMacro = hasMacro;
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -6358,7 +6357,6 @@ function CableRenderModal({ id, cable: c, initialMode = "standard", onClose }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
   useEffect(() => {
-    setViewMode(initialMode === "macro" && hasMacro ? "macro" : "standard");
     setPinnedLayer(null);
     setHoverLayer(null);
   }, [id, initialMode, hasMacro]);
@@ -6372,23 +6370,6 @@ function CableRenderModal({ id, cable: c, initialMode = "standard", onClose }) {
             <div style={S.renderModalTitle}>{c.name}</div>
           </div>
           <div style={S.renderModalHeaderTools}>
-            {hasMacro && (
-              <div style={S.renderModeSwitch} aria-label="Render fidelity">
-                {[
-                  ["standard", "Standard"],
-                  ["macro", "Macro"],
-                ].map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setViewMode(mode)}
-                    style={{ ...S.renderModeButton, ...(viewMode === mode ? S.renderModeButtonActive : {}) }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
             <button type="button" onClick={onClose} style={S.renderModalClose} title="Close">
               <XIcon size={18} />
             </button>
