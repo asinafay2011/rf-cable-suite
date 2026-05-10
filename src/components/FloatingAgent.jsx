@@ -774,24 +774,14 @@ export default function FloatingAgent({
 
   if (!open) {
     return (
-      <button
-        onClick={() => setOpen(true)}
-        className={`fixed z-[90] flex items-center gap-2 rounded-full text-[#0a0d0f] shadow-2xl transition-colors border ${isMobile ? 'bottom-3 left-3 px-3 py-2.5' : 'bottom-4 left-4 px-4 py-3'}`}
-        style={{
-          fontFamily: '"JetBrains Mono", monospace',
-          background: accent,
-          borderColor: accentBright,
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = accentBright)}
-        onMouseLeave={(e) => (e.currentTarget.style.background = accent)}
-        aria-label="Open chat"
-      >
-        <MessageSquare size={isMobile ? 18 : 16} strokeWidth={2.5} />
-        <span className="text-[11px] font-semibold uppercase tracking-wider">Ask</span>
-        {messages.length > 0 && (
-          <span className="text-[10px] bg-[#0a0d0f]/30 px-1.5 py-0.5 rounded">{visibleCount(messages)}</span>
-        )}
-      </button>
+      <CorgiChatLauncher
+        accent={accent}
+        accentBright={accentBright}
+        count={messages.length > 0 ? visibleCount(messages) : 0}
+        isMobile={isMobile}
+        busy={loading || toolStatus === 'executing'}
+        onOpen={() => setOpen(true)}
+      />
     )
   }
 
@@ -1197,6 +1187,437 @@ export default function FloatingAgent({
     </div>
     </>
   )
+}
+
+function CorgiChatLauncher({ accent, accentBright, count, isMobile, busy, onOpen }) {
+  const [modelReady, setModelReady] = useState(false)
+  return (
+    <>
+      <style>{`
+        @keyframes corgiFloat {
+          0%, 100% { transform: translateY(0) rotate(-1deg); }
+          50% { transform: translateY(-3px) rotate(1deg); }
+        }
+        @keyframes corgiWag {
+          0%, 100% { transform: rotate(-22deg); }
+          50% { transform: rotate(22deg); }
+        }
+        @keyframes corgiBlink {
+          0%, 92%, 100% { transform: scaleY(1); }
+          95% { transform: scaleY(0.08); }
+        }
+        @keyframes corgiListen {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-2px); }
+        }
+        .agent-corgi-launcher {
+          position: fixed;
+          left: 16px;
+          bottom: 14px;
+          z-index: 90;
+          width: 148px;
+          height: 110px;
+          border: 0;
+          background: transparent;
+          padding: 0;
+          cursor: pointer;
+          isolation: isolate;
+          filter: drop-shadow(0 16px 24px rgba(0, 0, 0, 0.45));
+        }
+        .agent-corgi-launcher-mobile {
+          left: 10px;
+          bottom: 8px;
+          width: 128px;
+          height: 96px;
+        }
+        .agent-corgi-stage {
+          position: absolute;
+          left: 0;
+          bottom: 6px;
+          width: 108px;
+          height: 90px;
+          transform-origin: 50% 100%;
+          transition: transform 0.18s ease;
+          animation: corgiFloat 4.6s ease-in-out infinite;
+        }
+        .agent-corgi-launcher:hover .agent-corgi-stage {
+          transform: translateY(-4px) scale(1.04);
+        }
+        .agent-corgi-launcher-busy .agent-corgi-stage {
+          animation: corgiListen 1.15s ease-in-out infinite;
+        }
+        .agent-corgi-model {
+          position: absolute;
+          left: -10px;
+          top: -12px;
+          width: 124px;
+          height: 102px;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.22s ease;
+        }
+        .agent-corgi-model-ready {
+          opacity: 1;
+        }
+        .agent-corgi-css {
+          transition: opacity 0.2s ease;
+        }
+        .agent-corgi-css-hidden {
+          opacity: 0;
+        }
+        .agent-corgi-shadow {
+          position: absolute;
+          left: 14px;
+          right: 30px;
+          bottom: 4px;
+          height: 13px;
+          border-radius: 999px;
+          background: rgba(0, 0, 0, 0.34);
+          filter: blur(5px);
+        }
+        .agent-corgi-body {
+          position: absolute;
+          left: 13px;
+          bottom: 8px;
+          width: 58px;
+          height: 36px;
+          border-radius: 26px 24px 19px 20px;
+          background: linear-gradient(135deg, #f6a23a 0%, #c6671d 62%, #8b3d12 100%);
+          border: 1px solid rgba(255, 225, 179, 0.75);
+          box-shadow: inset 0 7px 10px rgba(255, 220, 155, 0.28), inset -10px -8px 14px rgba(62, 27, 8, 0.28);
+        }
+        .agent-corgi-chest {
+          position: absolute;
+          left: 7px;
+          bottom: 2px;
+          width: 26px;
+          height: 27px;
+          border-radius: 18px 18px 12px 16px;
+          background: #fff3d8;
+          opacity: 0.96;
+        }
+        .agent-corgi-leg {
+          position: absolute;
+          bottom: 1px;
+          width: 9px;
+          height: 14px;
+          border-radius: 8px 8px 4px 4px;
+          background: #7a3713;
+        }
+        .agent-corgi-leg.front { left: 21px; }
+        .agent-corgi-leg.back { left: 55px; }
+        .agent-corgi-tail {
+          position: absolute;
+          left: 63px;
+          bottom: 31px;
+          width: 20px;
+          height: 12px;
+          border: 5px solid #f6a23a;
+          border-left: 0;
+          border-bottom: 0;
+          border-radius: 0 16px 0 0;
+          transform-origin: 0 100%;
+          animation: corgiWag 0.72s ease-in-out infinite;
+        }
+        .agent-corgi-head {
+          position: absolute;
+          left: 6px;
+          top: 4px;
+          width: 43px;
+          height: 39px;
+          border-radius: 20px 20px 17px 17px;
+          background: linear-gradient(145deg, #f5a23e 0%, #d87522 74%);
+          border: 1px solid rgba(255, 229, 188, 0.78);
+          box-shadow: inset 0 8px 10px rgba(255, 223, 174, 0.24);
+        }
+        .agent-corgi-ear {
+          position: absolute;
+          top: -10px;
+          width: 18px;
+          height: 23px;
+          background: #b95417;
+          border: 1px solid rgba(255, 222, 180, 0.6);
+          transform-origin: 50% 100%;
+          clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+        }
+        .agent-corgi-ear.left { left: 2px; transform: rotate(-17deg); }
+        .agent-corgi-ear.right { right: 2px; transform: rotate(17deg); }
+        .agent-corgi-face-white {
+          position: absolute;
+          left: 9px;
+          top: 10px;
+          width: 25px;
+          height: 25px;
+          border-radius: 16px 16px 13px 13px;
+          background: #fff5dc;
+        }
+        .agent-corgi-eye {
+          position: absolute;
+          top: 15px;
+          width: 4px;
+          height: 5px;
+          border-radius: 999px;
+          background: #21140d;
+          animation: corgiBlink 5.5s ease-in-out infinite;
+        }
+        .agent-corgi-eye.left { left: 13px; }
+        .agent-corgi-eye.right { right: 13px; }
+        .agent-corgi-nose {
+          position: absolute;
+          left: 18px;
+          top: 24px;
+          width: 7px;
+          height: 5px;
+          border-radius: 999px;
+          background: #21140d;
+        }
+        .agent-corgi-mouth {
+          position: absolute;
+          left: 18px;
+          top: 29px;
+          width: 8px;
+          height: 4px;
+          border-bottom: 1.5px solid #4d2b1d;
+          border-radius: 0 0 10px 10px;
+        }
+        .agent-corgi-collar {
+          position: absolute;
+          left: 12px;
+          bottom: 32px;
+          width: 40px;
+          height: 8px;
+          border-radius: 999px;
+          background: var(--agent-accent);
+          box-shadow: 0 0 16px color-mix(in srgb, var(--agent-accent) 56%, transparent);
+        }
+        .agent-corgi-tag {
+          position: absolute;
+          right: 0;
+          bottom: 17px;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          min-height: 34px;
+          padding: 0 10px;
+          border-radius: 999px;
+          background: linear-gradient(135deg, var(--agent-accent-bright), var(--agent-accent));
+          border: 1px solid color-mix(in srgb, var(--agent-accent-bright) 72%, #fff 18%);
+          color: #0a0d0f;
+          font-family: "JetBrains Mono", monospace;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 1.3px;
+          text-transform: uppercase;
+          box-shadow: 0 12px 26px rgba(0, 0, 0, 0.4);
+          transition: transform 0.18s ease, background 0.18s ease;
+        }
+        .agent-corgi-launcher:hover .agent-corgi-tag {
+          transform: translateX(3px);
+          background: var(--agent-accent-bright);
+        }
+        .agent-corgi-count {
+          min-width: 18px;
+          height: 18px;
+          display: inline-grid;
+          place-items: center;
+          border-radius: 999px;
+          background: rgba(10, 13, 15, 0.28);
+          font-size: 10px;
+          letter-spacing: 0;
+        }
+      `}</style>
+      <button
+        type="button"
+        onClick={onOpen}
+        className={`agent-corgi-launcher ${isMobile ? 'agent-corgi-launcher-mobile' : ''} ${busy ? 'agent-corgi-launcher-busy' : ''}`}
+        style={{
+          '--agent-accent': accent,
+          '--agent-accent-bright': accentBright,
+        }}
+        aria-label="Open chat"
+      >
+        <span className="agent-corgi-shadow" aria-hidden="true" />
+        <span className="agent-corgi-stage" aria-hidden="true">
+          <CorgiModelPreview assetUrl="/models/corgi-assistant.glb" onReady={setModelReady} />
+          <span className={`agent-corgi-css ${modelReady ? 'agent-corgi-css-hidden' : ''}`}>
+            <span className="agent-corgi-tail" />
+            <span className="agent-corgi-body">
+              <span className="agent-corgi-chest" />
+              <span className="agent-corgi-leg front" />
+              <span className="agent-corgi-leg back" />
+              <span className="agent-corgi-collar" />
+            </span>
+            <span className="agent-corgi-head">
+              <span className="agent-corgi-ear left" />
+              <span className="agent-corgi-ear right" />
+              <span className="agent-corgi-face-white" />
+              <span className="agent-corgi-eye left" />
+              <span className="agent-corgi-eye right" />
+              <span className="agent-corgi-nose" />
+              <span className="agent-corgi-mouth" />
+            </span>
+          </span>
+        </span>
+        <span className="agent-corgi-tag">
+          <MessageSquare size={14} strokeWidth={2.4} />
+          Ask
+          {count > 0 && <span className="agent-corgi-count">{count}</span>}
+        </span>
+      </button>
+    </>
+  )
+}
+
+function CorgiModelPreview({ assetUrl, onReady }) {
+  const mountRef = useRef(null)
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    let frameId = 0
+    let renderer = null
+    let scene = null
+    let camera = null
+    let model = null
+    let resizeObserver = null
+
+    const disposeMaterial = (material) => {
+      if (!material) return
+      for (const value of Object.values(material)) {
+        if (value && typeof value === 'object' && value.isTexture) value.dispose()
+      }
+      material.dispose?.()
+    }
+
+    const disposeObject = (object) => {
+      object?.traverse?.((node) => {
+        node.geometry?.dispose?.()
+        if (Array.isArray(node.material)) node.material.forEach(disposeMaterial)
+        else disposeMaterial(node.material)
+      })
+    }
+
+    const run = async () => {
+      const mount = mountRef.current
+      if (!mount) return
+
+      try {
+        const exists = await fetch(assetUrl, { method: 'HEAD' })
+        if (!alive || !exists.ok) {
+          setReady(false)
+          onReady?.(false)
+          return
+        }
+      } catch {
+        setReady(false)
+        onReady?.(false)
+        return
+      }
+
+      try {
+        const [THREE, { GLTFLoader }] = await Promise.all([
+          import('three'),
+          import('three/examples/jsm/loaders/GLTFLoader.js'),
+        ])
+        if (!alive || !mountRef.current) return
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' })
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+        renderer.outputColorSpace = THREE.SRGBColorSpace
+        renderer.domElement.style.width = '100%'
+        renderer.domElement.style.height = '100%'
+        renderer.domElement.style.display = 'block'
+        mount.appendChild(renderer.domElement)
+
+        scene = new THREE.Scene()
+        camera = new THREE.PerspectiveCamera(28, 1, 0.01, 80)
+        camera.position.set(0, 0.06, 3.45)
+        scene.add(camera)
+
+        const ambient = new THREE.HemisphereLight(0xfff0d4, 0x182022, 2.8)
+        const key = new THREE.DirectionalLight(0xffffff, 3.1)
+        key.position.set(-2.2, 3.2, 4.4)
+        const rim = new THREE.DirectionalLight(0xfbbf24, 1.3)
+        rim.position.set(2.4, 0.6, 3.2)
+        scene.add(ambient, key, rim)
+
+        const resize = () => {
+          if (!renderer || !camera || !mountRef.current) return
+          const rect = mountRef.current.getBoundingClientRect()
+          const width = Math.max(72, Math.floor(rect.width || 98))
+          const height = Math.max(60, Math.floor(rect.height || 82))
+          renderer.setSize(width, height, false)
+          camera.aspect = width / height
+          camera.updateProjectionMatrix()
+        }
+        resizeObserver = new ResizeObserver(resize)
+        resizeObserver.observe(mount)
+        resize()
+
+        new GLTFLoader().load(
+          assetUrl,
+          (gltf) => {
+            if (!alive || !scene) return
+            model = gltf.scene
+            const box = new THREE.Box3().setFromObject(model)
+            const center = box.getCenter(new THREE.Vector3())
+            const size = box.getSize(new THREE.Vector3())
+            model.position.sub(center)
+            const maxDim = Math.max(size.x, size.y, size.z, 0.001)
+            model.scale.setScalar(2.05 / maxDim)
+            model.rotation.set(-0.06, 0.42, 0.02)
+            model.traverse((node) => {
+              if (!node.isMesh || !node.material) return
+              node.castShadow = false
+              node.receiveShadow = false
+              const mats = Array.isArray(node.material) ? node.material : [node.material]
+              mats.forEach((mat) => {
+                mat.roughness = Math.min(mat.roughness ?? 0.55, 0.72)
+                mat.needsUpdate = true
+              })
+            })
+            scene.add(model)
+            setReady(true)
+            onReady?.(true)
+          },
+          undefined,
+          () => {
+            setReady(false)
+            onReady?.(false)
+          }
+        )
+
+        const animate = () => {
+          if (!alive || !renderer || !scene || !camera) return
+          const t = performance.now() / 1000
+          if (model) {
+            model.position.y = -0.08 + Math.sin(t * 2.1) * 0.025
+            model.rotation.y = 0.42 + Math.sin(t * 0.9) * 0.07
+            model.rotation.z = 0.02 + Math.sin(t * 1.4) * 0.025
+          }
+          renderer.render(scene, camera)
+          frameId = requestAnimationFrame(animate)
+        }
+        animate()
+      } catch {
+        setReady(false)
+        onReady?.(false)
+      }
+    }
+
+    run()
+
+    return () => {
+      alive = false
+      cancelAnimationFrame(frameId)
+      resizeObserver?.disconnect?.()
+      if (model) disposeObject(model)
+      renderer?.dispose?.()
+      renderer?.domElement?.remove?.()
+    }
+  }, [assetUrl, onReady])
+
+  return <span ref={mountRef} className={`agent-corgi-model ${ready ? 'agent-corgi-model-ready' : ''}`} />
 }
 
 // ── Build a flat array of view items from messages + in-flight stream
