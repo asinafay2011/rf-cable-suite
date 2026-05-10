@@ -241,6 +241,78 @@ function useRfStackModel(config) {
         modelGroup.rotation.set(-0.12, -0.2, 0.01)
         scene.add(modelGroup)
 
+        const makeSleeveMesh = ({ name, x0, x1, radius, innerRadius = 0.12, material, progress = 1 }) => {
+          const p = clamp(progress, 0.015, 1)
+          const xEnd = x0 + (x1 - x0) * p
+          const radialSegments = 96
+          const lengthSegments = Math.max(2, Math.round(18 * p))
+          const verts = []
+          const faces = []
+          for (let ix = 0; ix <= lengthSegments; ix++) {
+            const t = ix / lengthSegments
+            const x = x0 + (xEnd - x0) * t
+            for (let ir = 0; ir < radialSegments; ir++) {
+              const angle = (ir / radialSegments) * Math.PI * 2
+              verts.push(x, radius * Math.cos(angle), radius * Math.sin(angle))
+              verts.push(x, innerRadius * Math.cos(angle), innerRadius * Math.sin(angle))
+            }
+          }
+          for (let ix = 0; ix < lengthSegments; ix++) {
+            const row = ix * radialSegments * 2
+            const nextRow = (ix + 1) * radialSegments * 2
+            for (let ir = 0; ir < radialSegments; ir++) {
+              const next = (ir + 1) % radialSegments
+              const outer = row + ir * 2
+              const inner = outer + 1
+              const outerNext = row + next * 2
+              const innerNext = outerNext + 1
+              const outerUp = nextRow + ir * 2
+              const innerUp = outerUp + 1
+              const outerNextUp = nextRow + next * 2
+              const innerNextUp = outerNextUp + 1
+              faces.push(outer, outerNext, outerNextUp)
+              faces.push(outer, outerNextUp, outerUp)
+              faces.push(inner, innerUp, innerNextUp)
+              faces.push(inner, innerNextUp, innerNext)
+            }
+          }
+          const firstRow = 0
+          const lastRow = lengthSegments * radialSegments * 2
+          for (let ir = 0; ir < radialSegments; ir++) {
+            const next = (ir + 1) % radialSegments
+            const outer = firstRow + ir * 2
+            const inner = outer + 1
+            const outerNext = firstRow + next * 2
+            const innerNext = outerNext + 1
+            const outerEnd = lastRow + ir * 2
+            const innerEnd = outerEnd + 1
+            const outerNextEnd = lastRow + next * 2
+            const innerNextEnd = outerNextEnd + 1
+            faces.push(outer, inner, innerNext)
+            faces.push(outer, innerNext, outerNext)
+            faces.push(outerEnd, outerNextEnd, innerNextEnd)
+            faces.push(outerEnd, innerNextEnd, innerEnd)
+          }
+          const geometry = new THREE.BufferGeometry()
+          geometry.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+          geometry.setIndex(faces)
+          geometry.computeVertexNormals()
+          const mesh = new THREE.Mesh(geometry, material)
+          mesh.name = name
+          mesh.renderOrder = 6
+          return mesh
+        }
+
+        const makeCylinderX = ({ name, x0, x1, radius, material, radialSegments = 64 }) => {
+          const geometry = new THREE.CylinderGeometry(radius, radius, x1 - x0, radialSegments, 1, false)
+          const mesh = new THREE.Mesh(geometry, material)
+          mesh.name = name
+          mesh.rotation.z = Math.PI / 2
+          mesh.position.x = (x0 + x1) / 2
+          mesh.renderOrder = 2
+          return mesh
+        }
+
         const makeRibbonMesh = ({ name, x0, x1, radius, turns, phase, tapeWidth, handedness, material, progress = 1, thickness = 0.004 }) => {
           const p = clamp(progress, 0.02, 1)
           const segments = Math.max(10, Math.round(220 * p))
@@ -308,8 +380,9 @@ function useRfStackModel(config) {
           const signature = JSON.stringify({
             ptfeStack: nextConfig.ptfeStack,
             braidCoverage: nextConfig.braidCoverage,
+            showBraidPreview: nextConfig.showBraidPreview,
             animateToken: nextConfig.animateToken,
-            frame: elapsed < 3.2 ? Math.floor(elapsed * 30) : 'done',
+            frame: elapsed < 4.2 ? Math.floor(elapsed * 30) : 'done',
           })
           if (!force && runtimeRef.current.lastSignature === signature) return
           runtimeRef.current.lastSignature = signature
@@ -323,8 +396,19 @@ function useRfStackModel(config) {
 
           const ptfeA = new THREE.MeshStandardMaterial({ name: 'live PTFE tape satin white', color: 0xfff9e8, roughness: 0.26, metalness: 0.0, transparent: false, opacity: 1, side: THREE.DoubleSide, depthWrite: true })
           const ptfeB = new THREE.MeshStandardMaterial({ name: 'live PTFE tape edge shade', color: 0xf6ecd0, roughness: 0.34, metalness: 0.0, transparent: false, opacity: 1, side: THREE.DoubleSide, depthWrite: true })
+          const seamMat = new THREE.MeshStandardMaterial({ name: 'live PTFE faint tape seam', color: 0xcfc5a4, roughness: 0.68, metalness: 0.0, transparent: true, opacity: 0.62, side: THREE.DoubleSide, depthWrite: false })
+          const leadTapeMat = new THREE.MeshStandardMaterial({ name: 'live PTFE leading wrap lip', color: 0xffffff, roughness: 0.22, metalness: 0.0, transparent: false, opacity: 1, side: THREE.DoubleSide, depthWrite: true })
+          const copperMat = new THREE.MeshStandardMaterial({ name: 'live polished copper conductor', color: 0xd77828, roughness: 0.16, metalness: 0.9 })
           const braidBright = new THREE.MeshStandardMaterial({ name: 'live braid bright carrier', color: 0xd8d2bd, roughness: 0.24, metalness: 0.82 })
           const braidDark = new THREE.MeshStandardMaterial({ name: 'live braid shadow carrier', color: 0x807a69, roughness: 0.36, metalness: 0.72 })
+
+          dynamicGroup.add(makeCylinderX({
+            name: 'live continuous copper conductor',
+            x0: -1.72,
+            x1: 2.92,
+            radius: 0.072,
+            material: copperMat,
+          }))
 
           const stack = Array.isArray(nextConfig.ptfeStack) ? nextConfig.ptfeStack : []
           stack.forEach((layer, layerIndex) => {
@@ -332,25 +416,52 @@ function useRfStackModel(config) {
             const width = clamp(Number(layer.width) || 6, 2, 14)
             const direction = layer.direction === 'S' ? 'S' : 'Z'
             const handedness = direction === 'Z' ? 1 : -1
-            const tapeWidth = clamp(width * 0.07, 0.18, 0.72)
+            const tapeWidth = clamp(width * 0.052, 0.16, 0.54)
             const turns = clamp(18 / width + 1.65 + passes * 0.035, 2.6, 7.2)
             const layerProgress = elapsed < 4 ? clamp((elapsed - layerIndex * 0.48) / 1.25, 0, 1) : 1
             const phase = layerIndex * 1.1
-            const radius = 0.245 + layerIndex * 0.046
-            const mesh = makeRibbonMesh({
-              name: `live wide PTFE ${direction} tape layer ${layerIndex + 1}`,
-              x0: -1.12,
-              x1: 2.72,
+            const radius = 0.255 + layerIndex * 0.055
+            const x0 = -1.45
+            const x1 = 2.34
+            dynamicGroup.add(makeSleeveMesh({
+              name: `live full PTFE sleeve layer ${layerIndex + 1}`,
+              x0,
+              x1,
               radius,
-              turns,
-              phase,
-              tapeWidth,
-              handedness,
+              innerRadius: 0.118,
               material: layerIndex % 2 ? ptfeB : ptfeA,
               progress: layerProgress,
-              thickness: 0.01 + passes * 0.0015,
-            })
-            dynamicGroup.add(mesh)
+            }))
+            dynamicGroup.add(makeRibbonMesh({
+              name: `live subtle PTFE ${direction} seam layer ${layerIndex + 1}`,
+              x0: x0 + 0.02,
+              x1: x1 - 0.02,
+              radius: radius + 0.004,
+              turns,
+              phase,
+              tapeWidth: Math.max(0.012, tapeWidth * 0.045),
+              handedness,
+              material: seamMat,
+              progress: layerProgress,
+              thickness: 0.006,
+            }))
+            if (layerProgress > 0 && layerProgress < 0.98) {
+              const leadEnd = x0 + (x1 - x0) * layerProgress
+              const leadStart = clamp(leadEnd - 0.42, x0, x1)
+              dynamicGroup.add(makeRibbonMesh({
+                name: `live active PTFE wrap lip layer ${layerIndex + 1}`,
+                x0: leadStart,
+                x1: Math.min(x1, leadEnd + 0.18),
+                radius: radius + 0.012,
+                turns: 0.72,
+                phase: phase + layerProgress * turns * Math.PI * 2,
+                tapeWidth,
+                handedness,
+                material: leadTapeMat,
+                progress: 1,
+                thickness: 0.014,
+              }))
+            }
           })
 
           if (nextConfig.showBraidPreview && stack.length > 0) {
@@ -441,10 +552,11 @@ function useRfStackModel(config) {
             const root = gltf.scene
             root.traverse((node) => {
               if (!node.isMesh || !node.material) return
-              const nodeLabel = `${node.name} ${Array.isArray(node.material) ? node.material.map((mat) => mat.name).join(' ') : node.material.name}`.toLowerCase()
-              const isConductor = /conductor|copper/.test(nodeLabel)
+              const objectLabel = `${node.name}`.toLowerCase()
+              const materialLabel = `${Array.isArray(node.material) ? node.material.map((mat) => mat.name).join(' ') : node.material.name}`.toLowerCase()
+              const nodeLabel = `${objectLabel} ${materialLabel}`
               const isReferenceSurface = /table/.test(nodeLabel)
-              if (!isConductor && !isReferenceSurface) node.visible = false
+              if (!isReferenceSurface) node.visible = false
               node.castShadow = true
               node.receiveShadow = true
               const mats = Array.isArray(node.material) ? node.material : [node.material]
