@@ -230,10 +230,10 @@ const SECTION_STARTERS = {
     'Why does the open-end reflection saturate the trace?',
   ],
   atten: [
-    'Compute insertion loss for LMR-400 over 30 ft at 2.4 GHz',
-    'Why does cable loss scale with √f?',
-    'Compare RG-58 and LMR-240 for 900 MHz',
-    'When does dielectric loss start to dominate over skin effect?',
+    'Estimate insertion loss for a 2 m USB4 twinax pair at 10 GHz',
+    'Why does high-speed pair loss scale with √f?',
+    'Compare Cat 6A and Cat 8 attenuation at 1 GHz',
+    'When does dielectric loss dominate over conductor skin effect?',
   ],
   cost: [
     'Estimate Cu cost per km for a 24-carrier, 7-ends, 0.13mm SPC braid',
@@ -4718,7 +4718,7 @@ function AttenPlot() {
   const presets = {
     cat6a: { name: 'Cat 6A — 23 AWG', d: 0.574, er: 1.55, tand: 0.00035 },
     cat8: { name: 'Cat 8 — 22 AWG', d: 0.643, er: 2.05, tand: 0.0007 },
-    rg6: { name: 'RG6 — Foam PE', d: 1.024, er: 1.45, tand: 0.0002 },
+    usb4: { name: 'USB4 Twinax — 30 AWG', d: 0.255, er: 2.10, tand: 0.0007 },
     spw: { name: 'SpaceWire 26 AWG', d: 0.405, er: 2.05, tand: 0.0007 },
     custom: { name: 'Custom' },
   };
@@ -4783,11 +4783,13 @@ function AttenPlot() {
   const skinShare = selectedPoint.total ? selectedPoint.skin / selectedPoint.total : 0;
   const dielShare = selectedPoint.total ? selectedPoint.diel / selectedPoint.total : 0;
   const tenDbLengthM = selectedPoint.total > 0 ? 1000 / selectedPoint.total : 0;
+  const reach3 = selectedPoint.total > 0 ? 300 / selectedPoint.total : 0;
+  const reach6 = selectedPoint.total > 0 ? 600 / selectedPoint.total : 0;
   const materialRead =
     dielShare > 0.62
-      ? 'Dielectric is driving the limit. Lower tan δ material buys more reach than bigger copper.'
+      ? 'Dielectric is driving the limit. Lower tan δ pair insulation buys more reach than bigger copper.'
       : skinShare > 0.62
-        ? 'Conductor loss dominates. Larger diameter or plated/low-R surface gives the cleanest gain.'
+        ? 'Conductor loss dominates. Larger pair conductors or lower-R plating give the cleanest gain.'
         : 'Balanced region. Geometry and dielectric both matter, so optimize together.';
 
   return (
@@ -4817,11 +4819,22 @@ function AttenPlot() {
         ))}
       </div>
 
-      <div className="grid xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] gap-5 mb-5">
+      <div className="grid 2xl:grid-cols-[260px_minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_360px] gap-5 mb-6 items-start">
+        <AttenLayerRail
+          d={d}
+          er={er}
+          tand={tand}
+          selectedPoint={selectedPoint}
+          selectedFreq={selectedFreq}
+          crossover={crossover}
+          skinShare={skinShare}
+          dielShare={dielShare}
+        />
+
         <div className="border border-[#2f7a6e] bg-[#0b1012] overflow-hidden shadow-[0_0_36px_rgba(94,234,212,0.08)]">
           <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4 border-b border-[#252e33]">
             <div>
-              <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[#5eead4]">Macro attenuation twin</div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[#5eead4]">High-speed pair GLB twin</div>
               <div className="mt-1 text-sm text-[#a7b0b6]">
                 {presets[preset]?.name || 'Custom'} at <span className="text-[#fbbf24] font-mono">{formatAttenFrequency(selectedFreq)}</span>
               </div>
@@ -4852,7 +4865,7 @@ function AttenPlot() {
           </div>
         </div>
 
-        <div className="border border-[#252e33] bg-[#12171a] p-5">
+        <div className="border border-[#252e33] bg-[#12171a] p-5 xl:sticky xl:top-20">
           <div className="flex items-baseline justify-between gap-3 mb-4">
             <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f]">Cable parameters</div>
             <div className="font-mono text-[10px] text-[#5eead4]">Z₀ model 100 Ω</div>
@@ -4939,17 +4952,29 @@ function AttenPlot() {
             <div className="font-mono text-[10px] uppercase tracking-wider text-[#fbbf24] mb-1">Engineering read</div>
             <p className="text-sm text-[#f0ebe2] leading-relaxed">{materialRead}</p>
           </div>
+
+          <div className="mt-4 border border-[#252e33] bg-[#0a0d0f] p-4">
+            <div className="flex items-baseline justify-between mb-3">
+              <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f]">Reach budget</div>
+              <div className="font-mono text-[10px] text-[#6b7479]">{formatAttenFrequency(selectedFreq)}</div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <ReachMini label="3 dB" meters={reach3} />
+              <ReachMini label="6 dB" meters={reach6} />
+              <ReachMini label="10 dB" meters={tenDbLengthM} />
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="grid xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] gap-5 mb-6">
+      <div className="mb-6">
         <div className="p-5 border border-[#252e33] bg-[#12171a]">
           <div className="flex justify-between items-baseline mb-3">
             <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f]">α(f) — dB / 100 m</div>
             <div className="text-[10px] font-mono text-[#6b7479]">log-log sweep · 1 MHz to 10 GHz</div>
           </div>
 
-          <ResponsiveContainer width="100%" height={330}>
+          <ResponsiveContainer width="100%" height={390}>
             <LineChart data={data} margin={{ top: 6, right: 14, left: 0, bottom: 6 }}>
               <CartesianGrid strokeDasharray="2 2" stroke={C.border} />
               <XAxis
@@ -5013,27 +5038,30 @@ function AttenPlot() {
           </div>
         </div>
 
-        <div className="border border-[#252e33] bg-[#12171a] p-5">
-          <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f] mb-4">Decision table</div>
-          <div className="grid sm:grid-cols-2 gap-2">
-            {[
-              { f: '500 MHz', v: at500 },
-              { f: '1 GHz', v: at1G },
-              { f: '2 GHz', v: at2G },
-              { f: '5 GHz', v: at5G },
-            ].map((s) => (
-              <div key={s.f} className="border border-[#252e33] p-3 bg-[#0a0d0f]">
-                <div className="text-[10px] font-mono text-[#6b7479]">{s.f}</div>
-                <div className="font-mono text-lg text-[#5eead4] mt-1">
-                  {s.v ? `${s.v.total.toFixed(1)} dB/100m` : '—'}
+        <div className="mt-5 grid xl:grid-cols-[minmax(0,1fr)_420px] gap-5">
+          <div className="border border-[#252e33] bg-[#12171a] p-5">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f] mb-4">Decision table</div>
+            <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-2">
+              {[
+                { f: '500 MHz', v: at500 },
+                { f: '1 GHz', v: at1G },
+                { f: '2 GHz', v: at2G },
+                { f: '5 GHz', v: at5G },
+              ].map((s) => (
+                <div key={s.f} className="border border-[#252e33] p-3 bg-[#0a0d0f]">
+                  <div className="text-[10px] font-mono text-[#6b7479]">{s.f}</div>
+                  <div className="font-mono text-lg text-[#5eead4] mt-1">
+                    {s.v ? `${s.v.total.toFixed(1)} dB/100m` : '—'}
+                  </div>
+                  <div className="text-[10px] text-[#a7b0b6]">
+                    {s.v ? `${Math.round((s.v.skin / s.v.total) * 100)}% skin · ${Math.round((s.v.diel / s.v.total) * 100)}% dielectric` : ''}
+                  </div>
                 </div>
-                <div className="text-[10px] text-[#a7b0b6]">
-                  {s.v ? `${Math.round((s.v.skin / s.v.total) * 100)}% skin · ${Math.round((s.v.diel / s.v.total) * 100)}% dielectric` : ''}
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-          <div className="mt-4 pt-4 border-t border-dashed border-[#252e33]">
+
+          <div className="border border-[#252e33] bg-[#12171a] p-5">
             <div className="font-mono text-[10px] uppercase tracking-wider text-[#c97b3f] mb-2">Loss components</div>
             <Formula>αc = R/(2Z₀) · 8.686  ∝ √f / d</Formula>
             <Formula>αd = 27.3·√εᵣ·tanδ·f/c</Formula>
@@ -5112,6 +5140,81 @@ function AttenRange({ label, value, display, min, max, step, onChange }) {
   );
 }
 
+function formatReachLength(meters) {
+  if (!Number.isFinite(meters) || meters <= 0) return '—';
+  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
+  if (meters >= 100) return `${Math.round(meters)} m`;
+  if (meters >= 10) return `${meters.toFixed(1)} m`;
+  return `${meters.toFixed(2)} m`;
+}
+
+function ReachMini({ label, meters }) {
+  return (
+    <div className="border border-[#252e33] bg-[#050708] p-2">
+      <div className="font-mono text-[10px] uppercase text-[#6b7479]">{label}</div>
+      <div className="mt-1 font-mono text-sm text-[#5eead4]">{formatReachLength(meters)}</div>
+    </div>
+  );
+}
+
+function AttenLayerRail({ d, er, tand, selectedPoint, selectedFreq, crossover, skinShare, dielShare }) {
+  const layerCards = [
+    {
+      label: 'Conductor surface',
+      accent: '#e89357',
+      value: `${selectedPoint.skinDepthUm.toFixed(selectedPoint.skinDepthUm < 5 ? 1 : 0)} µm skin depth`,
+      detail: `${selectedPoint.skin.toFixed(1)} dB/100m · ${Math.round(skinShare * 100)}% of loss`,
+    },
+    {
+      label: 'Dielectric field',
+      accent: '#fbbf24',
+      value: `εr ${er.toFixed(2)} · tanδ ${(tand * 10000).toFixed(1)}e-4`,
+      detail: `${selectedPoint.diel.toFixed(1)} dB/100m · ${Math.round(dielShare * 100)}% of loss`,
+    },
+    {
+      label: 'Geometry knob',
+      accent: '#5eead4',
+      value: `Ø ${d.toFixed(3)} mm`,
+      detail: 'Larger pair conductors lower αc before material changes help.',
+    },
+    {
+      label: 'Crossover marker',
+      accent: '#7dd3fc',
+      value: crossover ? formatAttenFrequency(crossover) : 'outside sweep',
+      detail: `current plane ${formatAttenFrequency(selectedFreq)}`,
+    },
+  ];
+
+  return (
+    <aside className="hidden 2xl:block 2xl:sticky 2xl:top-20 space-y-4">
+      <div className="border border-[#252e33] bg-[#12171a] p-4">
+        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#5eead4]">Layer callouts</div>
+        <div className="mt-4 space-y-3">
+          {layerCards.map((card) => (
+            <div key={card.label} className="border border-[#252e33] bg-[#0a0d0f] p-3">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: card.accent, boxShadow: `0 0 14px ${card.accent}` }} />
+                <div className="font-mono text-[10px] uppercase tracking-wider text-[#a7b0b6]">{card.label}</div>
+              </div>
+              <div className="mt-2 font-mono text-sm text-[#f0ebe2]">{card.value}</div>
+              <div className="mt-1 text-[11px] leading-relaxed text-[#6b7479]">{card.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="border border-[#2f7a6e] bg-[#0d1f1d] p-4">
+        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#5eead4]">What to look at</div>
+        <div className="mt-3 space-y-2 text-xs leading-relaxed text-[#d8e7e3]">
+          <p>Bright traces show where current collapses on both conductors at high frequency.</p>
+          <p>Field arcs show dielectric loss between the differential pair as frequency rises.</p>
+          <p>Use the right rail to test whether geometry or material is the better fix.</p>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 function AttenMetric({ label, value, unit, tone = 'default' }) {
   const colors = {
     default: 'text-[#f0ebe2]',
@@ -5146,6 +5249,256 @@ function LossShareBar({ skin, diel }) {
 }
 
 function AttenTwinScene({ d, er, tand, selectedFreq, selectedPoint, crossover }) {
+  return (
+    <AttenMacroGlbViewer
+      d={d}
+      er={er}
+      tand={tand}
+      selectedFreq={selectedFreq}
+      selectedPoint={selectedPoint}
+      crossover={crossover}
+    />
+  );
+}
+
+function AttenMacroGlbViewer({ d, er, tand, selectedFreq, selectedPoint, crossover }) {
+  const mountRef = useRef(null);
+  const runtimeRef = useRef({ model: null, dynamic: [], materials: [], resize: null, renderer: null });
+  const [status, setStatus] = useState('Loading Blender GLB');
+  const dielShare = selectedPoint.total ? selectedPoint.diel / selectedPoint.total : 0;
+  const skinShare = selectedPoint.total ? selectedPoint.skin / selectedPoint.total : 0;
+  const heatOpacity = Math.min(0.92, 0.22 + selectedPoint.total / 70);
+  const fieldOpacity = 0.18 + dielShare * 0.62;
+  const skinOpacity = 0.24 + skinShare * 0.52;
+  const freqLabel = formatAttenFrequency(selectedFreq);
+  const crossoverLabel = crossover ? formatAttenFrequency(crossover) : 'outside sweep';
+  const dielectricName = er < 1.65 ? 'foamed PE / air' : er < 2.0 ? 'low-ε polymer' : 'solid FEP / PE';
+
+  useEffect(() => {
+    let alive = true;
+    let frameId = 0;
+    let renderer = null;
+    let scene = null;
+    let camera = null;
+    let controls = null;
+    let model = null;
+    let resizeObserver = null;
+    const disposables = [];
+
+    const disposeMaterial = (material) => {
+      if (!material) return;
+      Object.values(material).forEach((value) => {
+        if (value && typeof value === 'object' && value.isTexture) value.dispose();
+      });
+      material.dispose?.();
+    };
+
+    const disposeObject = (object) => {
+      object?.traverse?.((node) => {
+        node.geometry?.dispose?.();
+        if (Array.isArray(node.material)) node.material.forEach(disposeMaterial);
+        else disposeMaterial(node.material);
+      });
+    };
+
+    const run = async () => {
+      try {
+        const [THREE, { GLTFLoader }, { OrbitControls }] = await Promise.all([
+          import('three'),
+          import('three/examples/jsm/loaders/GLTFLoader.js'),
+          import('three/examples/jsm/controls/OrbitControls.js'),
+        ]);
+        if (!alive || !mountRef.current) return;
+
+        const mount = mountRef.current;
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.08;
+        renderer.domElement.dataset.testid = 'attenuation-macro-glb-canvas';
+        renderer.domElement.style.width = '100%';
+        renderer.domElement.style.height = '100%';
+        renderer.domElement.style.display = 'block';
+        mount.appendChild(renderer.domElement);
+
+        scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x071012, 0.026);
+
+        camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
+        camera.position.set(0.05, -8.35, 2.28);
+
+        const hemi = new THREE.HemisphereLight(0xdffff8, 0x050607, 1.55);
+        scene.add(hemi);
+        const soft = new THREE.DirectionalLight(0xffffff, 3.7);
+        soft.position.set(2.5, -4.2, 5);
+        scene.add(soft);
+        const rim = new THREE.PointLight(0xff8b2d, 2.2, 10);
+        rim.position.set(3.2, -1.8, 1.2);
+        scene.add(rim);
+        const cyan = new THREE.PointLight(0x5eead4, 0.9, 8);
+        cyan.position.set(-2.8, 2.2, 2.0);
+        scene.add(cyan);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.enablePan = false;
+        controls.enableZoom = true;
+        controls.minDistance = 5.6;
+        controls.maxDistance = 13.2;
+        controls.target.set(0.05, 0, 0.05);
+        controls.rotateSpeed = 0.42;
+        controls.zoomSpeed = 0.55;
+        controls.update();
+
+        const loader = new GLTFLoader();
+        loader.load(
+          '/models/highspeed-attenuation-macro.glb',
+          (gltf) => {
+            if (!alive) return;
+            model = gltf.scene;
+            model.name = 'Highspeed_Attenuation_Macro_GLB';
+            model.rotation.set(0, 0, 0);
+            model.position.set(0, 0, 0);
+            model.scale.setScalar(0.96);
+            const dynamic = [];
+            const materials = [];
+            model.traverse((node) => {
+              if (node.isMesh) {
+                node.castShadow = false;
+                node.receiveShadow = false;
+                const list = Array.isArray(node.material) ? node.material : [node.material];
+                list.forEach((mat) => {
+                  if (!mat) return;
+                  mat.side = THREE.DoubleSide;
+                  mat.needsUpdate = true;
+                  materials.push({ node, mat, baseOpacity: mat.opacity ?? 1, name: `${node.name} ${mat.name}`.toLowerCase() });
+                });
+                const lower = node.name.toLowerCase();
+                if (lower.includes('field') || lower.includes('skin') || lower.includes('heat')) dynamic.push(node);
+              }
+            });
+            runtimeRef.current.model = model;
+            runtimeRef.current.dynamic = dynamic;
+            runtimeRef.current.materials = materials;
+            scene.add(model);
+            setStatus('Drag to inspect · scroll to zoom');
+          },
+          undefined,
+          () => {
+            if (alive) setStatus('Blender GLB failed; showing fallback');
+          },
+        );
+
+        const resize = () => {
+          if (!renderer || !camera || !mount) return;
+          const width = Math.max(320, mount.clientWidth || 1);
+          const height = Math.max(330, mount.clientHeight || 1);
+          renderer.setSize(width, height, false);
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+        };
+        resizeObserver = new ResizeObserver(resize);
+        resizeObserver.observe(mount);
+        resize();
+
+        const render = () => {
+          if (!alive || !renderer || !scene || !camera) return;
+          controls?.update();
+          renderer.render(scene, camera);
+          frameId = requestAnimationFrame(render);
+        };
+        render();
+      } catch (error) {
+        if (alive) setStatus('Three.js GLB unavailable; showing fallback');
+      }
+    };
+
+    run();
+    return () => {
+      alive = false;
+      cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect();
+      controls?.dispose?.();
+      disposeObject(model);
+      disposables.forEach((item) => item?.dispose?.());
+      renderer?.dispose?.();
+      renderer?.domElement?.remove?.();
+      runtimeRef.current = { model: null, dynamic: [], materials: [], resize: null, renderer: null };
+    };
+  }, []);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    const freqPressure = Math.min(1, Math.max(0, Math.log10(selectedFreq) / 4));
+    runtime.materials?.forEach(({ mat, baseOpacity, name }) => {
+      if (!mat) return;
+      if (name.includes('skin_glow_surface')) {
+        mat.transparent = true;
+        mat.opacity = skinOpacity;
+        if (mat.emissive) mat.emissive.setRGB(1, 0.34 + freqPressure * 0.22, 0.03);
+        mat.emissiveIntensity = 0.45 + skinShare * 1.75;
+      } else if (name.includes('skin_loss_heat')) {
+        mat.transparent = true;
+        mat.opacity = heatOpacity;
+        if (mat.emissive) mat.emissive.setRGB(1, 0.23 + freqPressure * 0.32, 0.02);
+        mat.emissiveIntensity = 0.8 + freqPressure * 2.4;
+      } else if (name.includes('dielectric_field')) {
+        mat.transparent = true;
+        mat.opacity = fieldOpacity;
+        mat.emissiveIntensity = 0.35 + dielShare * 1.6;
+      } else if (name.includes('cream_dielectric') || name.includes('lowloss_insulation_dielectric')) {
+        mat.transparent = true;
+        mat.opacity = Math.min(0.93, Math.max(0.68, 0.78 + dielShare * 0.12));
+      } else if (name.includes('soft_silver_foil') || name.includes('pair_foil')) {
+        mat.transparent = true;
+        mat.opacity = 0.22 + dielShare * 0.16;
+      } else if (baseOpacity < 1) {
+        mat.opacity = baseOpacity;
+      }
+      mat.needsUpdate = true;
+    });
+  }, [selectedFreq, skinOpacity, heatOpacity, fieldOpacity, skinShare, dielShare]);
+
+  return (
+    <div className="relative min-h-[420px] bg-[#061011] overflow-hidden">
+      <div ref={mountRef} className="absolute inset-0" aria-label="Blender GLB attenuation cable cutaway" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_52%_42%,rgba(94,234,212,0.10),transparent_38%),linear-gradient(180deg,rgba(0,0,0,0.05),rgba(0,0,0,0.38))]" />
+      <div className="absolute left-5 top-5 w-[280px] border border-[#252e33] bg-[#071012]/90 px-4 py-3 backdrop-blur-sm">
+        <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[#5eead4]">Live loss plane</div>
+        <div className="mt-1 flex items-baseline gap-5 font-mono">
+          <span className="text-xl text-[#f0ebe2]">{freqLabel}</span>
+          <span className="text-2xl text-[#fbbf24]">{selectedPoint.total.toFixed(1)} dB</span>
+        </div>
+        <div className="mt-1 text-[10px] text-[#6b7479] font-mono text-right">per 100 m</div>
+      </div>
+      <div className="absolute bottom-5 left-5 grid grid-cols-2 gap-2 text-[10px] font-mono">
+        <div className="min-w-[190px] border border-[#252e33] bg-[#071012]/85 px-3 py-2">
+          <div className="uppercase tracking-wider text-[#6b7479]">dielectric</div>
+          <div className="mt-1 text-[#f0ebe2]">{dielectricName}</div>
+        </div>
+        <div className="min-w-[150px] border border-[#252e33] bg-[#071012]/85 px-3 py-2">
+          <div className="uppercase tracking-wider text-[#6b7479]">tanδ</div>
+          <div className="mt-1 text-[#fbbf24]">{(tand * 10000).toFixed(1)}e-4</div>
+        </div>
+      </div>
+      <div className="absolute bottom-5 right-5 border border-[#252e33] bg-[#071012]/85 px-3 py-2 text-[10px] font-mono">
+        <div className="uppercase tracking-wider text-[#6b7479]">crossover · Ø</div>
+        <div className="mt-1 text-[#fbbf24]">{crossoverLabel} <span className="text-[#5eead4]">{d.toFixed(3)} mm</span></div>
+      </div>
+      <div className="absolute right-5 top-5 border border-[#384249] bg-[#071012]/70 px-3 py-2 text-[10px] font-mono uppercase tracking-wider text-[#a7b0b6]">
+        {status}
+      </div>
+      {status.includes('fallback') && (
+        <div className="absolute inset-0">
+          <AttenTwinFallbackScene d={d} er={er} tand={tand} selectedFreq={selectedFreq} selectedPoint={selectedPoint} crossover={crossover} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AttenTwinFallbackScene({ d, er, tand, selectedFreq, selectedPoint, crossover }) {
   const radiusUm = (d * 1000) / 2;
   const skinRatio = Math.max(0.015, Math.min(0.55, selectedPoint.skinDepthUm / radiusUm));
   const annulus = 4 + skinRatio * 36;
@@ -9345,7 +9698,7 @@ export default function CableApp() {
       {section !== 'recipe' && <TopNav active={section} onChange={setSection} />}
       {section !== 'recipe' && section !== 'home' && <TabIntro section={section} />}
 
-      <main className="max-w-6xl mx-auto px-4 md:px-12 py-12">
+      <main className={`${section === 'atten' ? 'max-w-[1780px] px-4 md:px-8' : 'max-w-6xl px-4 md:px-12'} mx-auto py-12`}>
         {section === 'recipe' && <BuildRecipePage product={recipeProduct} onBack={closeRecipe} />}
         {section === 'home' && <HomeView setSection={setSection} />}
         {section === 'progression' && <ProgressionView />}
