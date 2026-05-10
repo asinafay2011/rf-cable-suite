@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, Layers, RotateCcw, ShieldCheck, Zap } from 'lucide-react'
+import { Activity, Layers, Play, Plus, RotateCcw, ShieldCheck, Trash2, Zap } from 'lucide-react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 const C = {
@@ -31,6 +31,11 @@ const PRESETS = {
     ptfeWidth: 6.0,
     ptfeOverlap: 50,
     ptfeDensity: 0.78,
+    ptfeStack: [
+      { passes: 4, mil: 2.0, width: 6.0, overlap: 50, density: 0.78, direction: 'Z' },
+      { passes: 3, mil: 1.5, width: 4.8, overlap: 54, density: 0.72, direction: 'S' },
+      { passes: 2, mil: 1.0, width: 3.2, overlap: 45, density: 0.86, direction: 'Z' },
+    ],
     suckout: 6,
     spiralWidth: 1.0,
     spiralGap: 12,
@@ -51,6 +56,11 @@ const PRESETS = {
     ptfeWidth: 7.2,
     ptfeOverlap: 47,
     ptfeDensity: 0.72,
+    ptfeStack: [
+      { passes: 4, mil: 1.5, width: 7.2, overlap: 47, density: 0.70, direction: 'Z' },
+      { passes: 3, mil: 1.2, width: 5.6, overlap: 53, density: 0.72, direction: 'S' },
+      { passes: 3, mil: 1.0, width: 3.8, overlap: 42, density: 0.75, direction: 'Z' },
+    ],
     suckout: 2,
     spiralWidth: 0.9,
     spiralGap: 8,
@@ -71,6 +81,11 @@ const PRESETS = {
     ptfeWidth: 6.5,
     ptfeOverlap: 55,
     ptfeDensity: 0.86,
+    ptfeStack: [
+      { passes: 3, mil: 2.5, width: 6.5, overlap: 55, density: 0.86, direction: 'Z' },
+      { passes: 3, mil: 2.0, width: 5.0, overlap: 58, density: 0.86, direction: 'S' },
+      { passes: 2, mil: 1.5, width: 3.6, overlap: 50, density: 0.92, direction: 'Z' },
+    ],
     suckout: 9,
     spiralWidth: 1.4,
     spiralGap: 6,
@@ -133,9 +148,45 @@ function overlapToPct(value) {
   return 50
 }
 
-function useRfStackModel() {
+function makePtfeId() {
+  return `ptfe-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+}
+
+function makePresetStack(preset) {
+  const source = Array.isArray(preset.ptfeStack) && preset.ptfeStack.length
+    ? preset.ptfeStack
+    : [{ passes: preset.ptfeLayers || 1, mil: preset.ptfeMil || 2, width: preset.ptfeWidth || 6, overlap: preset.ptfeOverlap || 50, density: preset.ptfeDensity || 0.78, direction: 'Z' }]
+  return source.map((layer, index) => ({
+    id: makePtfeId(),
+    passes: clamp(Math.round(layer.passes || 1), 1, 12),
+    mil: clamp(Number(layer.mil ?? layer.ptfeMil ?? preset.ptfeMil ?? 2), 0.5, 5),
+    width: clamp(Number(layer.width ?? preset.ptfeWidth ?? 6), 2, 14),
+    overlap: clamp(Number(layer.overlap ?? preset.ptfeOverlap ?? 50), 0, 80),
+    density: clamp(Number(layer.density ?? preset.ptfeDensity ?? 0.78), 0.45, 1.65),
+    direction: layer.direction === 'S' || index % 2 ? 'S' : 'Z',
+  }))
+}
+
+function stackSummary(stack, suckout = 0) {
+  const totalPasses = stack.reduce((sum, layer) => sum + Math.max(1, Number(layer.passes) || 1), 0)
+  const avg = (key, fallback) => {
+    if (!stack.length) return fallback
+    return stack.reduce((sum, layer) => sum + (Number(layer[key]) || fallback) * Math.max(1, Number(layer.passes) || 1), 0) / Math.max(1, totalPasses)
+  }
+  return {
+    totalPasses,
+    avgMil: avg('mil', 2),
+    avgWidth: avg('width', 6),
+    avgOverlap: avg('overlap', 50),
+    avgDensity: avg('density', 0.78),
+    tension: 1 - suckout / 180,
+  }
+}
+
+function useRfStackModel(config) {
   const mountRef = useRef(null)
   const [status, setStatus] = useState('Loading macro GLB')
+  const runtimeRef = useRef({ rebuildDynamic: null, config: null })
 
   useEffect(() => {
     let alive = true
@@ -144,6 +195,9 @@ function useRfStackModel() {
     let scene = null
     let camera = null
     let modelGroup = null
+    let dynamicGroup = null
+    let lastAnimationToken = null
+    let animationStart = 0
     let resizeObserver = null
     const disposables = []
     const pointer = { down: false, x: 0, y: 0 }
@@ -186,6 +240,141 @@ function useRfStackModel() {
         modelGroup = new THREE.Group()
         modelGroup.rotation.set(-0.15, 0.18, 0.02)
         scene.add(modelGroup)
+
+        const makeRibbonMesh = ({ name, x0, x1, radius, turns, phase, widthAngle, handedness, material, progress = 1 }) => {
+          const p = clamp(progress, 0.02, 1)
+          const segments = Math.max(8, Math.round(170 * p))
+          const verts = []
+          const faces = []
+          for (let i = 0; i <= segments; i++) {
+            const t = (i / segments) * p
+            const x = x0 + (x1 - x0) * t
+            const center = phase + handedness * turns * Math.PI * 2 * t
+            const lift = 1 + 0.012 * Math.sin(t * Math.PI * 2 * 7 + phase)
+            for (const edge of [-0.5, 0.5]) {
+              const a = center + edge * widthAngle
+              verts.push(x, radius * lift * Math.cos(a), radius * lift * Math.sin(a))
+            }
+          }
+          for (let i = 0; i < segments; i++) {
+            const row = i * 2
+            faces.push(row, row + 1, row + 3)
+            faces.push(row, row + 3, row + 2)
+          }
+          const geometry = new THREE.BufferGeometry()
+          geometry.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+          geometry.setIndex(faces)
+          geometry.computeVertexNormals()
+          const mesh = new THREE.Mesh(geometry, material)
+          mesh.name = name
+          mesh.renderOrder = 4
+          return mesh
+        }
+
+        const makeBraidStrand = ({ name, x0, x1, radius, turns, phase, handedness, material, strandRadius, carrierCount }) => {
+          const points = []
+          for (let i = 0; i < 72; i++) {
+            const t = i / 71
+            const x = x0 + (x1 - x0) * t
+            const weave = 0.5 + 0.5 * Math.sin((t * carrierCount * 2 + phase) * Math.PI * 2)
+            const angle = phase + handedness * turns * Math.PI * 2 * t
+            const r = radius + strandRadius * (1.2 + weave * 2.2)
+            points.push(new THREE.Vector3(x, r * Math.cos(angle), r * Math.sin(angle)))
+          }
+          const curve = new THREE.CatmullRomCurve3(points)
+          const geometry = new THREE.TubeGeometry(curve, 64, strandRadius, 5, false)
+          const mesh = new THREE.Mesh(geometry, material)
+          mesh.name = name
+          mesh.renderOrder = 5
+          return mesh
+        }
+
+        const rebuildDynamic = (nextConfig = runtimeRef.current.config || {}, force = false) => {
+          if (!modelGroup) return
+          const animationChanged = lastAnimationToken !== nextConfig.animateToken
+          if (animationChanged) {
+            lastAnimationToken = nextConfig.animateToken
+            animationStart = performance.now()
+          }
+          const elapsed = nextConfig.animateToken ? (performance.now() - animationStart) / 1000 : 999
+          const signature = JSON.stringify({
+            ptfeStack: nextConfig.ptfeStack,
+            braidCoverage: nextConfig.braidCoverage,
+            animateToken: nextConfig.animateToken,
+            frame: elapsed < 3.2 ? Math.floor(elapsed * 30) : 'done',
+          })
+          if (!force && runtimeRef.current.lastSignature === signature) return
+          runtimeRef.current.lastSignature = signature
+
+          if (dynamicGroup) {
+            modelGroup.remove(dynamicGroup)
+            disposeObject(dynamicGroup)
+          }
+          dynamicGroup = new THREE.Group()
+          dynamicGroup.name = 'live PTFE and braid coverage overlay'
+
+          const ptfeA = new THREE.MeshStandardMaterial({ name: 'live PTFE tape warm', color: 0xfff1bd, roughness: 0.34, metalness: 0.02, transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: true })
+          const ptfeB = new THREE.MeshStandardMaterial({ name: 'live PTFE tape cool', color: 0xf6e7bd, roughness: 0.42, metalness: 0.02, transparent: true, opacity: 0.68, side: THREE.DoubleSide, depthWrite: true })
+          const braidBright = new THREE.MeshStandardMaterial({ name: 'live braid bright carrier', color: 0xd8d2bd, roughness: 0.24, metalness: 0.82 })
+          const braidDark = new THREE.MeshStandardMaterial({ name: 'live braid shadow carrier', color: 0x807a69, roughness: 0.36, metalness: 0.72 })
+
+          const stack = Array.isArray(nextConfig.ptfeStack) ? nextConfig.ptfeStack : []
+          stack.forEach((layer, layerIndex) => {
+            const passes = clamp(Math.round(layer.passes || 1), 1, 12)
+            const passCount = Math.min(4, passes)
+            const width = clamp(Number(layer.width) || 6, 2, 14)
+            const direction = layer.direction === 'S' ? 'S' : 'Z'
+            const handedness = direction === 'Z' ? 1 : -1
+            const widthAngle = clamp(width / 42, 0.055, 0.22)
+            const turns = clamp(12.5 / width + 2.2 + passes * 0.06, 2.8, 8.2)
+            const layerProgress = elapsed < 3.2 ? clamp((elapsed - layerIndex * 0.42) / 0.95, 0, 1) : 1
+            for (let pass = 0; pass < passCount; pass++) {
+              const phase = layerIndex * 0.9 + pass * Math.PI * 0.54
+              const radius = 0.352 + layerIndex * 0.035 + pass * 0.006
+              const mesh = makeRibbonMesh({
+                name: `live PTFE ${direction} wrap L${layerIndex + 1} P${pass + 1}`,
+                x0: -0.52,
+                x1: 1.62,
+                radius,
+                turns,
+                phase,
+                widthAngle,
+                handedness,
+                material: pass % 2 ? ptfeB : ptfeA,
+                progress: layerProgress,
+              })
+              dynamicGroup.add(mesh)
+            }
+          })
+
+          const coverage = clamp(Number(nextConfig.braidCoverage) || 92, 65, 99)
+          let carrierCount = Math.round(10 + ((coverage - 65) / 34) * 14)
+          if (carrierCount % 2) carrierCount += 1
+          const strandRadius = 0.0048 + ((coverage - 65) / 34) * 0.0045
+          const turns = 4.2 + ((coverage - 65) / 34) * 1.9
+          for (const handedness of [1, -1]) {
+            const material = handedness === 1 ? braidBright : braidDark
+            for (let carrier = 0; carrier < carrierCount; carrier++) {
+              const phase = (Math.PI * 2 * carrier) / carrierCount + (handedness === 1 ? 0.15 : 0.52)
+              dynamicGroup.add(makeBraidStrand({
+                name: `live braid ${coverage.toFixed(0)}pct ${handedness > 0 ? 'Z' : 'S'} carrier ${carrier + 1}`,
+                x0: -1.28,
+                x1: 0.34,
+                radius: 0.585,
+                turns,
+                phase,
+                handedness,
+                material,
+                strandRadius,
+                carrierCount,
+              }))
+            }
+          }
+
+          modelGroup.add(dynamicGroup)
+        }
+        runtimeRef.current.rebuildDynamic = rebuildDynamic
+        rebuildDynamic(runtimeRef.current.config || config || {}, true)
 
         camera = new THREE.PerspectiveCamera(32, 1, 0.01, 120)
         camera.position.set(0, 0.18, 6.35)
@@ -274,6 +463,10 @@ function useRfStackModel() {
         const animate = () => {
           if (!alive || !renderer || !scene || !camera) return
           if (modelGroup && !pointer.down) modelGroup.rotation.y += 0.0015
+          const liveConfig = runtimeRef.current.config
+          if (liveConfig?.animateToken && performance.now() - animationStart < 3300) {
+            rebuildDynamic(liveConfig)
+          }
           renderer.render(scene, camera)
           frameId = requestAnimationFrame(animate)
         }
@@ -295,6 +488,11 @@ function useRfStackModel() {
       renderer?.domElement?.remove?.()
     }
   }, [])
+
+  useEffect(() => {
+    runtimeRef.current.config = config
+    runtimeRef.current.rebuildDynamic?.(config, true)
+  }, [config])
 
   return { mountRef, status }
 }
@@ -332,7 +530,7 @@ function Metric({ label, value, sub, accent = C.teal }) {
 function LayerRail({ computed }) {
   const states = [
     ['01', 'Conductor', `${fmt(computed.conductorOD, 2)} mm Cu`, C.copperHi],
-    ['02', 'PTFE tape', `${computed.ptfeLayers}x ${fmt(computed.ptfeMil, 1)} mil`, '#fff2c4'],
+    ['02', 'PTFE stack', `${computed.ptfeLayerCount} layers · ${computed.ptfeLayers} passes`, '#fff2c4'],
     ['03', 'SPC spiral', `${computed.spiralBobbins} bobbins · ${fmt(computed.spiralCoverage, 0)}%`, C.foil],
     ['04', 'SPC helical', `${computed.helicalBobbins} bobbins · ${fmt(computed.helicalCoverage, 0)}%`, C.sky],
     ['05', 'Foil shield', `${fmt(computed.foilCoverage, 0)}% seam`, C.foil],
@@ -342,7 +540,7 @@ function LayerRail({ computed }) {
   return (
     <div style={S.layerRail}>
       {states.map(([num, label, sub, color]) => (
-        <div key={num} style={{ ...S.layerChip, borderColor: `${color}55` }}>
+        <div key={num} style={{ ...S.layerChip, border: `1px solid ${color}55` }}>
           <span style={S.layerNum}>{num}</span>
           <span style={{ ...S.layerDot, background: color }} />
           <span style={S.layerText}>
@@ -355,10 +553,52 @@ function LayerRail({ computed }) {
   )
 }
 
+function PTFELayerCard({ layer, index, canRemove, onUpdate, onRemove }) {
+  const direction = layer.direction === 'S' ? 'S' : 'Z'
+  const accent = direction === 'Z' ? C.amber : C.sky
+  return (
+    <div style={{ ...S.ptfeLayerCard, border: `1px solid ${accent}66` }}>
+      <div style={S.ptfeLayerTop}>
+        <div style={S.ptfeLayerTitle}>
+          <span style={{ ...S.layerDot, background: accent }} />
+          <strong>PTFE L{index + 1}</strong>
+          <small>{direction}-wrap · {fmt(layer.width, 1)} mm tape</small>
+        </div>
+        <div style={S.ptfeLayerActions}>
+          <button
+            type="button"
+            onClick={() => onUpdate({ direction: direction === 'Z' ? 'S' : 'Z' })}
+            style={{ ...S.directionBtn, border: `1px solid ${accent}88`, color: accent }}
+          >
+            {direction}
+          </button>
+          <button type="button" onClick={onRemove} disabled={!canRemove} style={{ ...S.iconBtn, opacity: canRemove ? 1 : 0.35 }}>
+            <Trash2 size={12} />
+          </button>
+        </div>
+      </div>
+      <div style={S.ptfeLayerGrid}>
+        <Slider label="Width" value={layer.width} setValue={(value) => onUpdate({ width: value })} min={2} max={14} step={0.1} unit=" mm" accent={accent} />
+        <Slider label="Passes" value={layer.passes} setValue={(value) => onUpdate({ passes: Math.round(value) })} min={1} max={12} step={1} accent={accent} />
+        <Slider label="Mil" value={layer.mil} setValue={(value) => onUpdate({ mil: value })} min={0.5} max={5} step={0.1} unit=" mil" accent="#fff2c4" />
+        <Slider label="Overlap" value={layer.overlap} setValue={(value) => onUpdate({ overlap: value })} min={0} max={80} step={1} unit="%" accent={C.amber} />
+        <Slider label="Density" value={layer.density} setValue={(value) => onUpdate({ density: value })} min={0.45} max={1.65} step={0.01} unit=" g/cc" accent={C.sky} />
+      </div>
+    </div>
+  )
+}
+
 export default function RFStackLab() {
   const [params, setParams] = useState(PRESETS.phaseStable)
+  const [ptfeStack, setPtfeStack] = useState(() => makePresetStack(PRESETS.phaseStable))
   const [activePreset, setActivePreset] = useState('phaseStable')
-  const { mountRef, status } = useRfStackModel()
+  const [animationToken, setAnimationToken] = useState(1)
+  const modelConfig = useMemo(() => ({
+    ptfeStack,
+    braidCoverage: params.braidCoverage,
+    animateToken: animationToken,
+  }), [animationToken, params.braidCoverage, ptfeStack])
+  const { mountRef, status } = useRfStackModel(modelConfig)
 
   const setParam = (key) => (value) => {
     setParams((current) => ({ ...current, [key]: value }))
@@ -368,6 +608,40 @@ export default function RFStackLab() {
   const loadPreset = (key) => {
     setActivePreset(key)
     setParams(PRESETS[key])
+    setPtfeStack(makePresetStack(PRESETS[key]))
+    setAnimationToken((token) => token + 1)
+  }
+
+  const updatePtfeLayer = (id, patch) => {
+    setPtfeStack((current) => current.map((layer) => layer.id === id ? { ...layer, ...patch } : layer))
+    setActivePreset('')
+  }
+
+  const addPtfeLayer = (direction) => {
+    setPtfeStack((current) => {
+      const last = current[current.length - 1] || makePresetStack(PRESETS.phaseStable)[0]
+      const nextDirection = direction || (last.direction === 'Z' ? 'S' : 'Z')
+      return [
+        ...current,
+        {
+          id: makePtfeId(),
+          passes: 1,
+          mil: clamp(last.mil * 0.86, 0.5, 5),
+          width: clamp(last.width - 1.2, 2, 14),
+          overlap: clamp(last.overlap + (nextDirection === 'S' ? 4 : -3), 0, 80),
+          density: clamp(last.density + 0.02, 0.45, 1.65),
+          direction: nextDirection,
+        },
+      ].slice(0, 8)
+    })
+    setActivePreset('')
+    setAnimationToken((token) => token + 1)
+  }
+
+  const removePtfeLayer = (id) => {
+    setPtfeStack((current) => current.length <= 1 ? current : current.filter((layer) => layer.id !== id))
+    setActivePreset('')
+    setAnimationToken((token) => token + 1)
   }
 
   useEffect(() => {
@@ -381,6 +655,18 @@ export default function RFStackLab() {
       const avgDensity = layers.length
         ? layers.reduce((sum, layer) => sum + (Number(layer.density) || 0.78) * Math.max(1, Number(layer.passes) || 1), 0) / Math.max(1, totalPasses)
         : 0.78
+      if (layers.length) {
+        setPtfeStack(layers.map((layer, index) => ({
+          id: makePtfeId(),
+          passes: clamp(Math.round(Number(layer.passes) || 1), 1, 12),
+          mil: clamp((Number(layer.tape_thickness_mm) || 0.05) / MIL_TO_MM, 0.5, 5),
+          width: clamp(Number(layer.tape_width_mm) || 6.35, 2, 14),
+          overlap: clamp(overlapToPct(layer.overlap), 0, 80),
+          density: clamp(Number(layer.density) || avgDensity || 0.78, 0.45, 1.65),
+          direction: index % 2 ? 'S' : 'Z',
+        })))
+        setAnimationToken((token) => token + 1)
+      }
       setParams((current) => ({
         ...current,
         conductorOD: Number(preset.conductor_od_mm) || current.conductorOD,
@@ -397,20 +683,41 @@ export default function RFStackLab() {
   }, [])
 
   const computed = useMemo(() => {
-    const ptfeThickness = params.ptfeMil * MIL_TO_MM
-    const overlapBuild = 1 + clamp(params.ptfeOverlap / 100, 0, 0.9)
+    const summary = stackSummary(ptfeStack, params.suckout)
     const tension = 1 - params.suckout / 180
-    const dielectricWall = params.ptfeLayers * ptfeThickness * overlapBuild * tension
+    const layerBuilds = ptfeStack.map((layer) => {
+      const passes = Math.max(1, Number(layer.passes) || 1)
+      const mil = Number(layer.mil) || 2
+      const overlap = Number(layer.overlap) || 0
+      const radial = passes * mil * MIL_TO_MM * (1 + clamp(overlap / 100, 0, 0.9)) * tension
+      return { ...layer, passes, mil, overlap, radial, eps: densityToEps(Number(layer.density) || summary.avgDensity) }
+    })
+    const dielectricWall = layerBuilds.reduce((sum, layer) => sum + layer.radial, 0)
     const dielectricOD = params.conductorOD + 2 * dielectricWall
-    const eps = densityToEps(params.ptfeDensity) * (1 + params.suckout * 0.0018)
+    const epsBase = layerBuilds.length && dielectricWall > 0
+      ? layerBuilds.reduce((sum, layer) => sum + layer.eps * layer.radial, 0) / dielectricWall
+      : densityToEps(summary.avgDensity)
+    const eps = epsBase * (1 + params.suckout * 0.0018)
     const vp = 1 / Math.sqrt(eps)
     const z0 = z0From(params.conductorOD, dielectricOD, eps)
-    const pitchTape = pitchFrom(params.ptfeWidth, params.ptfeOverlap, dielectricOD, 1)
+    const ptfeNotches = layerBuilds.map((layer, index) => {
+      const layerOD = params.conductorOD + 2 * layerBuilds.slice(0, index + 1).reduce((sum, item) => sum + item.radial, 0)
+      const pitch = pitchFrom(layer.width, layer.overlap, layerOD, 1)
+      return {
+        id: layer.id,
+        label: `L${index + 1} ${layer.direction}`,
+        pitch,
+        freq: notchGHz(pitch, vp),
+        width: layer.width,
+        direction: layer.direction,
+      }
+    })
+    const pitchTape = ptfeNotches[0]?.pitch || pitchFrom(summary.avgWidth, summary.avgOverlap, dielectricOD, 1)
+    const tapeNotch = ptfeNotches.length ? Math.min(...ptfeNotches.map((item) => item.freq)) : notchGHz(pitchTape, vp)
     const spiralGap = -Math.abs(params.spiralGap)
     const helicalGap = -Math.abs(params.helicalGap)
     const pitchSpiral = pitchFrom(params.spiralWidth, spiralGap, dielectricOD + 0.25, params.spiralBobbins)
     const pitchHelical = pitchFrom(params.helicalWidth, helicalGap, dielectricOD + 0.48, params.helicalBobbins)
-    const tapeNotch = notchGHz(pitchTape, vp)
     const spiralNotch = notchGHz(pitchSpiral, vp)
     const helicalNotch = notchGHz(pitchHelical, vp)
     const circ = Math.PI * (dielectricOD + 0.3)
@@ -422,11 +729,21 @@ export default function RFStackLab() {
     const zError = Math.abs(z0 - 50)
     const worstRl = clamp(34 - zError * 1.7 - params.suckout * 0.26 - Math.max(0, 92 - shieldCoverage) * 0.08, 6, 42)
     const vswr = rlToVswr(worstRl)
-    const baseLoss = 0.16 * Math.sqrt(params.freqGHz) + 0.018 * params.freqGHz + (params.ptfeDensity - 0.7) * 0.15
-    const suckoutDepth = params.suckout * 0.24 + Math.max(0, 50 - params.ptfeOverlap) * 0.04
+    const baseLoss = 0.16 * Math.sqrt(params.freqGHz) + 0.018 * params.freqGHz + (summary.avgDensity - 0.7) * 0.15
+    const sharedPitchCount = ptfeNotches.reduce((count, notch, index) => {
+      return count + ptfeNotches.slice(index + 1).filter((other) => Math.abs(other.freq - notch.freq) < notch.freq * 0.05).length
+    }, 0)
+    const suckoutDepth = params.suckout * 0.20 + Math.max(0, 50 - summary.avgOverlap) * 0.035 + sharedPitchCount * 0.55
     return {
       ...params,
-      ptfeThickness,
+      ptfeThickness: summary.avgMil * MIL_TO_MM,
+      ptfeLayers: summary.totalPasses,
+      ptfeMil: summary.avgMil,
+      ptfeWidth: summary.avgWidth,
+      ptfeOverlap: summary.avgOverlap,
+      ptfeDensity: summary.avgDensity,
+      ptfeLayerCount: ptfeStack.length,
+      ptfeNotches,
       dielectricOD,
       eps,
       vp,
@@ -447,7 +764,7 @@ export default function RFStackLab() {
       baseLoss,
       suckoutDepth,
     }
-  }, [params])
+  }, [params, ptfeStack])
 
   const traces = useMemo(() => {
     const rl = []
@@ -456,10 +773,11 @@ export default function RFStackLab() {
     for (let i = 0; i < 180; i++) {
       const t = i / 179
       const f = 0.2 * (params.freqGHz * 2 / 0.2) ** t
-      const notch = [computed.tapeNotch, computed.spiralNotch, computed.helicalNotch].reduce((sum, nf, index) => {
+      const notchSources = [...computed.ptfeNotches.map((item) => item.freq), computed.spiralNotch, computed.helicalNotch]
+      const notch = notchSources.reduce((sum, nf, index) => {
         const sigma = Math.max(0.08, nf * (index ? 0.045 : 0.035))
         const dx = (f - nf) / sigma
-        return sum + (computed.suckoutDepth / (index + 1.2)) * Math.exp(-dx * dx)
+        return sum + (computed.suckoutDepth / (index + 1.25)) * Math.exp(-dx * dx)
       }, 0)
       const loss = computed.baseLoss * Math.sqrt(f / Math.max(0.2, params.freqGHz)) + notch
       const localRl = clamp(computed.worstRl - notch * 1.2 + 2.5 * Math.sin(t * Math.PI), 4, 44)
@@ -532,13 +850,31 @@ export default function RFStackLab() {
 
           <div style={S.controlSections}>
             <div style={S.controlBlock}>
-              <div style={S.blockTitle}><Zap size={13} /> Conductor + PTFE</div>
+              <div style={S.blockTitle}><Zap size={13} /> Conductor + PTFE stack</div>
               <Slider label="Conductor OD" value={params.conductorOD} setValue={setParam('conductorOD')} min={0.2} max={2.2} step={0.01} unit=" mm" accent={C.copperHi} />
-              <Slider label="PTFE layers" value={params.ptfeLayers} setValue={setParam('ptfeLayers')} min={1} max={16} step={1} accent="#fff2c4" />
-              <Slider label="PTFE tape" value={params.ptfeMil} setValue={setParam('ptfeMil')} min={0.5} max={5} step={0.1} unit=" mil" accent="#fff2c4" />
-              <Slider label="PTFE width" value={params.ptfeWidth} setValue={setParam('ptfeWidth')} min={2} max={14} step={0.1} unit=" mm" accent="#fff2c4" />
-              <Slider label="PTFE density" value={params.ptfeDensity} setValue={setParam('ptfeDensity')} min={0.45} max={1.65} step={0.01} unit=" g/cc" accent={C.sky} />
-              <Slider label="Tape overlap" value={params.ptfeOverlap} setValue={setParam('ptfeOverlap')} min={0} max={80} step={1} unit="%" accent={C.amber} />
+              <div style={S.ptfeToolbar}>
+                <button type="button" style={S.toolBtn} onClick={() => addPtfeLayer('Z')}>
+                  <Plus size={13} /> Add Z
+                </button>
+                <button type="button" style={S.toolBtn} onClick={() => addPtfeLayer('S')}>
+                  <Plus size={13} /> Add S
+                </button>
+                <button type="button" style={{ ...S.toolBtn, color: C.teal, border: `1px solid ${C.teal}66` }} onClick={() => setAnimationToken((token) => token + 1)}>
+                  <Play size={13} /> Play wrap
+                </button>
+              </div>
+              <div style={S.ptfeStackList}>
+                {ptfeStack.map((layer, index) => (
+                  <PTFELayerCard
+                    key={layer.id}
+                    layer={layer}
+                    index={index}
+                    canRemove={ptfeStack.length > 1}
+                    onUpdate={(patch) => updatePtfeLayer(layer.id, patch)}
+                    onRemove={() => removePtfeLayer(layer.id)}
+                  />
+                ))}
+              </div>
               <Slider label="Tape suckout" value={params.suckout} setValue={setParam('suckout')} min={0} max={24} step={1} unit="%" accent={params.suckout > 12 ? C.red : C.amber} />
             </div>
 
@@ -649,11 +985,21 @@ const S = {
   layerText: { minWidth: 0, display: 'grid', gap: 2 },
   presets: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 },
   presetBtn: { background: '#070b0c', border: `1px solid ${C.border}`, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, padding: '8px 7px', cursor: 'pointer' },
-  presetBtnActive: { borderColor: C.amber, color: C.amber, background: 'rgba(251,191,36,0.11)' },
+  presetBtnActive: { border: `1px solid ${C.amber}`, color: C.amber, background: 'rgba(251,191,36,0.11)' },
   resetBtn: { display: 'inline-flex', alignItems: 'center', gap: 6, background: '#070b0c', border: `1px solid ${C.borderHi}`, color: C.dim, padding: '7px 10px', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', cursor: 'pointer' },
   controlSections: { display: 'grid', gap: 12 },
   controlBlock: { border: `1px solid rgba(167,176,182,0.13)`, background: '#080d0f', padding: 12, display: 'grid', gap: 11 },
   blockTitle: { display: 'flex', alignItems: 'center', gap: 8, color: C.amber, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 2 },
+  ptfeToolbar: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 },
+  toolBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 32, background: '#070b0c', border: `1px solid ${C.borderHi}`, color: C.amber, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer' },
+  ptfeStackList: { display: 'grid', gap: 9 },
+  ptfeLayerCard: { border: '1px solid', background: 'linear-gradient(135deg, rgba(255,242,196,0.06), rgba(7,11,12,0.98))', padding: 10, display: 'grid', gap: 9 },
+  ptfeLayerTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  ptfeLayerTitle: { display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, color: C.text, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
+  ptfeLayerActions: { display: 'flex', gap: 6, alignItems: 'center', flex: '0 0 auto' },
+  directionBtn: { minWidth: 34, minHeight: 28, background: '#070b0c', border: '1px solid', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 11, cursor: 'pointer' },
+  iconBtn: { width: 30, height: 28, display: 'grid', placeItems: 'center', background: '#070b0c', border: `1px solid ${C.border}`, color: C.dim, cursor: 'pointer' },
+  ptfeLayerGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 9 },
   slider: { display: 'grid', gap: 6, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.3 },
   sliderTop: { display: 'flex', justifyContent: 'space-between', gap: 8 },
   metrics: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 },
