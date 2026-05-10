@@ -666,14 +666,14 @@ function useRfStackModel(config) {
               return
             }
 
-            const width = clamp(Number(layer.width) || 1.2, 0.35, 3.2)
+            const width = clamp(Number(layer.width) || 1.2, 0.35, 10)
             const handedness = (layer.direction || (type === 'flatwire' ? 'S' : 'Z')) === 'S' ? -1 : 1
 
             if (type === 'spiral') {
               const bobbins = clamp(Math.round(Number(layer.bobbins) || 8), 1, 16)
               const pitch = clamp(Number(layer.pitch) || spiralPitchFromGap(Number(layer.gap) || 10, width), 1, 140)
               const gap = clamp(Number(layer.gap) || 10, 0, 28)
-              const tapeWidth = clamp(width * 0.012, 0.012, 0.15)
+              const tapeWidth = clamp(width * 0.032, 0.018, 0.36)
               const turns = clamp(((x1 - x0) * 13) / Math.max(1, pitch), 1.2, 18)
               for (let bobbin = 0; bobbin < bobbins; bobbin++) {
                 const phase = (Math.PI * 2 * bobbin) / bobbins + shieldIndex * 0.33
@@ -707,7 +707,7 @@ function useRfStackModel(config) {
             } else {
               const overlap = clamp(Number(layer.overlap) || 45, 0, 80)
               const pitch = clamp(Number(layer.pitch) || helicalPitchFromOverlap(overlap, width), 0.8, 140)
-              const tapeWidth = clamp(width * 0.045, 0.055, 0.44)
+              const tapeWidth = clamp(width * 0.072, 0.055, 0.78)
               const turns = clamp(((x1 - x0) * 13) / Math.max(0.8, pitch), 1.1, 22)
               dynamicGroup.add(makeRibbonMesh({
                 name: 'live SPC flatwire helical overlap wrap',
@@ -1034,7 +1034,7 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
               value={layer.width}
               setValue={(value) => {
                 const nextGap = spiralGapFromPitch(spiralPitch, value)
-                onUpdate({ width: value, gap: nextGap, pitch: spiralPitchFromGap(nextGap, value) })
+                onUpdate({ width: value, gap: nextGap, pitch: spiralPitch })
               }}
               min={0.35}
               max={10}
@@ -1070,7 +1070,7 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
               value={layer.width}
               setValue={(value) => {
                 const nextOverlap = helicalOverlapFromPitch(helicalPitch, value)
-                onUpdate({ width: value, overlap: nextOverlap, pitch: helicalPitchFromOverlap(nextOverlap, value) })
+                onUpdate({ width: value, overlap: nextOverlap, pitch: helicalPitch })
               }}
               min={0.35}
               max={10}
