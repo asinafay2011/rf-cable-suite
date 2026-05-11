@@ -9377,26 +9377,6 @@ function SignalFlow({ cable }) {
   const margin = rxPower - rxSens;
   const ok = margin > 0;
 
-  const W = 720, H = 150;
-  const cableX1 = 80, cableX2 = W - 80;
-  const cableY = H / 2;
-  const pulseDur = Math.max(1.5, Math.min(4, length / 3));
-
-  const Pulse = ({ delay }) => (
-    <g>
-      <circle cy={cableY} r="9" fill="#fbbf24">
-        <animate attributeName="cx" values={`${cableX1};${cableX2}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
-        <animate attributeName="r" values={`10;${ok ? 4 : 2}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
-        <animate attributeName="opacity" values={`0.95;${ok ? 0.35 : 0.1}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
-      </circle>
-      <circle cy={cableY} r="14" fill="none" stroke="#fbbf24" strokeWidth="1" opacity="0.5">
-        <animate attributeName="cx" values={`${cableX1};${cableX2}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
-        <animate attributeName="r" values={`16;${ok ? 6 : 3}`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
-        <animate attributeName="opacity" values={`0.6;0`} dur={`${pulseDur}s`} repeatCount="indefinite" begin={`${delay}s`} />
-      </circle>
-    </g>
-  );
-
   const Ctrl = ({ label, val, set, min, max, step = 1, unit }) => (
     <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1, minWidth: 110 }}>
       <div style={{ fontSize: 9, letterSpacing: 1, color: "#a8a29e", textTransform: "uppercase", display: "flex", justifyContent: "space-between" }}>
@@ -9415,34 +9395,283 @@ function SignalFlow({ cable }) {
         <Ctrl label="Frequency" val={freq} set={setFreq} min={10} max={Math.round(cable.fMax * 1000)} unit=" MHz" />
         <Ctrl label="RX sensitivity" val={rxSens} set={setRxSens} min={-120} max={-30} unit=" dBm" />
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", background: "rgba(15,10,5,0.35)", borderRadius: 3 }}>
-        <defs>
-          <linearGradient id="cable-grad" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#fbbf24" stopOpacity="0.9" />
-            <stop offset="100%" stopColor="#fbbf24" stopOpacity={ok ? 0.3 : 0.1} />
-          </linearGradient>
-        </defs>
-        <rect x={10} y={cableY - 28} width={70} height={56} fill="#1f1611" stroke="#d97706" strokeWidth="1.5" rx="3" />
-        <text x={45} y={cableY - 10} fontSize="10" fill="#fbbf24" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontWeight="700">TX</text>
-        <text x={45} y={cableY + 5} fontSize="8.5" fill="#fbbf24" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{txPower.toFixed(0)} dBm</text>
-        <text x={45} y={cableY + 18} fontSize="7" fill="#a8a29e" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{(10 ** (txPower / 10)).toFixed(0)} mW</text>
-
-        <line x1={cableX1} y1={cableY} x2={cableX2} y2={cableY} stroke="#2a2520" strokeWidth="10" strokeLinecap="round" />
-        <line x1={cableX1} y1={cableY} x2={cableX2} y2={cableY} stroke="url(#cable-grad)" strokeWidth="4" strokeLinecap="round" />
-
-        <Pulse delay={0} />
-        <Pulse delay={pulseDur * 0.33} />
-        <Pulse delay={pulseDur * 0.66} />
-
-        <rect x={W - 80} y={cableY - 28} width={70} height={56} fill="#1f1611" stroke={ok ? "#34d399" : "#ef4444"} strokeWidth="1.5" rx="3" />
-        <text x={W - 45} y={cableY - 10} fontSize="10" fill={ok ? "#34d399" : "#ef4444"} textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontWeight="700">RX</text>
-        <text x={W - 45} y={cableY + 5} fontSize="8.5" fill={ok ? "#34d399" : "#ef4444"} textAnchor="middle" fontFamily="JetBrains Mono, monospace">{rxPower.toFixed(1)} dBm</text>
-        <text x={W - 45} y={cableY + 18} fontSize="7" fill="#a8a29e" textAnchor="middle" fontFamily="JetBrains Mono, monospace">sens: {rxSens} dBm</text>
-
-        <text x={W / 2} y={cableY - 22} fontSize="9" fill="#a8a29e" textAnchor="middle" fontFamily="JetBrains Mono, monospace">{cable.name} · {length} m · {freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}</text>
-        <text x={W / 2} y={cableY + 28} fontSize="10" fill="#fbbf24" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontWeight="700">Loss: {totalLoss.toFixed(2)} dB ({attenPer100m.toFixed(2)} dB/100m)</text>
-      </svg>
+      <LinkBudgetTheater3D
+        cable={cable}
+        length={length}
+        freq={freq}
+        txPower={txPower}
+        rxPower={rxPower}
+        rxSens={rxSens}
+        attenPer100m={attenPer100m}
+        totalLoss={totalLoss}
+        margin={margin}
+        ok={ok}
+      />
       <PowerSummary txPower={txPower} rxPower={rxPower} totalLoss={totalLoss} margin={margin} cable={cable} length={length} freq={freq} />
+    </div>
+  );
+}
+
+function LinkBudgetTheater3D({ cable, length, freq, txPower, rxPower, rxSens, attenPer100m, totalLoss, margin, ok }) {
+  const mountRef = useRef(null);
+  const metricsRef = useRef({ cable, length, freq, txPower, rxPower, rxSens, attenPer100m, totalLoss, margin, ok });
+  const [status, setStatus] = useState("Loading Blender scene");
+
+  useEffect(() => {
+    metricsRef.current = { cable, length, freq, txPower, rxPower, rxSens, attenPer100m, totalLoss, margin, ok };
+  }, [cable, length, freq, txPower, rxPower, rxSens, attenPer100m, totalLoss, margin, ok]);
+
+  useEffect(() => {
+    let alive = true;
+    let renderer = null;
+    let scene = null;
+    let camera = null;
+    let root = null;
+    let frameId = 0;
+    let resizeObserver = null;
+    const disposables = [];
+    const pulses = [];
+    const pointer = { down: false, x: 0, y: 0, rx: -0.05, ry: 0.02 };
+
+    const disposeMaterial = (material) => {
+      if (!material) return;
+      for (const value of Object.values(material)) {
+        if (value && typeof value === "object" && value.isTexture) value.dispose();
+      }
+      material.dispose?.();
+    };
+
+    const disposeObject = (object) => {
+      object?.traverse?.((node) => {
+        node.geometry?.dispose?.();
+        if (Array.isArray(node.material)) node.material.forEach(disposeMaterial);
+        else disposeMaterial(node.material);
+      });
+    };
+
+    const run = async () => {
+      try {
+        const [THREE, { GLTFLoader }] = await Promise.all([
+          import("three"),
+          import("three/examples/jsm/loaders/GLTFLoader.js"),
+        ]);
+        if (!alive || !mountRef.current) return;
+
+        const mount = mountRef.current;
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.domElement.dataset.testid = "rf-link-budget-theater-canvas";
+        renderer.domElement.style.width = "100%";
+        renderer.domElement.style.height = "100%";
+        renderer.domElement.style.display = "block";
+        mount.appendChild(renderer.domElement);
+
+        scene = new THREE.Scene();
+        root = new THREE.Group();
+        root.rotation.set(pointer.rx, pointer.ry, 0);
+        scene.add(root);
+
+        camera = new THREE.PerspectiveCamera(38, 1, 0.1, 80);
+        camera.position.set(0, 2.0, 7.0);
+        camera.lookAt(0, 0, 0);
+        scene.add(camera);
+
+        const ambient = new THREE.HemisphereLight(0xf4eadc, 0x091111, 1.75);
+        const key = new THREE.DirectionalLight(0xffffff, 2.65);
+        key.position.set(-3.4, 4.6, 5.3);
+        const txRim = new THREE.PointLight(0xff9c1a, 1.6, 7);
+        txRim.position.set(-3.8, -0.5, 1.0);
+        const rxRim = new THREE.PointLight(0x48ffd4, 1.35, 7);
+        rxRim.position.set(3.8, 0.5, 1.0);
+        scene.add(ambient, key, txRim, rxRim);
+
+        const loader = new GLTFLoader();
+        const gltf = await new Promise((resolve, reject) => {
+          loader.load("/models/rf-link-budget-theater.glb", resolve, undefined, reject);
+        });
+        if (!alive) return;
+        const model = gltf.scene;
+        model.traverse((node) => {
+          if (node.isMesh && node.material) {
+            node.castShadow = true;
+            node.receiveShadow = true;
+            const mats = Array.isArray(node.material) ? node.material : [node.material];
+            mats.forEach((mat) => {
+              if (/transparent|energy guide/i.test(mat.name || "")) {
+                mat.transparent = true;
+                mat.depthWrite = false;
+                mat.opacity = Math.min(mat.opacity ?? 0.3, 0.32);
+              }
+              mat.needsUpdate = true;
+            });
+          }
+        });
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        model.position.sub(center);
+        model.scale.setScalar(0.93);
+        root.add(model);
+
+        const pathMat = new THREE.MeshBasicMaterial({
+          color: 0xfbbf24,
+          transparent: true,
+          opacity: 0.22,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        });
+        const pathCurve = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(-3.12, 0.02, 0.02),
+          new THREE.Vector3(-1.45, 0.03, 0.02),
+          new THREE.Vector3(0, 0.05, 0.02),
+          new THREE.Vector3(1.45, 0.03, 0.02),
+          new THREE.Vector3(3.12, 0.02, 0.02),
+        ]);
+        const path = new THREE.Mesh(new THREE.TubeGeometry(pathCurve, 96, 0.018, 10, false), pathMat);
+        path.name = "live signal rail";
+        root.add(path);
+        disposables.push(path);
+
+        const pulseGeometry = new THREE.SphereGeometry(0.12, 32, 20);
+        const haloGeometry = new THREE.SphereGeometry(0.28, 32, 20);
+        for (let i = 0; i < 3; i += 1) {
+          const material = new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.92, blending: THREE.AdditiveBlending, depthWrite: false });
+          const haloMaterial = new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false });
+          const pulse = new THREE.Mesh(pulseGeometry, material);
+          const halo = new THREE.Mesh(haloGeometry, haloMaterial);
+          const light = new THREE.PointLight(0xfbbf24, 0.55, 2.4);
+          const group = new THREE.Group();
+          group.add(halo, pulse, light);
+          root.add(group);
+          pulses.push({ group, pulse, halo, light, material, haloMaterial });
+        }
+        disposables.push(pulseGeometry, haloGeometry, pathMat);
+
+        const resize = () => {
+          if (!mount || !renderer || !camera) return;
+          const rect = mount.getBoundingClientRect();
+          const width = Math.max(320, Math.floor(rect.width || 900));
+          const height = Math.max(300, Math.floor(rect.height || 420));
+          renderer.setSize(width, height, false);
+          camera.aspect = width / height;
+          camera.position.z = width < 680 ? 8.4 : 7.0;
+          camera.updateProjectionMatrix();
+        };
+        resizeObserver = new ResizeObserver(resize);
+        resizeObserver.observe(mount);
+        resize();
+
+        const onPointerDown = (e) => {
+          pointer.down = true;
+          pointer.x = e.clientX;
+          pointer.y = e.clientY;
+          renderer.domElement.setPointerCapture?.(e.pointerId);
+        };
+        const onPointerMove = (e) => {
+          if (!pointer.down || !root) return;
+          const dx = e.clientX - pointer.x;
+          const dy = e.clientY - pointer.y;
+          pointer.x = e.clientX;
+          pointer.y = e.clientY;
+          pointer.ry = clampValue(pointer.ry + dx * 0.006, -0.55, 0.55);
+          pointer.rx = clampValue(pointer.rx + dy * 0.004, -0.48, 0.22);
+          root.rotation.set(pointer.rx, pointer.ry, 0);
+        };
+        const onPointerUp = () => { pointer.down = false; };
+        renderer.domElement.addEventListener("pointerdown", onPointerDown);
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+        disposables.push({
+          dispose: () => {
+            renderer?.domElement?.removeEventListener("pointerdown", onPointerDown);
+            window.removeEventListener("pointermove", onPointerMove);
+            window.removeEventListener("pointerup", onPointerUp);
+          },
+        });
+
+        setStatus("");
+        const start = performance.now();
+        const animate = (now) => {
+          if (!alive || !renderer || !scene || !camera) return;
+          const m = metricsRef.current;
+          const statusColor = m.margin < 0 ? new THREE.Color(0xef4444) : m.margin < 6 ? new THREE.Color(0xfbbf24) : new THREE.Color(0x34d399);
+          const startColor = new THREE.Color(0xffb21a);
+          const endAmp = clampValue(Math.pow(10, -(m.totalLoss || 0) / 28), 0.18, 1);
+          const speed = clampValue(1.25 + (m.length || 10) / 46, 1.3, 4.0);
+          pulses.forEach((p, i) => {
+            const t = (((now - start) / 1000) / speed + i / pulses.length) % 1;
+            const x = -3.02 + 6.04 * t;
+            const y = 0.055 + Math.sin(t * Math.PI * 2) * 0.012;
+            const scale = 1.15 - (1.0 - endAmp) * t;
+            const opacity = clampValue(0.95 - (0.74 * (1 - endAmp) * t), 0.12, 0.96);
+            const color = startColor.clone().lerp(statusColor, t);
+            p.group.position.set(x, y, 0.02);
+            p.group.scale.setScalar(scale);
+            p.material.color.copy(color);
+            p.haloMaterial.color.copy(color);
+            p.light.color.copy(color);
+            p.material.opacity = opacity;
+            p.haloMaterial.opacity = opacity * 0.22;
+            p.light.intensity = 0.35 + opacity * 0.75;
+          });
+          pathMat.color.copy(statusColor);
+          pathMat.opacity = 0.12 + endAmp * 0.18;
+          renderer.render(scene, camera);
+          frameId = requestAnimationFrame(animate);
+        };
+        frameId = requestAnimationFrame(animate);
+      } catch {
+        if (alive) setStatus("3D scene unavailable");
+      }
+    };
+
+    run();
+
+    return () => {
+      alive = false;
+      cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect?.();
+      disposables.forEach((item) => item.dispose?.());
+      if (root) disposeObject(root);
+      renderer?.dispose?.();
+      renderer?.domElement?.remove?.();
+    };
+  }, []);
+
+  const marginColor = margin < 0 ? "#ef4444" : margin < 6 ? "#fbbf24" : "#34d399";
+  const signalKept = Math.pow(10, -totalLoss / 10) * 100;
+
+  return (
+    <div style={S.linkTheaterFrame} data-testid="rf-link-budget-theater">
+      <div ref={mountRef} style={S.linkTheaterCanvas} />
+      <div style={S.linkTheaterScrim} />
+      <div style={S.linkTheaterTopHud}>
+        <div>
+          <div style={S.linkTheaterEyebrow}>Blender GLB link theater</div>
+          <div style={S.linkTheaterTitle}>{cable.name} · {length} m · {freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}</div>
+        </div>
+        <div style={{ ...S.linkTheaterPill, borderColor: marginColor, color: marginColor }}>
+          {ok ? "Link alive" : "Below sensitivity"} · {margin > 0 ? "+" : ""}{margin.toFixed(1)} dB
+        </div>
+      </div>
+      <div style={S.linkTheaterStats}>
+        <div style={{ ...S.linkTheaterMetric, borderColor: "rgba(251,191,36,0.45)" }}>
+          <span style={S.linkTheaterMetricLabel}>TX power</span>
+          <strong style={{ ...S.linkTheaterMetricValue, color: "#fbbf24" }}>{txPower.toFixed(0)} dBm</strong>
+          <small style={S.linkTheaterMetricSub}>{dbmToPower(txPower)}</small>
+        </div>
+        <div style={{ ...S.linkTheaterMetric, borderColor: "rgba(239,68,68,0.45)" }}>
+          <span style={S.linkTheaterMetricLabel}>Cable loss</span>
+          <strong style={{ ...S.linkTheaterMetricValue, color: "#f97316" }}>{totalLoss.toFixed(2)} dB</strong>
+          <small style={S.linkTheaterMetricSub}>{attenPer100m.toFixed(2)} dB/100m · {signalKept.toFixed(signalKept < 10 ? 1 : 0)}% survives</small>
+        </div>
+        <div style={{ ...S.linkTheaterMetric, borderColor: `${marginColor}88` }}>
+          <span style={S.linkTheaterMetricLabel}>RX power</span>
+          <strong style={{ ...S.linkTheaterMetricValue, color: marginColor }}>{rxPower.toFixed(1)} dBm</strong>
+          <small style={S.linkTheaterMetricSub}>sens {rxSens} dBm</small>
+        </div>
+      </div>
+      {status && <div style={S.linkTheaterStatus}>{status}</div>}
     </div>
   );
 }
@@ -11223,6 +11452,124 @@ const S = {
     marginTop: 8,
     lineHeight: 1.55,
     fontStyle: "italic",
+  },
+  linkTheaterFrame: {
+    position: "relative",
+    minHeight: 420,
+    border: "1px solid rgba(94,234,212,0.28)",
+    borderRadius: 5,
+    overflow: "hidden",
+    background: "radial-gradient(circle at 50% 18%, rgba(20,83,77,0.28), rgba(5,10,10,0.98) 62%)",
+    boxShadow: "inset 0 0 80px rgba(94,234,212,0.07), 0 22px 58px rgba(0,0,0,0.32)",
+    marginTop: 10,
+  },
+  linkTheaterCanvas: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 1,
+    cursor: "grab",
+  },
+  linkTheaterScrim: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 2,
+    pointerEvents: "none",
+    background: "linear-gradient(180deg, rgba(0,0,0,0.34), transparent 32%, rgba(0,0,0,0.54) 100%)",
+  },
+  linkTheaterTopHud: {
+    position: "absolute",
+    top: 16,
+    left: 16,
+    right: 16,
+    zIndex: 3,
+    pointerEvents: "none",
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  linkTheaterEyebrow: {
+    color: "#5eead4",
+    fontSize: 9,
+    letterSpacing: "0.22em",
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontWeight: 800,
+    marginBottom: 6,
+  },
+  linkTheaterTitle: {
+    color: "#fff7ed",
+    fontSize: 17,
+    lineHeight: 1.2,
+    fontFamily: "'JetBrains Mono', monospace",
+    textShadow: "0 2px 16px rgba(0,0,0,0.75)",
+  },
+  linkTheaterPill: {
+    padding: "7px 10px",
+    background: "rgba(2,6,8,0.72)",
+    border: "1px solid",
+    borderRadius: 3,
+    fontSize: 10,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontWeight: 800,
+    boxShadow: "0 12px 32px rgba(0,0,0,0.3)",
+  },
+  linkTheaterStats: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: 16,
+    zIndex: 3,
+    pointerEvents: "none",
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+    gap: 10,
+  },
+  linkTheaterMetric: {
+    padding: "11px 12px",
+    background: "rgba(2,6,8,0.76)",
+    border: "1px solid",
+    borderRadius: 4,
+    fontFamily: "'JetBrains Mono', monospace",
+    boxShadow: "0 16px 36px rgba(0,0,0,0.28)",
+  },
+  linkTheaterMetricLabel: {
+    display: "block",
+    color: "#94a3b8",
+    fontSize: 8.5,
+    letterSpacing: "0.16em",
+    textTransform: "uppercase",
+    marginBottom: 5,
+  },
+  linkTheaterMetricValue: {
+    display: "block",
+    fontSize: 18,
+    lineHeight: 1.1,
+    fontWeight: 800,
+    marginBottom: 5,
+  },
+  linkTheaterMetricSub: {
+    display: "block",
+    color: "#d6cfc4",
+    fontSize: 10,
+    lineHeight: 1.25,
+  },
+  linkTheaterStatus: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 4,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#5eead4",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+    letterSpacing: "0.18em",
+    textTransform: "uppercase",
+    background: "rgba(2,6,8,0.52)",
   },
 
   // Engineering tab
