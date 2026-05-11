@@ -1,7 +1,7 @@
 // Tools exposed to the RF agent. Pure-math + small DBs, client-side dispatch.
 import { getCustomRfCables, addCustomRfCable, deleteCustomRfCable } from './customCableStore.js'
 import { getCompanyDefaults, setCompanyDefaults, resetCompanyDefaults } from './companyDefaults.js'
-import { RF_CABLES, RF_CATEGORIES } from '../data/rfCableLibrary.js'
+import { RF_CABLES, RF_CATEGORIES, getRfCableSourceMeta } from '../data/rfCableLibrary.js'
 
 // ── Material properties database ────────────────────────
 export const MATERIAL_DB = {
@@ -82,6 +82,7 @@ export const STANDARDS_DB = {
 const _dbPer100mTo100ft = (db) => Number((db * 0.3048).toFixed(3))
 
 function _normaliseLibraryCable(id, cable) {
+  const sourceMeta = getRfCableSourceMeta(id, cable)
   const attenuation100ft = {}
   const attenuation100m = {}
   for (const [freq, dbPer100m] of cable.atten || []) {
@@ -116,6 +117,11 @@ function _normaliseLibraryCable(id, cable) {
     model: cable.model,
     macroModel: cable.macroModel,
     datasheet: cable.datasheet,
+    source_confidence: sourceMeta.confidence,
+    source_label: sourceMeta.label,
+    source_name: sourceMeta.sourceName,
+    source_detail: sourceMeta.sourceDetail,
+    source_note: sourceMeta.description,
     atten_db_per_100m: attenuation100m,
     atten_db_per_100ft: attenuation100ft,
   }
@@ -147,6 +153,7 @@ function searchDB(db, query) {
   for (const [id, item] of Object.entries(db)) {
     const hay = normaliseSearchKey([
       id, item.name, item.alias, item.notes, item.makers, item.category_label, item.category,
+      item.source_label, item.source_name, item.source_confidence,
     ].filter(Boolean).join(' '))
     if (hay.includes(q)) out.push({ id, ...item })
   }

@@ -8,7 +8,14 @@ import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
 import CompanyDefaultsPanel from "../components/CompanyDefaultsPanel.jsx";
 import RFStackLab from "../components/RFStackLab.jsx";
 import { useIsMobile } from "../components/useIsMobile.js";
-import { RF_CABLES as CABLES, RF_CATEGORIES as CATEGORIES, RF_CABLE_IDS as CABLE_IDS } from "../data/rfCableLibrary.js";
+import {
+  RF_CABLES as CABLES,
+  RF_CATEGORIES as CATEGORIES,
+  RF_CABLE_IDS as CABLE_IDS,
+  RF_SOURCE_CONFIDENCE,
+  getRfCableSourceMeta,
+  getRfCableSourceStats,
+} from "../data/rfCableLibrary.js";
 
 const RF_SYSTEM_PROMPT = `You are a senior RF cable engineer embedded in the RF Cable Engineering Suite. You have access to calculation tools — use them whenever a numeric answer is requested instead of relying on memorized constants.
 
@@ -5022,6 +5029,7 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
   const [filterZ, setFilterZ] = useState("all");
   const [filterCat, setFilterCat] = useState("all");
   const [filterFreq, setFilterFreq] = useState(0);
+  const [filterSource, setFilterSource] = useState("all");
   const [sortBy, setSortBy] = useState("name");
   const [visualOnly, setVisualOnly] = useState(false);
   const [detailId, setDetailId] = useState(activeCable || null);
@@ -5059,6 +5067,7 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
       if (filterZ !== "all" && c.z !== Number(filterZ)) return false;
       if (filterCat !== "all" && c.cat !== filterCat) return false;
       if (c.fMax < filterFreq) return false;
+      if (filterSource !== "all" && getRfCableSourceMeta(id, c).confidence !== filterSource) return false;
       if (visualOnly && !getCableModelPath(id, c)) return false;
       if (search) { const q = search.toLowerCase(); if (!(c.name + " " + c.alias + " " + c.apps).toLowerCase().includes(q)) return false; }
       return true;
@@ -5072,9 +5081,10 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
       return 0;
     });
     return list;
-  }, [search, filterZ, filterCat, filterFreq, sortBy, visualOnly]);
+  }, [search, filterZ, filterCat, filterFreq, filterSource, sortBy, visualOnly]);
 
   const total = Object.keys(CABLES).length;
+  const sourceStats = useMemo(() => getRfCableSourceStats(CABLES), []);
   const categoryCount = Object.values(CABLES).filter(c => filterCat === "all" || c.cat === filterCat).length;
   const highFreqCount = Object.values(CABLES).filter(c => c.fMax >= 6).length;
   const lowPimCount = Object.values(CABLES).filter(c => /PIM|cellular|LTE|5G/i.test(`${c.name} ${c.alias} ${c.apps}`)).length;
@@ -5087,11 +5097,12 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
     filterZ !== "all" ? `${filterZ} ohm` : null,
     filterCat !== "all" ? CATEGORIES[filterCat]?.label : null,
     filterFreq > 0 ? `${filterFreq} GHz+` : null,
+    filterSource !== "all" ? `${RF_SOURCE_CONFIDENCE[filterSource]?.label || filterSource} source` : null,
     visualOnly ? "3D render" : null,
   ].filter(Boolean).join(" / ") || "All families";
 
-  const hasActiveFilter = search || filterZ !== "all" || filterCat !== "all" || filterFreq > 0 || visualOnly;
-  const clearFilters = () => { setSearch(""); setFilterZ("all"); setFilterCat("all"); setFilterFreq(0); setVisualOnly(false); };
+  const hasActiveFilter = search || filterZ !== "all" || filterCat !== "all" || filterFreq > 0 || filterSource !== "all" || visualOnly;
+  const clearFilters = () => { setSearch(""); setFilterZ("all"); setFilterCat("all"); setFilterFreq(0); setFilterSource("all"); setVisualOnly(false); };
   const renderModalCable = renderModalId && CABLES[renderModalId] ? withCableModel(renderModalId) : null;
   const renderModal = renderModalCable ? (
     <CableRenderModal
@@ -5156,6 +5167,14 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
             <span style={S.libQuickStatValue}>{renderCoveragePct}%</span>
             <span style={S.libQuickStatLabel}>3D coverage</span>
           </div>
+          <div style={S.libQuickStat}>
+            <span style={{ ...S.libQuickStatValue, color: RF_SOURCE_CONFIDENCE.catalog.color }}>{sourceStats.catalog}</span>
+            <span style={S.libQuickStatLabel}>Catalog</span>
+          </div>
+          <div style={S.libQuickStat}>
+            <span style={{ ...S.libQuickStatValue, color: RF_SOURCE_CONFIDENCE.estimate.color }}>{sourceStats.estimate}</span>
+            <span style={S.libQuickStatLabel}>Estimate</span>
+          </div>
         </div>
         </div>
 
@@ -5200,6 +5219,19 @@ function LibraryView({ activeCable, loadIntoDesign, askAboutCable, setActiveCabl
             <option value="od">Diameter</option>
             <option value="freq">Max freq</option>
             <option value="loss">Loss @ 900 MHz</option>
+          </select>
+        </div>
+        <div style={S.libToolbarFilter}>
+          <span style={S.libToolbarFilterLabel}>Source</span>
+          <select
+            value={filterSource}
+            onChange={(e) => setFilterSource(e.target.value)}
+            style={S.libToolbarSelect}
+          >
+            <option value="all">All</option>
+            <option value="verified">Datasheet</option>
+            <option value="catalog">Catalog</option>
+            <option value="estimate">Estimate</option>
           </select>
         </div>
         <div style={S.libToolbarFilter}>
@@ -5951,12 +5983,31 @@ function CableGlbViewer({ cable: c, activeLayer }) {
   );
 }
 
+function SourceConfidenceBadge({ meta, compact = false }) {
+  if (!meta) return null;
+  return (
+    <span
+      style={{
+        ...S.sourceBadge,
+        ...(compact ? S.sourceBadgeCompact : {}),
+        color: meta.color,
+        borderColor: meta.color,
+        background: `${meta.color}12`,
+      }}
+      title={`${meta.label}: ${meta.description}`}
+    >
+      {compact ? meta.label : meta.short}
+    </span>
+  );
+}
+
 // Slim list-item card: just the head row, taps open the detail page.
 function CableCard({ id, cable: c, onOpen, onViewRender, onViewMacro, compared, isMobile = false }) {
   const { units } = useContext(SettingsContext);
   const cat = CATEGORIES[c.cat];
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity];
   const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity];
+  const sourceMeta = getRfCableSourceMeta(id, c);
   const loss900 = c.atten.find(([f]) => f >= 900)?.[1];
   const lossLabel = Number.isFinite(loss900) ? `${fmt(loss900, 2)} dB/100m` : "n/a";
 
@@ -5986,6 +6037,7 @@ function CableCard({ id, cable: c, onOpen, onViewRender, onViewMacro, compared, 
               <span style={S.cableName}>{c.name}</span>
               <span style={{ ...S.catBadge, color: cat.color, borderColor: cat.color }}>{cat.label}</span>
               <span style={{ ...S.cxBadge, background: `${cxColor}22`, color: cxColor, borderColor: cxColor }}>{cxLabel}</span>
+              <SourceConfidenceBadge meta={sourceMeta} compact />
               {compared && <span style={S.compareDot} title="In compare list">●</span>}
               {onViewRender && (
                 <button
@@ -6074,6 +6126,7 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
   const cat = CATEGORIES[c.cat] || { label: c.cat, color: "#d97706" };
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity] || "#fbbf24";
   const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity] || c.complexity;
+  const sourceMeta = getRfCableSourceMeta(id, c);
 
   const [buildStep, setBuildStep] = useState(0);
   const [selectedLayer, setSelectedLayer] = useState(null);
@@ -6126,6 +6179,7 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
         <div style={S.cableDetailHeading}>
           <span style={{ ...S.catBadge, color: cat.color, borderColor: cat.color, fontSize: 9 }}>{cat.label}</span>
           <span style={{ ...S.cxBadge, background: `${cxColor}22`, color: cxColor, borderColor: cxColor, fontSize: 9 }}>{cxLabel}</span>
+          <SourceConfidenceBadge meta={sourceMeta} />
         </div>
         <div style={S.cableDetailActions}>
           {onViewRender && (
@@ -6161,6 +6215,11 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
           {(c.description || c.apps) && (
             <p style={S.cdHeroDescription}>{wrapTerms(c.description || c.apps)}</p>
           )}
+          <div style={{ ...S.cdSourceStrip, borderColor: `${sourceMeta.color}44` }}>
+            <span style={S.cdSourceLabel}>Data source</span>
+            <span style={{ ...S.cdSourceValue, color: sourceMeta.color }}>{sourceMeta.label}</span>
+            <span style={S.cdSourceDetail}>{sourceMeta.sourceName} · {sourceMeta.sourceDetail}</span>
+          </div>
           <div style={S.cdHeroMetrics}>
             {heroMetrics.map((m) => (
               <div key={m.label} style={S.cdHeroMetric}>
@@ -6221,7 +6280,7 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
         </CableSection>
 
         <CableSection eyebrow="05" title="Engineering detail" sub="Electrical · mechanical · derived geometry">
-          <CableSectionEngineering c={c} units={units} />
+          <CableSectionEngineering c={c} units={units} sourceMeta={sourceMeta} />
         </CableSection>
 
         <CableSection eyebrow="06" title="Manufacturing process" sub="Click any step to expand the operator-facing notes">
@@ -6310,7 +6369,7 @@ function CableSectionAttenTable({ c, units }) {
 }
 
 // ── Section: Engineering detail (electrical + mechanical, 2 columns) ──
-function CableSectionEngineering({ c, units }) {
+function CableSectionEngineering({ c, units, sourceMeta }) {
   return (
     <div style={S.cdSectionGrid}>
       <div>
@@ -6321,6 +6380,7 @@ function CableSectionEngineering({ c, units }) {
           <SpecRow label="Capacitance" value={fmtCap(c.cap, units, 1)} />
           <SpecRow label="Max freq"    value={`${c.fMax} GHz`} />
           <SpecRow label="Max voltage" value={`${c.vMax} V RMS`} />
+          {sourceMeta && <SpecRow label="Source confidence" value={sourceMeta.label} />}
         </div>
       </div>
       <div>
@@ -6331,6 +6391,7 @@ function CableSectionEngineering({ c, units }) {
           <SpecRow label="Shield OD"         value={fmtLen(c.shield, units)} />
           <SpecRow label="Jacket OD (final)" value={fmtLen(c.OD, units)} />
           <SpecRow label="Mass"              value={fmtMass(c.mass, units, 1)} />
+          {sourceMeta && <SpecRow label="Source" value={sourceMeta.sourceName} />}
         </div>
       </div>
     </div>
@@ -8776,6 +8837,7 @@ function CableDatasheetPoster({ id, c, units, shieldLayers }) {
   const cat = CATEGORIES[c.cat] || { label: c.cat, color: "#d97706" };
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity] || "#fbbf24";
   const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity] || c.complexity;
+  const sourceMeta = getRfCableSourceMeta(id, c);
   const shieldLayer = shieldLayers?.[0];
   const bendMm = c.OD * 10;
   const attenRows = c.atten.slice(0, 6);
@@ -8806,6 +8868,7 @@ function CableDatasheetPoster({ id, c, units, shieldLayers }) {
             <h2 style={S.profileTitle}>{c.name}</h2>
             <span style={{ ...S.profileBadge, color: cat.color, borderColor: cat.color }}>{cat.label}</span>
             <span style={{ ...S.profileBadge, color: cxColor, borderColor: cxColor }}>{cxLabel}</span>
+            <SourceConfidenceBadge meta={sourceMeta} />
           </div>
           <div style={S.profileAlias}>{wrapTerms(c.alias)}</div>
           <p style={S.profileDescription}>{wrapTerms(c.description || c.apps)}</p>
@@ -8875,6 +8938,7 @@ function CableDatasheetHero({ id, c, units, shieldLayers }) {
   const cat = CATEGORIES[c.cat] || { label: c.cat, color: "#d97706" };
   const cxColor = { low: "#34d399", medium: "#fbbf24", high: "#ef4444" }[c.complexity] || "#fbbf24";
   const cxLabel = { low: "Simple", medium: "Moderate", high: "Complex" }[c.complexity] || c.complexity;
+  const sourceMeta = getRfCableSourceMeta(id, c);
   const attenRows = c.atten.slice(0, 6);
   const shieldLayer = shieldLayers?.[0];
   const bendMm = c.OD * 10;
@@ -8906,6 +8970,7 @@ function CableDatasheetHero({ id, c, units, shieldLayers }) {
             <div style={S.sheetTitle}>{c.name}</div>
             <span style={{ ...S.sheetBadge, color: cat.color, borderColor: cat.color }}>{cat.label}</span>
             <span style={{ ...S.sheetBadge, color: cxColor, borderColor: cxColor }}>{cxLabel}</span>
+            <SourceConfidenceBadge meta={sourceMeta} />
           </div>
           <div style={S.sheetAlias}>{wrapTerms(c.alias)}</div>
           <div style={S.sheetApps}>{wrapTerms(c.apps)}</div>
@@ -9639,7 +9704,7 @@ const S = {
     marginLeft: 4,
   },
   libSubcopy: { margin: 0, color: "#a8a29e", fontSize: 12, lineHeight: 1.55, maxWidth: 540 },
-  libHeaderStats: { display: "flex", gap: 8, alignItems: "stretch", flexShrink: 0 },
+  libHeaderStats: { display: "flex", gap: 8, alignItems: "stretch", flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" },
   libQuickStat: {
     display: "flex",
     flexDirection: "column",
@@ -10437,6 +10502,24 @@ const S = {
   cableName: { fontFamily: "'Fraunces', serif", fontSize: 17, color: "#fef3c7", fontWeight: 650, lineHeight: 1.05 },
   catBadge: { fontSize: 8, padding: "3px 8px", border: "1px solid", borderRadius: 999, letterSpacing: "0.12em", textTransform: "uppercase", background: "rgba(0,0,0,0.25)" },
   cxBadge: { fontSize: 8, padding: "3px 8px", border: "1px solid", borderRadius: 999, letterSpacing: "0.05em" },
+  sourceBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "3px 8px",
+    border: "1px solid",
+    borderRadius: 999,
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 8.5,
+    fontWeight: 800,
+    letterSpacing: "0.09em",
+    textTransform: "uppercase",
+    whiteSpace: "nowrap",
+  },
+  sourceBadgeCompact: {
+    fontSize: 8,
+    padding: "3px 7px",
+  },
   cableAlias: { fontSize: 9.5, color: "#78716c", fontStyle: "italic", marginBottom: 3 },
   cableApps: { fontSize: 10.5, color: "#b8afa3", lineHeight: 1.4 },
   cableMeta: {
@@ -10630,6 +10713,36 @@ const S = {
     fontSize: 13,
     lineHeight: 1.6,
     maxWidth: 580,
+  },
+  cdSourceStrip: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+    margin: "0 0 14px",
+    padding: "9px 10px",
+    border: "1px solid rgba(168,162,158,0.14)",
+    borderRadius: 4,
+    background: "rgba(3,7,8,0.45)",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    lineHeight: 1.45,
+  },
+  cdSourceLabel: {
+    color: "#78716c",
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    fontSize: 8.5,
+  },
+  cdSourceValue: {
+    fontWeight: 900,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+  },
+  cdSourceDetail: {
+    color: "#a8a29e",
+    flex: "1 1 260px",
+    minWidth: 0,
   },
   cdHeroMetrics: {
     display: "grid",

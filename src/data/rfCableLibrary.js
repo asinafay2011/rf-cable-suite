@@ -11,6 +11,27 @@ export const RF_CATEGORIES = {
   "phase":     { label: "Phase-Stable",     color: "#a78bfa" },
 };
 
+export const RF_SOURCE_CONFIDENCE = {
+  verified: {
+    label: "Datasheet",
+    short: "Verified",
+    color: "#5eead4",
+    description: "Manufacturer datasheet or explicit source is attached to this profile.",
+  },
+  catalog: {
+    label: "Catalog",
+    short: "Catalog",
+    color: "#34d399",
+    description: "Built-in catalog profile with full construction/process data and visual coverage. Confirm final ordering data against the manufacturer sheet.",
+  },
+  estimate: {
+    label: "Estimate",
+    short: "Estimate",
+    color: "#fbbf24",
+    description: "Engineering estimate built from known cable-family geometry. Verify with the vendor datasheet before procurement or production release.",
+  },
+};
+
 export const RF_CABLES = {
   rg58: { name: "RG-58/U", cat: "rg-50", alias: "M17/28, Belden 8259",
     z: 50, vp: 66, cap: 101, mass: 37, fMax: 1.0, vMax: 1900,
@@ -717,6 +738,7 @@ export const RF_CABLES = {
   lmr200: { name: "LMR-200", cat: "lmr", alias: "Times low-loss RG-58 replacement",
     z: 50, vp: 83, cap: 80, mass: 34, fMax: 5.8, vMax: 1500,
     d: 1.12, D: 2.95, shield: 3.66, OD: 4.95, flex: "high", outdoor: true, power: "medium", complexity: "medium",
+    render: "/cable-renders/rf-lmr200-low-loss.png",
     atten: [[100, 12.8], [400, 26.2], [900, 39.4], [1000, 41.7], [2400, 67.3], [5800, 108.3]],
     cons: { conductor: "Solid bare Cu, 1.12mm", dielectric: "Gas-injected foam PE", shield: "Bonded Al foil + tinned Cu braid", jacket: "Black UV PE" },
     proc: ["Cu draw 1.12mm", "Gas-foam PE dielectric", "Bonded foil shield", "Tinned Cu braid", "Outdoor PE jacket"],
@@ -773,6 +795,7 @@ export const RF_CABLES = {
   ava4: { name: "AVA4-50", cat: "heliax", alias: "Andrew HELIAX 1/2-inch low-loss",
     z: 50, vp: 88, cap: 75, mass: 150, fMax: 8.8, vMax: 2500,
     d: 4.80, D: 10.2, shield: 11.5, OD: 13.9, flex: "medium", outdoor: true, power: "high", complexity: "medium",
+    render: "/cable-renders/rf-ava4-corrugated.png",
     atten: [[100, 2.25], [450, 4.65], [900, 6.85], [2000, 10.4], [5800, 18.7], [8800, 24.8]],
     cons: { conductor: "Solid Cu inner", dielectric: "Foam PE", shield: "Annular corrugated Cu outer", jacket: "Black PE jacket" },
     proc: ["Solid Cu inner", "Foam PE dielectric", "Corrugated Cu outer conductor", "PE jacket", "Sweep VSWR for cellular bands"],
@@ -1095,6 +1118,7 @@ export const RF_CABLES = {
   rg405: { name: "RG-405/U", cat: "semi", alias: "0.086 inch semi-rigid / UT-085 class",
     z: 50, vp: 70, cap: 95, mass: 24, fMax: 40.0, vMax: 1500,
     d: 0.51, D: 1.68, shield: 1.95, OD: 2.20, flex: "none", outdoor: false, power: "medium", complexity: "high",
+    render: "/cable-renders/rf-rg405-semirigid.png",
     atten: [[1000, 62.0], [6000, 150.0], [18000, 278.0], [26500, 360.0], [40000, 500.0]],
     cons: { conductor: "SPC center", dielectric: "Solid PTFE", shield: "Seamless Cu tube", jacket: "Bare semi-rigid outer" },
     proc: ["SPC center", "PTFE dielectric", "Drawn copper tube", "Mandrel forming", "Microwave sweep"],
@@ -1462,5 +1486,58 @@ export const RF_CABLES = {
     proc: ["Precision center", "Plenum dielectric", "Duofoil", "Braid", "12G plenum QA"],
     apps: "12G-SDI plenum patch/trunk, UHD broadcast buildings, routers", makers: "Belden" },
 };
+
+export function getRfCableSourceMeta(id, cable = RF_CABLES[id]) {
+  const profile = cable || {};
+  const style = RF_SOURCE_CONFIDENCE;
+  const hasDatasheet = Boolean(profile.datasheet || profile.sourceUrl || profile.source_url);
+  const hasExplicitSource = Boolean(profile.source || profile.sourceName || profile.source_name);
+  const hasVisualAsset = Boolean(profile.render || profile.model || profile.macroModel);
+  const hasRichConstruction = profile.cons && typeof profile.cons === "object"
+    && ["conductor", "dielectric", "shield", "jacket"].every((key) => Boolean(profile.cons[key]));
+  const hasRichProcess = Array.isArray(profile.proc) && profile.proc.length >= 4;
+  const hasDenseAttenuation = Array.isArray(profile.atten) && profile.atten.length >= 4;
+  const explicitConfidence = profile.sourceConfidence || profile.confidence;
+  const confidence = explicitConfidence
+    || (hasDatasheet || hasExplicitSource
+      ? "verified"
+      : (hasVisualAsset && hasRichConstruction && hasRichProcess && hasDenseAttenuation ? "catalog" : "estimate"));
+  const safeConfidence = style[confidence] ? confidence : "estimate";
+  const meta = style[safeConfidence];
+  const sourceName = profile.sourceName
+    || profile.source_name
+    || profile.source
+    || (hasDatasheet ? "Manufacturer datasheet" : safeConfidence === "catalog" ? "Built-in catalog profile" : "Engineering estimate");
+  const sourceDetail = profile.sourceNote
+    || profile.source_note
+    || (hasDatasheet
+      ? "Datasheet URL/spec is attached in the cable record."
+      : safeConfidence === "catalog"
+        ? "Structured construction, process steps, attenuation table, and visual profile are available."
+        : "Use for screening and comparison; confirm exact OD, VP, attenuation, bend radius, and power rating from the vendor datasheet.");
+
+  return {
+    id,
+    confidence: safeConfidence,
+    label: meta.label,
+    short: meta.short,
+    color: meta.color,
+    description: meta.description,
+    sourceName,
+    sourceDetail,
+    datasheet: profile.datasheet || profile.sourceUrl || profile.source_url,
+    maker: profile.makers,
+    isEstimate: safeConfidence === "estimate",
+  };
+}
+
+export function getRfCableSourceStats(cables = RF_CABLES) {
+  return Object.entries(cables).reduce((acc, [id, cable]) => {
+    const { confidence } = getRfCableSourceMeta(id, cable);
+    acc[confidence] = (acc[confidence] || 0) + 1;
+    acc.total += 1;
+    return acc;
+  }, { total: 0, verified: 0, catalog: 0, estimate: 0 });
+}
 
 export const RF_CABLE_IDS = Object.keys(RF_CABLES);
