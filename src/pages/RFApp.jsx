@@ -1239,6 +1239,7 @@ export default function RFCableSuite() {
     setQueuedPrompt(`Analyze ${c.name}: construction highlights, ideal applications, and closest alternatives to consider.`);
   };
   const openInLibrary = (id) => { setActiveCable(id); setTab("library"); };
+  const showingLibraryDetail = tab === "library" && Boolean(activeCable);
 
   return (
     <SettingsContext.Provider value={settingsCtx}>
@@ -1536,7 +1537,7 @@ export default function RFCableSuite() {
           </div>
         )}
 
-        {activeCable && (
+        {activeCable && !showingLibraryDetail && (
           <div style={S.activeCableBar}>
             <span style={S.activeLabel}>Active cable</span>
             <span style={S.activeName}>{CABLES[activeCable].name}</span>
@@ -1550,8 +1551,8 @@ export default function RFCableSuite() {
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
           {tab === "library" && (
             <>
-              <CompanyDefaultsPanel accentColor="#d97706" />
-              <CustomCablesPanel side="rf" accentColor="#d97706" />
+              {!showingLibraryDetail && <CompanyDefaultsPanel accentColor="#d97706" />}
+              {!showingLibraryDetail && <CustomCablesPanel side="rf" accentColor="#d97706" />}
               <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} onPrint={(id) => setPrintSetup({ type: "cable", id })} isMobile={isMobile} />
             </>
           )}
@@ -6500,55 +6501,84 @@ function CableDetailView({ id, cable: c, onBack, onDesign, onAsk, compared, togg
               </div>
             </>
           ) : (
-            <div style={S.cdHeroVisualFallback}>
-              <MiniCrossSection c={c} />
-            </div>
+            <CableHeroBlueprint c={c} units={units} shieldLayers={shieldLayers} />
           )}
         </div>
       </div>
 
-      {/* All sections — single scroll, no tabs. Each block has its own
-          big heading so the user can't miss any of the data. */}
+      {/* Compact profile cockpit. The page keeps the visual/interactive
+          tools up front, while dense datasheet content folds away. */}
       <div style={S.cdAllSections}>
-        <CableSection eyebrow="01" title="Layer stack" sub="Top-down construction · jacket → conductor">
-          <CableSectionLayerStack c={c} shieldLayers={shieldLayers} />
+        <CableSection eyebrow="01" title="Construction snapshot" sub="Layer order + cross-section in one scan">
+          <div style={S.cdConstructionGrid}>
+            <div style={S.cdCompactPanel}>
+              <div style={S.cdCompactPanelHead}>
+                <span>Layer stack</span>
+                <strong>{shieldLayers.length + 3}</strong>
+              </div>
+              <CableSectionLayerStack c={c} shieldLayers={shieldLayers} />
+            </div>
+            <div style={S.cdCompactPanel}>
+              <CableConstructionInspector
+                c={c}
+                units={units}
+                shieldLayers={shieldLayers}
+                buildStep={buildStep}
+                selectedLayer={selectedLayer}
+                hoveredLayer={hoveredLayer}
+                setSelectedLayer={setSelectedLayer}
+                setHoveredLayer={setHoveredLayer}
+                replay={replay}
+                compact
+              />
+            </div>
+          </div>
         </CableSection>
 
-        <CableSection eyebrow="02" title="Cross-section · interactive layer inspector" sub="Click any ring to see material + role">
-          <CableConstructionInspector
-            c={c}
-            units={units}
-            shieldLayers={shieldLayers}
-            buildStep={buildStep}
-            selectedLayer={selectedLayer}
-            hoveredLayer={hoveredLayer}
-            setSelectedLayer={setSelectedLayer}
-            setHoveredLayer={setHoveredLayer}
-            replay={replay}
-          />
+        <CableSection eyebrow="02" title="Live link budget" sub="TX power → cable loss → receiver margin">
+          <CableSignalSection cable={c} compact />
         </CableSection>
 
-        <CableSection eyebrow="03" title="Signal flow · live link-budget simulator" sub="Slide the controls to see how length and frequency hit margin">
-          <CableSignalSection cable={c} />
-        </CableSection>
+        <div style={S.cdDisclosureGrid}>
+          <CableDetailDisclosure eyebrow="03" title="Attenuation table" sub="Frequency resolved loss">
+            <CableSectionAttenTable c={c} units={units} />
+          </CableDetailDisclosure>
+          <CableDetailDisclosure eyebrow="04" title="Engineering detail" sub="Electrical + mechanical geometry">
+            <CableSectionEngineering c={c} units={units} sourceMeta={sourceMeta} />
+          </CableDetailDisclosure>
+          <CableDetailDisclosure eyebrow="05" title="Manufacturing process" sub="Operator-facing build notes">
+            <CableSectionManufacturing c={c} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
+          </CableDetailDisclosure>
+          {(c.makers || (c.benefits && c.benefits.length > 0)) && (
+            <CableDetailDisclosure eyebrow="06" title="Suppliers + benefits" sub="Makers and why to choose it">
+              <CableSectionMakersBenefits c={c} />
+            </CableDetailDisclosure>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-        <CableSection eyebrow="04" title="Attenuation table" sub="Frequency-resolved insertion loss · dB/100m · dB/100ft · dB/25ft">
-          <CableSectionAttenTable c={c} units={units} />
-        </CableSection>
-
-        <CableSection eyebrow="05" title="Engineering detail" sub="Electrical · mechanical · derived geometry">
-          <CableSectionEngineering c={c} units={units} sourceMeta={sourceMeta} />
-        </CableSection>
-
-        <CableSection eyebrow="06" title="Manufacturing process" sub="Click any step to expand the operator-facing notes">
-          <CableSectionManufacturing c={c} expandedStep={expandedStep} setExpandedStep={setExpandedStep} />
-        </CableSection>
-
-        {(c.makers || (c.benefits && c.benefits.length > 0)) && (
-          <CableSection eyebrow="07" title="Suppliers &amp; key benefits" sub="Typical makers · why pick this cable">
-            <CableSectionMakersBenefits c={c} />
-          </CableSection>
-        )}
+function CableHeroBlueprint({ c, units, shieldLayers }) {
+  return (
+    <div style={S.cdHeroBlueprint}>
+      <div style={S.cdHeroBlueprintLabel}>Cross-section blueprint</div>
+      <div style={S.cdHeroBlueprintSvg}>
+        <CrossSection
+          d={c.d}
+          D={c.D}
+          shield={c.shield}
+          jacket={c.OD}
+          units={units}
+          cons={c.cons}
+          shieldLayers={shieldLayers}
+          buildStep={4}
+        />
+      </div>
+      <div style={S.cdHeroBlueprintStats}>
+        <span>{fmtLen(c.d, units, 2)} core</span>
+        <span>{fmtLen(c.OD, units, 2)} OD</span>
       </div>
     </div>
   );
@@ -6906,14 +6936,14 @@ function LibraryDisclosure({ eyebrow, title, children, defaultOpen = false }) {
   );
 }
 
-function CableConstructionInspector({ c, units, shieldLayers, buildStep, selectedLayer, hoveredLayer, setSelectedLayer, setHoveredLayer, replay, framed = false }) {
+function CableConstructionInspector({ c, units, shieldLayers, buildStep, selectedLayer, hoveredLayer, setSelectedLayer, setHoveredLayer, replay, framed = false, compact = false }) {
   return (
-    <div style={framed ? S.sectionFrame : undefined}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
-        <div style={{ fontSize: 10, letterSpacing: 2, color: "#a8a29e", textTransform: "uppercase" }}>Cross-section · layer inspector</div>
-        <button onClick={replay} style={{ background: "rgba(217,119,6,0.15)", color: "#fbbf24", border: "1px solid #d97706", padding: "3px 10px", fontSize: 9, letterSpacing: 1, cursor: "pointer", borderRadius: 3, textTransform: "uppercase", fontWeight: 600 }}>↻ Replay build</button>
+    <div style={framed ? S.sectionFrame : compact ? S.cdInspectorCompact : undefined}>
+      <div style={compact ? S.cdInspectorHeadCompact : { display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
+        <div style={compact ? S.cdCompactPanelHeadLabel : { fontSize: 10, letterSpacing: 2, color: "#a8a29e", textTransform: "uppercase" }}>Cross-section · layer inspector</div>
+        <button onClick={replay} style={compact ? S.cdReplayBtnCompact : { background: "rgba(217,119,6,0.15)", color: "#fbbf24", border: "1px solid #d97706", padding: "3px 10px", fontSize: 9, letterSpacing: 1, cursor: "pointer", borderRadius: 3, textTransform: "uppercase", fontWeight: 600 }}>↻ Replay build</button>
       </div>
-      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap", justifyContent: "center" }}>
+      <div style={compact ? S.cdInspectorBodyCompact : { display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap", justifyContent: "center" }}>
         <CrossSection d={c.d} D={c.D} shield={c.shield} jacket={c.OD} units={units} cons={c.cons} shieldLayers={shieldLayers} buildStep={buildStep} selectedLayer={selectedLayer} hoveredLayer={hoveredLayer} onLayerClick={setSelectedLayer} onLayerHover={setHoveredLayer} />
         {selectedLayer && <LayerDetailPanel layer={selectedLayer} c={c} onClose={() => setSelectedLayer(null)} units={units} />}
       </div>
@@ -6921,11 +6951,11 @@ function CableConstructionInspector({ c, units, shieldLayers, buildStep, selecte
   );
 }
 
-function CableSignalSection({ cable, framed = false }) {
+function CableSignalSection({ cable, framed = false, compact = false }) {
   return (
     <div style={framed ? S.sectionFrame : undefined}>
-      <div style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#a8a29e", marginBottom: 10, textTransform: "uppercase" }}>Signal flow · live link-budget simulator</div>
-      <SignalFlow cable={cable} />
+      {!compact && <div style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#a8a29e", marginBottom: 10, textTransform: "uppercase" }}>Signal flow · live link-budget simulator</div>}
+      <SignalFlow cable={cable} compact={compact} />
     </div>
   );
 }
@@ -8545,6 +8575,22 @@ function LinkView({ openInLibrary, onPrint, toolPreset, clearToolPreset }) {
   );
 }
 
+function CableDetailDisclosure({ eyebrow, title, sub, children, defaultOpen = false }) {
+  return (
+    <details style={S.cdDisclosure} open={defaultOpen}>
+      <summary style={S.cdDisclosureSummary}>
+        <span style={S.cdDisclosureTitleWrap}>
+          <span style={S.cdDisclosureEyebrow}>◆ {eyebrow}</span>
+          <span style={S.cdDisclosureTitle}>{title}</span>
+          {sub && <span style={S.cdDisclosureSub}>{sub}</span>}
+        </span>
+        <span style={S.cdDisclosureHint}>Open</span>
+      </summary>
+      <div style={S.cdDisclosureBody}>{children}</div>
+    </details>
+  );
+}
+
 function LinkChainTheater3D({ stages, freq, txPower, rxPower, rxSens, totalLoss, margin, verdict, totalCableLengthM, cableOnlyLoss, passiveLoss, activeGain }) {
   const cableStages = stages.filter((st) => st.type === "cable");
   const primaryCableId = cableStages[0]?.cableId || "lmr400";
@@ -9459,7 +9505,7 @@ function interpAtten(atten, freqMHz) {
   return atten[atten.length - 1][1];
 }
 
-function SignalFlow({ cable }) {
+function SignalFlow({ cable, compact = false }) {
   const [length, setLength] = useState(10);
   const [freq, setFreq] = useState(900);
   const [txPower, setTxPower] = useState(20);
@@ -9483,7 +9529,7 @@ function SignalFlow({ cable }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 10 }} onClick={(e) => e.stopPropagation()}>
+      <div style={compact ? S.signalControlsCompact : { display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 10 }} onClick={(e) => e.stopPropagation()}>
         <Ctrl label="TX power" val={txPower} set={setTxPower} min={0} max={40} unit=" dBm" />
         <Ctrl label="Length" val={length} set={setLength} min={1} max={100} unit=" m" />
         <Ctrl label="Frequency" val={freq} set={setFreq} min={10} max={Math.round(cable.fMax * 1000)} unit=" MHz" />
@@ -9500,8 +9546,9 @@ function SignalFlow({ cable }) {
         totalLoss={totalLoss}
         margin={margin}
         ok={ok}
+        compact={compact}
       />
-      <PowerSummary txPower={txPower} rxPower={rxPower} totalLoss={totalLoss} margin={margin} cable={cable} length={length} freq={freq} />
+      <PowerSummary txPower={txPower} rxPower={rxPower} totalLoss={totalLoss} margin={margin} cable={cable} length={length} freq={freq} compact={compact} />
     </div>
   );
 }
@@ -9526,6 +9573,7 @@ function LinkBudgetTheater3D({
   txSub,
   rxSub,
   children,
+  compact = false,
 }) {
   const mountRef = useRef(null);
   const metricsRef = useRef({ cable, length, freq, txPower, rxPower, rxSens, attenPer100m, totalLoss, margin, ok });
@@ -9756,7 +9804,7 @@ function LinkBudgetTheater3D({
   const signalKept = Math.pow(10, -totalLoss / 10) * 100;
 
   return (
-    <div style={S.linkTheaterFrame} data-testid="rf-link-budget-theater">
+    <div style={{ ...S.linkTheaterFrame, ...(compact ? S.linkTheaterFrameCompact : {}) }} data-testid="rf-link-budget-theater">
       <div ref={mountRef} style={S.linkTheaterCanvas} />
       <div style={S.linkTheaterScrim} />
       <div style={S.linkTheaterTopHud}>
@@ -9826,7 +9874,7 @@ function linkVerdict(margin) {
   return { icon: "🚀", title: "OVERKILL", color: "#34d399", desc: "Massive margin. You could use lower TX power or cheaper cable." };
 }
 
-function PowerSummary({ txPower, rxPower, totalLoss, margin, cable, length, freq }) {
+function PowerSummary({ txPower, rxPower, totalLoss, margin, cable, length, freq, compact = false }) {
   const v = linkVerdict(margin);
   const txPw = dbmToPower(txPower);
   const rxPw = dbmToPower(rxPower);
@@ -9845,6 +9893,39 @@ function PowerSummary({ txPower, rxPower, totalLoss, margin, cable, length, freq
       </div>
     </div>
   );
+
+  if (compact) {
+    return (
+      <div style={S.powerSummaryCompact}>
+        <div style={S.powerSummaryCompactHead}>
+          <span style={S.powerSummaryCompactKicker}>Engineering read</span>
+          <strong style={{ color: v.color }}>{v.title} · {margin > 0 ? "+" : ""}{margin.toFixed(1)} dB</strong>
+        </div>
+        <div style={S.powerSummaryCompactGrid}>
+          <div style={S.powerSummaryTile}>
+            <span style={S.powerSummaryTileLabel}>TX</span>
+            <strong style={S.powerSummaryTileValue}>{txPw}</strong>
+            <small style={S.powerSummaryTileSub}>{txPower.toFixed(0)} dBm</small>
+          </div>
+          <div style={S.powerSummaryTile}>
+            <span style={S.powerSummaryTileLabel}>Cable loss</span>
+            <strong style={{ ...S.powerSummaryTileValue, color: "#f97316" }}>{totalLoss.toFixed(2)} dB</strong>
+            <small style={S.powerSummaryTileSub}>{pctKept.toFixed(pctKept < 10 ? 2 : 0)}% survives</small>
+          </div>
+          <div style={S.powerSummaryTile}>
+            <span style={S.powerSummaryTileLabel}>RX</span>
+            <strong style={{ ...S.powerSummaryTileValue, color: v.color }}>{rxPw}</strong>
+            <small style={S.powerSummaryTileSub}>{rxPower.toFixed(1)} dBm</small>
+          </div>
+          <div style={S.powerSummaryTileWide}>
+            <span style={S.powerSummaryTileLabel}>Plain English</span>
+            <strong style={{ ...S.powerSummaryTileValue, fontSize: 12, lineHeight: 1.35 }}>{v.desc}</strong>
+            <small style={S.powerSummaryTileSub}>{cable.name} · {length} m · {freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}</small>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ marginTop: 14, padding: "14px 16px", background: "rgba(15,10,5,0.5)", borderRadius: 4, border: "1px solid rgba(217,119,6,0.15)" }}>
@@ -11288,10 +11369,10 @@ const S = {
   // ── Detail-view (cd*) — tab-based layout ──
   cdHero: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px, 0.9fr)",
-    gap: 24,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
+    gap: 18,
     alignItems: "stretch",
-    padding: 22,
+    padding: 16,
     marginBottom: 14,
     background: "linear-gradient(135deg, rgba(7,9,10,0.96), rgba(19,15,11,0.9))",
     border: "1px solid rgba(168,162,158,0.18)",
@@ -11302,7 +11383,7 @@ const S = {
     margin: "4px 0 4px",
     color: "#fef3c7",
     fontFamily: "'Fraunces', serif",
-    fontSize: 36,
+    fontSize: 31,
     lineHeight: 1.05,
     fontWeight: 700,
     letterSpacing: "-0.01em",
@@ -11386,7 +11467,7 @@ const S = {
   },
   cdHeroVisual: {
     position: "relative",
-    minHeight: 280,
+    minHeight: 238,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -11412,6 +11493,45 @@ const S = {
     fontFamily: "'JetBrains Mono', monospace",
   },
   cdHeroVisualFallback: { padding: 20 },
+  cdHeroBlueprint: {
+    position: "relative",
+    width: "100%",
+    minHeight: 238,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  cdHeroBlueprintLabel: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    color: "#5eead4",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    letterSpacing: "0.2em",
+    textTransform: "uppercase",
+    fontWeight: 800,
+  },
+  cdHeroBlueprintSvg: {
+    transform: "scale(0.78)",
+    transformOrigin: "center",
+    filter: "drop-shadow(0 22px 32px rgba(0,0,0,0.62))",
+  },
+  cdHeroBlueprintStats: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 10,
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    color: "#a8a29e",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+  },
 
   // Tab strip
   cdTabs: {
@@ -11452,7 +11572,7 @@ const S = {
   cdSectionGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-    gap: 28,
+    gap: 18,
   },
   cdSectionStack: { display: "flex", flexDirection: "column", gap: 28 },
   cdSectionTitle: {
@@ -11577,6 +11697,10 @@ const S = {
     background: "radial-gradient(circle at 50% 18%, rgba(20,83,77,0.28), rgba(5,10,10,0.98) 62%)",
     boxShadow: "inset 0 0 80px rgba(94,234,212,0.07), 0 22px 58px rgba(0,0,0,0.32)",
     marginTop: 10,
+  },
+  linkTheaterFrameCompact: {
+    minHeight: 360,
+    marginTop: 0,
   },
   linkTheaterCanvas: {
     position: "absolute",
@@ -11755,6 +11879,80 @@ const S = {
     fontSize: 10,
     lineHeight: 1.25,
   },
+  signalControlsCompact: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 10,
+    padding: "11px 12px",
+    marginBottom: 10,
+    background: "rgba(3,7,8,0.55)",
+    border: "1px solid rgba(94,234,212,0.16)",
+    borderRadius: 4,
+  },
+  powerSummaryCompact: {
+    marginTop: 10,
+    border: "1px solid rgba(217,119,6,0.16)",
+    borderRadius: 4,
+    background: "rgba(8,8,8,0.58)",
+    overflow: "hidden",
+  },
+  powerSummaryCompactHead: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: "10px 12px",
+    borderBottom: "1px solid rgba(168,162,158,0.12)",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+  },
+  powerSummaryCompactKicker: {
+    color: "#f59e0b",
+    fontSize: 9,
+    letterSpacing: "0.18em",
+    textTransform: "uppercase",
+    fontWeight: 800,
+  },
+  powerSummaryCompactGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+    gap: 1,
+    background: "rgba(168,162,158,0.08)",
+  },
+  powerSummaryTile: {
+    minHeight: 72,
+    padding: "10px 12px",
+    background: "rgba(5,5,5,0.62)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  powerSummaryTileWide: {
+    minHeight: 72,
+    padding: "10px 12px",
+    background: "rgba(5,5,5,0.62)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  powerSummaryTileLabel: {
+    color: "#94a3b8",
+    fontSize: 8.5,
+    letterSpacing: "0.16em",
+    textTransform: "uppercase",
+  },
+  powerSummaryTileValue: {
+    color: "#fbbf24",
+    fontSize: 15,
+    lineHeight: 1.1,
+  },
+  powerSummaryTileSub: {
+    color: "#a8a29e",
+    fontSize: 9.5,
+    lineHeight: 1.3,
+  },
   linkTheaterStatus: {
     position: "absolute",
     inset: 0,
@@ -11836,13 +12034,13 @@ const S = {
   cdAllSections: {
     display: "flex",
     flexDirection: "column",
-    gap: 36,
-    paddingTop: 22,
+    gap: 18,
+    paddingTop: 14,
   },
   cdSection: { display: "flex", flexDirection: "column" },
   cdSectionHeader: {
-    paddingBottom: 14,
-    marginBottom: 18,
+    paddingBottom: 10,
+    marginBottom: 12,
     borderBottom: "1px solid rgba(168,162,158,0.18)",
   },
   cdSectionEyebrow: {
@@ -11854,10 +12052,10 @@ const S = {
     fontWeight: 600,
   },
   cdSectionH: {
-    margin: "6px 0 4px",
+    margin: "5px 0 3px",
     color: "#fef3c7",
     fontFamily: "'Fraunces', serif",
-    fontSize: 22,
+    fontSize: 19,
     fontWeight: 600,
     letterSpacing: "-0.005em",
     lineHeight: 1.15,
@@ -11865,10 +12063,141 @@ const S = {
   cdSectionSub: {
     margin: 0,
     color: "#a8a29e",
-    fontSize: 12,
+    fontSize: 11,
     lineHeight: 1.55,
   },
   cdSectionContent: {},
+  cdConstructionGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 380px), 1fr))",
+    gap: 12,
+    alignItems: "stretch",
+  },
+  cdCompactPanel: {
+    padding: 12,
+    background: "rgba(3,7,8,0.48)",
+    border: "1px solid rgba(168,162,158,0.14)",
+    borderRadius: 4,
+    minWidth: 0,
+  },
+  cdCompactPanelHead: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingBottom: 9,
+    marginBottom: 10,
+    borderBottom: "1px solid rgba(168,162,158,0.12)",
+    color: "#5eead4",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    letterSpacing: "0.18em",
+    textTransform: "uppercase",
+    fontWeight: 800,
+  },
+  cdCompactPanelHeadLabel: {
+    color: "#5eead4",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    letterSpacing: "0.18em",
+    textTransform: "uppercase",
+    fontWeight: 800,
+  },
+  cdInspectorCompact: {
+    minWidth: 0,
+  },
+  cdInspectorHeadCompact: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingBottom: 9,
+    marginBottom: 8,
+    borderBottom: "1px solid rgba(168,162,158,0.12)",
+  },
+  cdReplayBtnCompact: {
+    background: "rgba(94,234,212,0.09)",
+    color: "#5eead4",
+    border: "1px solid rgba(94,234,212,0.32)",
+    padding: "4px 9px",
+    fontSize: 8.5,
+    letterSpacing: 1,
+    cursor: "pointer",
+    borderRadius: 3,
+    textTransform: "uppercase",
+    fontWeight: 700,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  cdInspectorBodyCompact: {
+    display: "flex",
+    gap: 12,
+    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    minHeight: 300,
+  },
+  cdDisclosureGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
+    gap: 10,
+  },
+  cdDisclosure: {
+    background: "rgba(8,8,8,0.52)",
+    border: "1px solid rgba(168,162,158,0.14)",
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  cdDisclosureSummary: {
+    listStyle: "none",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: "12px 14px",
+    cursor: "pointer",
+    background: "linear-gradient(135deg, rgba(15,10,5,0.72), rgba(3,7,8,0.48))",
+  },
+  cdDisclosureTitleWrap: {
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: "auto 1fr",
+    gap: "2px 10px",
+    alignItems: "baseline",
+  },
+  cdDisclosureEyebrow: {
+    color: "#d97706",
+    fontSize: 8.5,
+    letterSpacing: "0.22em",
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontWeight: 800,
+  },
+  cdDisclosureTitle: {
+    color: "#fef3c7",
+    fontSize: 13,
+    fontWeight: 800,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  cdDisclosureSub: {
+    gridColumn: "2",
+    color: "#78716c",
+    fontSize: 10,
+    lineHeight: 1.35,
+  },
+  cdDisclosureHint: {
+    color: "#5eead4",
+    border: "1px solid rgba(94,234,212,0.28)",
+    borderRadius: 3,
+    padding: "4px 8px",
+    fontSize: 8.5,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  cdDisclosureBody: {
+    padding: 14,
+    borderTop: "1px solid rgba(168,162,158,0.12)",
+  },
   cdSubsectionTitle: {
     color: "#f59e0b",
     fontSize: 9.5,
