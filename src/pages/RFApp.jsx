@@ -5688,7 +5688,7 @@ function CableRenderModal({ id, cable: c, initialMode = "standard", onClose }) {
       <div style={S.renderModalCard} onClick={(e) => e.stopPropagation()} data-testid="rf-glb-render-modal">
         <div style={S.renderModalHeader}>
           <div>
-            <div style={S.renderModalEyebrow}>{isMacro ? "◆ Macro GLB / Three.js render" : "◆ GLB / Three.js render"}</div>
+            <div style={S.renderModalEyebrow}>{isMacro ? "◆ Macro 3D / Three.js render" : "◆ GLB / Three.js render"}</div>
             <div style={S.renderModalTitle}>{c.name}</div>
           </div>
           <div style={S.renderModalHeaderTools}>
@@ -5701,7 +5701,7 @@ function CableRenderModal({ id, cable: c, initialMode = "standard", onClose }) {
           <div style={S.renderModalViewerPane}>
             <CableGlbViewer cable={renderCable} activeLayer={activeLayer} />
             <div style={S.renderModalStats}>
-              <RfFailureMetric label="Model" value={isMacro ? `${id}-macro` : id} sub={isMacro ? "hero macro GLB" : "runtime GLB"} accent="#5eead4" />
+              <RfFailureMetric label="Model" value={isMacro ? `${id}-macro` : id} sub={isMacro ? "macro 3D render" : "runtime GLB"} accent="#5eead4" />
               <RfFailureMetric label="OD" value={`${fmt(c.OD, 1)} mm`} sub={`${fmt(c.OD / MM_PER_IN, 2)} in`} accent="#fbbf24" />
               <RfFailureMetric label="VP" value={`${c.vp}%`} sub={`${c.z} Ω`} accent="#38bdf8" />
             </div>
@@ -5783,7 +5783,7 @@ function CableGlbViewer({ cable: c, activeLayer }) {
 
         scene = new THREE.Scene();
         modelGroup = new THREE.Group();
-        modelGroup.rotation.set(-0.12, 0.22, 0.02);
+        modelGroup.rotation.set(-0.1, -0.18, 0.015);
         scene.add(modelGroup);
 
         camera = new THREE.PerspectiveCamera(36, 1, 0.01, 100);
@@ -5879,6 +5879,267 @@ function CableGlbViewer({ cable: c, activeLayer }) {
         };
         applyLayerHighlightRef.current = applyLayerHighlight;
 
+        const snapshotBaseMaterials = (object, layers) => {
+          object.traverse((node) => {
+            if (!node.isMesh || !node.material) return;
+            node.userData.rfLayers = Array.from(new Set(layers || []));
+            const materials = Array.isArray(node.material) ? node.material : [node.material];
+            node.userData.rfBaseMaterials = materials.map((mat) => ({
+              color: mat.color.clone(),
+              emissive: mat.emissive?.clone?.() || new THREE.Color(0x000000),
+              opacity: mat.opacity ?? 1,
+              transparent: Boolean(mat.transparent),
+              depthWrite: mat.depthWrite !== false,
+              roughness: mat.roughness ?? 0.5,
+              metalness: mat.metalness ?? 0,
+            }));
+          });
+          return object;
+        };
+
+        const makeRfMaterial = (name, color, options = {}) => {
+          const opacity = options.opacity ?? 1;
+          const material = new THREE.MeshStandardMaterial({
+            name,
+            color,
+            metalness: options.metalness ?? 0,
+            roughness: options.roughness ?? 0.55,
+            transparent: opacity < 1,
+            opacity,
+            side: options.doubleSide ? THREE.DoubleSide : THREE.FrontSide,
+            depthWrite: opacity >= 0.98,
+          });
+          if (options.emissive) {
+            material.emissive = new THREE.Color(options.emissive);
+            material.emissiveIntensity = options.emissiveIntensity ?? 0.12;
+          }
+          return material;
+        };
+
+        const addCylinderX = (group, name, x, length, radius, material, layers, options = {}) => {
+          const geometry = new THREE.CylinderGeometry(
+            Math.max(radius, 0.006),
+            Math.max(radius, 0.006),
+            Math.max(length, 0.01),
+            options.radialSegments || 128,
+            options.heightSegments || 1,
+            Boolean(options.openEnded)
+          );
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.name = name;
+          mesh.rotation.z = Math.PI / 2;
+          mesh.position.x = x;
+          snapshotBaseMaterials(mesh, layers);
+          group.add(mesh);
+          return mesh;
+        };
+
+        const addCurveTube = (group, name, points, material, layers, radius, segments = 96) => {
+          const curve = new THREE.CatmullRomCurve3(points);
+          const geometry = new THREE.TubeGeometry(curve, segments, Math.max(radius, 0.003), 8, false);
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.name = name;
+          snapshotBaseMaterials(mesh, layers);
+          group.add(mesh);
+          return mesh;
+        };
+
+        const addHelix = (group, name, x0, x1, radius, turns, phase, material, layers, tubeRadius, handedness = 1) => {
+          const points = [];
+          const steps = 92;
+          for (let i = 0; i < steps; i += 1) {
+            const t = i / (steps - 1);
+            const x = x0 + (x1 - x0) * t;
+            const angle = phase + handedness * turns * Math.PI * 2 * t;
+            points.push(new THREE.Vector3(x, radius * Math.cos(angle), radius * Math.sin(angle)));
+          }
+          return addCurveTube(group, name, points, material, layers, tubeRadius, steps);
+        };
+
+        const addBraid = (group, x0, x1, radius, cableOd, materialA, materialB) => {
+          const carriers = Math.max(12, Math.min(22, Math.round(12 + cableOd * 0.55)));
+          const evenCarriers = carriers % 2 ? carriers + 1 : carriers;
+          const turns = cableOd >= 10 ? 2.15 : 2.55;
+          const tubeRadius = Math.max(0.0045, radius * 0.011);
+          for (let i = 0; i < evenCarriers; i += 1) {
+            const phase = (Math.PI * 2 * i) / evenCarriers;
+            addHelix(group, `procedural woven braid carrier ${i + 1}A`, x0, x1, radius, turns, phase, materialA, ["braid"], tubeRadius, 1);
+            addHelix(group, `procedural woven braid carrier ${i + 1}B`, x0, x1, radius * 1.012, turns, phase + Math.PI / evenCarriers, materialB, ["braid"], tubeRadius, -1);
+          }
+        };
+
+        const addSurfaceLines = (group, label, x0, x1, radius, count, material, layers, tubeRadius, wobble = 0.015) => {
+          for (let i = 0; i < count; i += 1) {
+            const phase = (Math.PI * 2 * i) / count;
+            const points = [];
+            const steps = 24;
+            for (let step = 0; step < steps; step += 1) {
+              const t = step / (steps - 1);
+              const x = x0 + (x1 - x0) * t;
+              const angle = phase + Math.sin(t * Math.PI * 2 + i * 0.31) * wobble;
+              points.push(new THREE.Vector3(x, radius * Math.cos(angle), radius * Math.sin(angle)));
+            }
+            addCurveTube(group, `${label} surface line ${i + 1}`, points, material, layers, tubeRadius, steps);
+          }
+        };
+
+        const addTorusRingX = (group, name, x, radius, tubeRadius, material, layers) => {
+          const geometry = new THREE.TorusGeometry(Math.max(radius, 0.01), Math.max(tubeRadius, 0.002), 10, 128);
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.name = name;
+          mesh.rotation.y = Math.PI / 2;
+          mesh.position.x = x;
+          snapshotBaseMaterials(mesh, layers);
+          group.add(mesh);
+          return mesh;
+        };
+
+        const conductorStrandCount = (text = "") => {
+          const lower = `${text}`.toLowerCase();
+          const match = lower.match(/\b(7|19|37)\s*[- ]?strand/);
+          if (match) return Number(match[1]);
+          if (/stranded|flexible/.test(lower)) return 7;
+          return 1;
+        };
+
+        const colorByText = {
+          jacket(text = "") {
+            const lower = text.toLowerCase();
+            if (/white|plenum|lszh|fep/.test(lower)) return 0xd8d1bd;
+            if (/brown|tan/.test(lower)) return 0x8b5e38;
+            if (/orange/.test(lower)) return 0x8a3a12;
+            if (/blue/.test(lower)) return 0x17365f;
+            return 0x11110f;
+          },
+          conductor(text = "") {
+            const lower = text.toLowerCase();
+            if (/silver|spc|ss|steel/.test(lower)) return 0xd8d2c3;
+            if (/tin|tinned/.test(lower)) return 0xc0b8a8;
+            return 0xb8692c;
+          },
+          braid(text = "") {
+            const lower = text.toLowerCase();
+            if (/silver|spc|tin|tinned|al|aluminum|foil/.test(lower)) return 0xcfc7b8;
+            return 0xb06b34;
+          },
+          dielectric(text = "") {
+            const lower = text.toLowerCase();
+            if (/ptfe|fep|teflon/.test(lower)) return 0xf3ead0;
+            if (/air/.test(lower)) return 0xd9e8e4;
+            if (/foam/.test(lower)) return 0xfff2cf;
+            return 0xf4df9f;
+          },
+        };
+
+        const addConductor = (group, x0, x1, radius, material, strands) => {
+          if (strands <= 1) {
+            addCylinderX(group, "procedural continuous center conductor", (x0 + x1) / 2, x1 - x0, radius, material, ["conductor"], { radialSegments: 96 });
+            return;
+          }
+          const centerRadius = radius * 0.34;
+          addCylinderX(group, "procedural center conductor core strand", (x0 + x1) / 2, x1 - x0, centerRadius, material, ["conductor"], { radialSegments: 48 });
+          const ringCount = Math.min(strands - 1, 18);
+          const strandRadius = radius * (strands >= 19 ? 0.18 : 0.24);
+          const ringRadius = radius - strandRadius * 1.1;
+          for (let i = 0; i < ringCount; i += 1) {
+            const phase = (Math.PI * 2 * i) / ringCount;
+            const points = [];
+            const steps = 42;
+            for (let step = 0; step < steps; step += 1) {
+              const t = step / (steps - 1);
+              const x = x0 + (x1 - x0) * t;
+              const angle = phase + Math.PI * 2 * 1.15 * t;
+              points.push(new THREE.Vector3(x, ringRadius * Math.cos(angle), ringRadius * Math.sin(angle)));
+            }
+            addCurveTube(group, `procedural conductor strand ${i + 1}`, points, material, ["conductor"], strandRadius, steps);
+          }
+        };
+
+        const buildProceduralRfMacro = () => {
+          const group = new THREE.Group();
+          group.name = `${c.name || "RF cable"} procedural macro render`;
+          const cons = c.cons || {};
+          const shieldText = `${cons.shield || ""} ${c.shield || ""}`;
+          const conductorText = cons.conductor || "";
+          const dielectricText = cons.dielectric || "";
+          const jacketText = cons.jacket || "";
+          const od = Math.max(Number(c.OD) || 8, 1);
+          const scale = Math.max(0.055, Math.min(0.23, 1.26 / od));
+          const outerR = Math.max(0.22, (od * 0.5) * scale);
+          const shieldR = Math.max(0.08, (Number(c.shield) || od * 0.82) * 0.5 * scale);
+          const dielectricR = Math.max(0.055, (Number(c.D) || od * 0.52) * 0.5 * scale);
+          const conductorR = Math.max(0.022, (Number(c.d) || od * 0.12) * 0.5 * scale);
+          const isHardline = c.cat === "heliax" || /corrugated|annular|outer conductor|solid.*tube|cellflex|heliax/i.test(shieldText);
+          const isSemiRigid = c.cat === "semi" || /semi[- ]?rigid|seamless|solid cu tube|bare semi|conformable/i.test(`${c.name} ${shieldText}`);
+          const hasFoil = /foil|duobond|duofoil|al[- ]?polymer|bonded/i.test(shieldText);
+          const hasBraid = /braid|woven|carrier|tinned cu/i.test(shieldText) || (!isHardline && !isSemiRigid);
+
+          const jacket = makeRfMaterial("procedural jacket material", colorByText.jacket(`${c.name} ${jacketText}`), { roughness: 0.92 });
+          const jacketEdge = makeRfMaterial("procedural jacket cut edge", colorByText.jacket(`${c.name} ${jacketText}`), { roughness: 0.98 });
+          const conductor = makeRfMaterial("procedural conductor copper surface", colorByText.conductor(conductorText), { metalness: 0.88, roughness: 0.18 });
+          const dielectric = makeRfMaterial("procedural dielectric surface", colorByText.dielectric(dielectricText), { roughness: /foam/i.test(dielectricText) ? 0.86 : 0.58 });
+          const dielectricLine = makeRfMaterial("procedural dielectric extrusion texture", 0xd8c9a6, { roughness: 0.94 });
+          const foil = makeRfMaterial("procedural golden foil shield", hasFoil ? 0xd2a549 : 0x9c7a3f, { metalness: 0.82, roughness: 0.28, doubleSide: true });
+          const foilSeam = makeRfMaterial("procedural foil lap seam", 0x6b4b1f, { metalness: 0.6, roughness: 0.4 });
+          const braidA = makeRfMaterial("procedural bright woven braid wires", colorByText.braid(shieldText), { metalness: 0.76, roughness: 0.32 });
+          const braidB = makeRfMaterial("procedural shadow woven braid wires", 0x776f61, { metalness: 0.62, roughness: 0.48 });
+          const copperShield = makeRfMaterial("procedural corrugated copper outer conductor", 0xb7652d, { metalness: 0.9, roughness: 0.22 });
+          const copperShadow = makeRfMaterial("procedural corrugation groove shadow", 0x5a2c12, { metalness: 0.68, roughness: 0.46 });
+
+          addCylinderX(group, "procedural rear jacket body", -1.92, 2.7, outerR, jacket, ["jacket"], { radialSegments: 128 });
+          addCylinderX(group, "procedural jacket cut lip", -0.58, 0.08, outerR * 1.012, jacketEdge, ["jacket"], { radialSegments: 128 });
+          addSurfaceLines(group, "procedural jacket", -3.05, -0.7, outerR * 1.006, 8, makeRfMaterial("procedural jacket satin streaks", 0x2b2b27, { roughness: 0.96 }), ["jacket"], Math.max(0.0025, outerR * 0.004), 0.01);
+
+          if (isHardline) {
+            addCylinderX(group, "procedural hardline corrugated shield sleeve", -0.02, 2.45, shieldR, copperShield, ["outerShield"], { radialSegments: 128 });
+            const rings = Math.max(14, Math.min(34, Math.round(od * 0.9)));
+            for (let i = 0; i < rings; i += 1) {
+              const x = -1.12 + (2.0 * i) / Math.max(1, rings - 1);
+              addTorusRingX(group, `procedural annular corrugation ${i + 1}`, x, shieldR * 1.01, Math.max(0.006, shieldR * 0.035), i % 2 ? copperShadow : copperShield, ["outerShield"]);
+            }
+            addCylinderX(group, "procedural exposed hardline dielectric", 1.52, 1.85, dielectricR, dielectric, ["dielectric"], { radialSegments: 128 });
+            if (/air/i.test(dielectricText)) {
+              addHelix(group, "procedural PE air spacer ribbon", 0.74, 2.34, Math.max(conductorR * 1.7, dielectricR * 0.55), 3.1, 0, makeRfMaterial("procedural air spacer ribbon", 0xe8ddba, { roughness: 0.58 }), ["dielectric"], Math.max(0.006, dielectricR * 0.018), 1);
+            }
+          } else if (isSemiRigid) {
+            addCylinderX(group, "procedural semi rigid outer tube", -0.22, 3.18, shieldR, /silver|tin/i.test(shieldText) ? braidA : copperShield, ["outerShield"], { radialSegments: 128 });
+            addCylinderX(group, "procedural semi rigid tube cut rim", 1.35, 0.08, shieldR * 1.02, /silver|tin/i.test(shieldText) ? braidA : copperShield, ["outerShield"], { radialSegments: 128 });
+            addCylinderX(group, "procedural exposed PTFE dielectric", 1.70, 1.65, dielectricR, dielectric, ["dielectric"], { radialSegments: 128 });
+          } else {
+            if (hasFoil) {
+              addCylinderX(group, "procedural golden foil shield sleeve", -0.18, 1.65, Math.max(dielectricR * 1.03, shieldR * 0.93), foil, ["foil"], { radialSegments: 128, openEnded: true });
+              addHelix(group, "procedural foil lap seam", -0.92, 0.62, Math.max(dielectricR * 1.045, shieldR * 0.945), 1.12, Math.PI / 7, foilSeam, ["foil"], Math.max(0.004, shieldR * 0.006), 1);
+            }
+            if (hasBraid) {
+              addBraid(group, -0.86, 0.98, Math.max(shieldR, dielectricR * 1.10), od, braidA, braidB);
+            } else {
+              addCylinderX(group, "procedural shield sleeve", -0.15, 1.7, shieldR, braidA, ["outerShield"], { radialSegments: 128, openEnded: true });
+            }
+            addCylinderX(group, "procedural exposed dielectric core", 1.30, 2.25, dielectricR, dielectric, ["dielectric"], { radialSegments: 128 });
+          }
+
+          addSurfaceLines(group, "procedural dielectric", 0.84, 2.35, dielectricR * 1.004, 9, dielectricLine, ["dielectric"], Math.max(0.0025, dielectricR * 0.004), 0.014);
+          addConductor(group, -2.85, 2.94, conductorR, conductor, conductorStrandCount(conductorText));
+          return group;
+        };
+
+        const mountRoot = (root) => {
+          const box = new THREE.Box3().setFromObject(root);
+          const center = box.getCenter(new THREE.Vector3());
+          const size = box.getSize(new THREE.Vector3());
+          root.position.sub(center);
+          const rect = mount.getBoundingClientRect();
+          const od = Number(c.OD) || 0;
+          const targetSize = rect.width < 560
+            ? (od >= 40 ? 1.35 : od >= 20 ? 1.75 : od >= 14 ? 2.1 : 2.45)
+            : (od >= 40 ? 2.45 : od >= 20 ? 3.15 : od >= 14 ? 3.7 : 4.55);
+          const scale = targetSize / Math.max(size.x, size.y, size.z, 0.001);
+          root.scale.setScalar(scale);
+          modelGroup.add(root);
+          modelRootRef.current = root;
+          applyLayerHighlight(activeLayerRef.current);
+        };
+
         loader.load(
           c.model,
           (gltf) => {
@@ -5922,29 +6183,25 @@ function CableGlbViewer({ cable: c, activeLayer }) {
                 }
               }
             });
-            const box = new THREE.Box3().setFromObject(root);
-            const center = box.getCenter(new THREE.Vector3());
-            const size = box.getSize(new THREE.Vector3());
-            root.position.sub(center);
-            const rect = mount.getBoundingClientRect();
-            const od = Number(c.OD) || 0;
-            const targetSize = rect.width < 560
-              ? (od >= 40 ? 1.35 : od >= 20 ? 1.75 : od >= 14 ? 2.1 : 2.45)
-              : (od >= 40 ? 2.45 : od >= 20 ? 3.15 : od >= 14 ? 3.7 : 4.55);
-            const scale = targetSize / Math.max(size.x, size.y, size.z, 0.001);
-            root.scale.setScalar(scale);
-            modelGroup.add(root);
-            modelRootRef.current = root;
-            applyLayerHighlight(activeLayerRef.current);
+            mountRoot(root);
             setStatus("");
           },
           undefined,
-          () => alive && setStatus("GLB failed to load")
+          () => {
+            if (!alive) return;
+            try {
+              setStatus("Building procedural macro");
+              const fallbackRoot = buildProceduralRfMacro();
+              mountRoot(fallbackRoot);
+              setStatus("");
+            } catch {
+              if (alive) setStatus("Procedural render unavailable");
+            }
+          }
         );
 
         const animate = () => {
           if (!alive || !renderer || !scene || !camera) return;
-          if (modelGroup && !pointer.down) modelGroup.rotation.y += 0.0018;
           renderer.render(scene, camera);
           frameId = requestAnimationFrame(animate);
         };
