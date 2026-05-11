@@ -8386,6 +8386,11 @@ function LinkView({ openInLibrary, onPrint, toolPreset, clearToolPreset }) {
   const totalLoss = stages.reduce((s, st) => st.type !== "tx" && st.type !== "rx" ? s + (st.loss || 0) : s, 0);
   const margin = rxPower - rxSens;
   const verdict = linkVerdict(margin);
+  const cableStageStats = stages.filter((st) => st.type === "cable");
+  const totalCableLengthM = cableStageStats.reduce((sum, st) => sum + (Number(st.lengthM) || 0), 0);
+  const cableOnlyLoss = cableStageStats.reduce((sum, st) => sum + Math.max(0, Number(st.loss) || 0), 0);
+  const passiveLoss = stages.reduce((sum, st) => st.type !== "tx" && st.type !== "rx" ? sum + Math.max(0, Number(st.loss) || 0) : sum, 0);
+  const activeGain = stages.reduce((sum, st) => st.loss < 0 ? sum + Math.abs(st.loss) : sum, 0);
 
   const update = (idx, patch) => setSegments(prev => prev.map((s, i) => i === idx ? { ...s, ...patch } : s));
   const insert = (atIdx, type) => setSegments(prev => { const a = [...prev]; a.splice(atIdx, 0, defaultSegment(type)); return a; });
@@ -8429,12 +8434,20 @@ function LinkView({ openInLibrary, onPrint, toolPreset, clearToolPreset }) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 4, marginBottom: 4, padding: "8px 10px", background: "rgba(15,10,5,0.3)", borderRadius: 3, fontSize: 9, color: "#78716c", textAlign: "center" }}>
-        <div>TX: <strong style={{ color: "#fbbf24", fontFamily: "JetBrains Mono, monospace" }}>{txPower.toFixed(0)} dBm</strong></div>
-        <div>Total loss: <strong style={{ color: "#ef4444", fontFamily: "JetBrains Mono, monospace" }}>{totalLoss.toFixed(2)} dB</strong></div>
-        <div>RX: <strong style={{ color: "#34d399", fontFamily: "JetBrains Mono, monospace" }}>{rxPower.toFixed(1)} dBm</strong> ({dbmToPower(rxPower)})</div>
-        <div>Sens: <strong style={{ color: "#a8a29e", fontFamily: "JetBrains Mono, monospace" }}>{rxSens} dBm</strong></div>
-      </div>
+      <LinkChainTheater3D
+        stages={stages}
+        freq={freq}
+        txPower={txPower}
+        rxPower={rxPower}
+        rxSens={rxSens}
+        totalLoss={totalLoss}
+        margin={margin}
+        verdict={verdict}
+        totalCableLengthM={totalCableLengthM}
+        cableOnlyLoss={cableOnlyLoss}
+        passiveLoss={passiveLoss}
+        activeGain={activeGain}
+      />
 
       <div style={{ display: "flex", alignItems: "stretch", gap: 0, flexWrap: "nowrap", overflowX: "auto", padding: "12px 6px", marginBottom: 16, background: "rgba(15,10,5,0.35)", borderRadius: 4 }}>
         {stages.map((st, i) => (
@@ -8528,6 +8541,87 @@ function LinkView({ openInLibrary, onPrint, toolPreset, clearToolPreset }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function LinkChainTheater3D({ stages, freq, txPower, rxPower, rxSens, totalLoss, margin, verdict, totalCableLengthM, cableOnlyLoss, passiveLoss, activeGain }) {
+  const cableStages = stages.filter((st) => st.type === "cable");
+  const primaryCableId = cableStages[0]?.cableId || "lmr400";
+  const primaryCable = CABLES[primaryCableId] || CABLES.lmr400;
+  const linkLength = Math.max(1, totalCableLengthM || cableStages[0]?.lengthM || 10);
+  const chainStages = stages.filter((st) => st.type !== "tx" && st.type !== "rx");
+  const componentSummary = chainStages.length
+    ? chainStages.slice(0, 4).map((st) => st.type === "cable" ? CABLES[st.cableId]?.name || "Cable" : st.label).join(" · ")
+    : "direct TX to RX";
+  const title = `${chainStages.length + 2} stages · ${freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}`;
+  const chainSub = [
+    `${cableOnlyLoss.toFixed(2)} dB cable`,
+    `${Math.max(0, passiveLoss - cableOnlyLoss).toFixed(2)} dB components`,
+    activeGain > 0 ? `${activeGain.toFixed(1)} dB active gain` : null,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <div style={S.linkChainTheaterWrap}>
+      <LinkBudgetTheater3D
+        cable={primaryCable}
+        length={linkLength}
+        freq={freq}
+        txPower={txPower}
+        rxPower={rxPower}
+        rxSens={rxSens}
+        attenPer100m={linkLength ? (cableOnlyLoss * 100 / linkLength) : 0}
+        totalLoss={Math.max(0, totalLoss)}
+        margin={margin}
+        ok={margin > 0}
+        eyebrow="Blender GLB chain theater"
+        title={title}
+        statusText={`${verdict.title} · ${margin > 0 ? "+" : ""}${margin.toFixed(1)} dB`}
+        lossLabel={activeGain > 0 ? "Net chain" : "Total chain"}
+        lossValue={`${totalLoss.toFixed(2)} dB`}
+        lossSub={chainSub}
+        txSub={dbmToPower(txPower)}
+        rxSub={`sens ${rxSens} dBm · ${dbmToPower(rxPower)}`}
+      >
+        <LinkTheaterStageRail stages={stages} rxSens={rxSens} />
+      </LinkBudgetTheater3D>
+      <div style={S.linkChainCaption}>
+        <span style={S.linkChainCaptionLabel}>Chain read</span>
+        <span>{componentSummary}</span>
+      </div>
+    </div>
+  );
+}
+
+function LinkTheaterStageRail({ stages, rxSens }) {
+  const compact = stages.length > 8;
+  const visible = compact ? [...stages.slice(0, 4), ...stages.slice(-3)] : stages;
+  return (
+    <div style={S.linkTheaterStageRail}>
+      {visible.map((st, i) => {
+        const typeInfo = st.type === "tx"
+          ? { icon: "TX", label: "TX", color: "#fbbf24" }
+          : st.type === "rx"
+            ? { icon: "RX", label: "RX", color: st.pwrOut >= rxSens ? "#34d399" : "#ef4444" }
+            : SEGMENT_TYPES.find((t) => t.v === st.type) || { icon: "◆", label: st.type, color: "#a8a29e" };
+        const lossText = st.type === "tx"
+          ? `${st.power ?? st.pwrOut} dBm`
+          : st.type === "rx"
+            ? `${st.pwrOut?.toFixed?.(1) || "?"} dBm`
+            : `${st.loss > 0 ? "-" : st.loss < 0 ? "+" : ""}${Math.abs(st.loss || 0).toFixed(st.type === "splitter" ? 1 : 2)} dB`;
+        return (
+          <React.Fragment key={`${st.id}-${i}`}>
+            {compact && i === 4 && <div style={S.linkTheaterStageGap}>+{stages.length - 7}</div>}
+            <div style={{ ...S.linkTheaterStageChip, borderColor: `${typeInfo.color}77` }}>
+              <div style={{ ...S.linkTheaterStageIcon, color: typeInfo.color, borderColor: `${typeInfo.color}88` }}>{typeInfo.icon}</div>
+              <div style={S.linkTheaterStageText}>
+                <span style={{ color: typeInfo.color }}>{st.type === "tx" || st.type === "rx" ? typeInfo.label : st.label}</span>
+                <small style={{ color: "#94a3b8", fontWeight: 700 }}>{lossText}</small>
+              </div>
+            </div>
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -9412,7 +9506,27 @@ function SignalFlow({ cable }) {
   );
 }
 
-function LinkBudgetTheater3D({ cable, length, freq, txPower, rxPower, rxSens, attenPer100m, totalLoss, margin, ok }) {
+function LinkBudgetTheater3D({
+  cable,
+  length,
+  freq,
+  txPower,
+  rxPower,
+  rxSens,
+  attenPer100m,
+  totalLoss,
+  margin,
+  ok,
+  eyebrow = "Blender GLB link theater",
+  title,
+  statusText,
+  lossLabel = "Cable loss",
+  lossValue,
+  lossSub,
+  txSub,
+  rxSub,
+  children,
+}) {
   const mountRef = useRef(null);
   const metricsRef = useRef({ cable, length, freq, txPower, rxPower, rxSens, attenPer100m, totalLoss, margin, ok });
   const [status, setStatus] = useState("Loading Blender scene");
@@ -9647,28 +9761,29 @@ function LinkBudgetTheater3D({ cable, length, freq, txPower, rxPower, rxSens, at
       <div style={S.linkTheaterScrim} />
       <div style={S.linkTheaterTopHud}>
         <div>
-          <div style={S.linkTheaterEyebrow}>Blender GLB link theater</div>
-          <div style={S.linkTheaterTitle}>{cable.name} · {length} m · {freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}</div>
+          <div style={S.linkTheaterEyebrow}>{eyebrow}</div>
+          <div style={S.linkTheaterTitle}>{title || `${cable.name} · ${length} m · ${freq < 1000 ? `${freq} MHz` : `${(freq / 1000).toFixed(2)} GHz`}`}</div>
         </div>
         <div style={{ ...S.linkTheaterPill, borderColor: marginColor, color: marginColor }}>
-          {ok ? "Link alive" : "Below sensitivity"} · {margin > 0 ? "+" : ""}{margin.toFixed(1)} dB
+          {statusText || `${ok ? "Link alive" : "Below sensitivity"} · ${margin > 0 ? "+" : ""}${margin.toFixed(1)} dB`}
         </div>
       </div>
+      {children && <div style={S.linkTheaterStageOverlay}>{children}</div>}
       <div style={S.linkTheaterStats}>
         <div style={{ ...S.linkTheaterMetric, borderColor: "rgba(251,191,36,0.45)" }}>
           <span style={S.linkTheaterMetricLabel}>TX power</span>
           <strong style={{ ...S.linkTheaterMetricValue, color: "#fbbf24" }}>{txPower.toFixed(0)} dBm</strong>
-          <small style={S.linkTheaterMetricSub}>{dbmToPower(txPower)}</small>
+          <small style={S.linkTheaterMetricSub}>{txSub || dbmToPower(txPower)}</small>
         </div>
         <div style={{ ...S.linkTheaterMetric, borderColor: "rgba(239,68,68,0.45)" }}>
-          <span style={S.linkTheaterMetricLabel}>Cable loss</span>
-          <strong style={{ ...S.linkTheaterMetricValue, color: "#f97316" }}>{totalLoss.toFixed(2)} dB</strong>
-          <small style={S.linkTheaterMetricSub}>{attenPer100m.toFixed(2)} dB/100m · {signalKept.toFixed(signalKept < 10 ? 1 : 0)}% survives</small>
+          <span style={S.linkTheaterMetricLabel}>{lossLabel}</span>
+          <strong style={{ ...S.linkTheaterMetricValue, color: "#f97316" }}>{lossValue || `${totalLoss.toFixed(2)} dB`}</strong>
+          <small style={S.linkTheaterMetricSub}>{lossSub || `${attenPer100m.toFixed(2)} dB/100m · ${signalKept.toFixed(signalKept < 10 ? 1 : 0)}% survives`}</small>
         </div>
         <div style={{ ...S.linkTheaterMetric, borderColor: `${marginColor}88` }}>
           <span style={S.linkTheaterMetricLabel}>RX power</span>
           <strong style={{ ...S.linkTheaterMetricValue, color: marginColor }}>{rxPower.toFixed(1)} dBm</strong>
-          <small style={S.linkTheaterMetricSub}>sens {rxSens} dBm</small>
+          <small style={S.linkTheaterMetricSub}>{rxSub || `sens ${rxSens} dBm`}</small>
         </div>
       </div>
       {status && <div style={S.linkTheaterStatus}>{status}</div>}
@@ -11527,6 +11642,89 @@ const S = {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
     gap: 10,
+  },
+  linkTheaterStageOverlay: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: 112,
+    zIndex: 3,
+    pointerEvents: "none",
+  },
+  linkChainTheaterWrap: {
+    marginBottom: 16,
+  },
+  linkChainCaption: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "9px 12px",
+    border: "1px solid rgba(94,234,212,0.18)",
+    borderTop: "none",
+    borderRadius: "0 0 4px 4px",
+    background: "rgba(3,9,10,0.58)",
+    color: "#d6cfc4",
+    fontSize: 10,
+    lineHeight: 1.45,
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  linkChainCaptionLabel: {
+    color: "#5eead4",
+    letterSpacing: "0.16em",
+    textTransform: "uppercase",
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
+  linkTheaterStageRail: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  linkTheaterStageChip: {
+    display: "flex",
+    alignItems: "center",
+    gap: 7,
+    minWidth: 112,
+    maxWidth: 168,
+    padding: "7px 8px",
+    background: "rgba(2,6,8,0.72)",
+    border: "1px solid",
+    borderRadius: 4,
+    boxShadow: "0 14px 32px rgba(0,0,0,0.26)",
+  },
+  linkTheaterStageIcon: {
+    width: 26,
+    height: 22,
+    border: "1px solid",
+    borderRadius: 3,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    fontSize: 9,
+    fontFamily: "'JetBrains Mono', monospace",
+    fontWeight: 900,
+  },
+  linkTheaterStageText: {
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9.5,
+    lineHeight: 1.15,
+    fontWeight: 800,
+  },
+  linkTheaterStageGap: {
+    padding: "5px 8px",
+    color: "#94a3b8",
+    background: "rgba(2,6,8,0.72)",
+    border: "1px dashed rgba(148,163,184,0.38)",
+    borderRadius: 3,
+    fontSize: 9,
+    fontFamily: "'JetBrains Mono', monospace",
   },
   linkTheaterMetric: {
     padding: "11px 12px",
