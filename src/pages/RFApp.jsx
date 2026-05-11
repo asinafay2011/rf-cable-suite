@@ -8575,19 +8575,18 @@ function LinkView({ openInLibrary, onPrint, toolPreset, clearToolPreset }) {
   );
 }
 
-function CableDetailDisclosure({ eyebrow, title, sub, children, defaultOpen = false }) {
+function CableDetailDisclosure({ eyebrow, title, sub, children }) {
   return (
-    <details style={S.cdDisclosure} open={defaultOpen}>
-      <summary style={S.cdDisclosureSummary}>
+    <section style={S.cdDisclosure}>
+      <div style={S.cdDisclosureSummary}>
         <span style={S.cdDisclosureTitleWrap}>
           <span style={S.cdDisclosureEyebrow}>◆ {eyebrow}</span>
           <span style={S.cdDisclosureTitle}>{title}</span>
           {sub && <span style={S.cdDisclosureSub}>{sub}</span>}
         </span>
-        <span style={S.cdDisclosureHint}>Open</span>
-      </summary>
+      </div>
       <div style={S.cdDisclosureBody}>{children}</div>
-    </details>
+    </section>
   );
 }
 
@@ -12148,13 +12147,11 @@ const S = {
     overflow: "hidden",
   },
   cdDisclosureSummary: {
-    listStyle: "none",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
     padding: "12px 14px",
-    cursor: "pointer",
     background: "linear-gradient(135deg, rgba(15,10,5,0.72), rgba(3,7,8,0.48))",
   },
   cdDisclosureTitleWrap: {
@@ -12183,16 +12180,6 @@ const S = {
     color: "#78716c",
     fontSize: 10,
     lineHeight: 1.35,
-  },
-  cdDisclosureHint: {
-    color: "#5eead4",
-    border: "1px solid rgba(94,234,212,0.28)",
-    borderRadius: 3,
-    padding: "4px 8px",
-    fontSize: 8.5,
-    letterSpacing: "0.14em",
-    textTransform: "uppercase",
-    fontFamily: "'JetBrains Mono', monospace",
   },
   cdDisclosureBody: {
     padding: 14,
