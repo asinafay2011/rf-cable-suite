@@ -509,6 +509,26 @@ export const CABLE_TOOLS = [
     },
   },
   {
+    name: 'highspeed_compliance_checker',
+    description:
+      'Check a high-speed cable/channel against protocol-style limits: USB4/TB, PCIe, HDMI 2.1, Cat6A, Cat8, SpaceWire, or custom. Returns pass/fail checks for Z0, insertion loss, return loss, skew, NEXT, and eye opening. Use this from the Highspeed agent when the engineer asks whether a design is compliant.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        protocol:             { type: 'string', description: 'usb4 | tb4 | pcie5 | pcie6 | hdmi21 | cat6a | cat8 | spacewire | custom.' },
+        length_m:             { type: 'number', description: 'Channel length in metres.' },
+        z0_ohm:               { type: 'number', description: 'Measured impedance. Differential systems use differential Z0.' },
+        insertion_loss_db:    { type: 'number', description: 'Measured total insertion loss at the relevant Nyquist/frequency.' },
+        return_loss_db:       { type: 'number', description: 'Worst return loss in dB. Higher is better.' },
+        skew_ps_per_m:        { type: 'number', description: 'Intra-pair or pair-to-pair skew in ps/m.' },
+        next_db:              { type: 'number', description: 'Worst NEXT/crosstalk isolation in dB. Higher is better.' },
+        eye_height_ui:        { type: 'number', description: 'Eye height/opening as fraction of UI, 0..1.' },
+        custom_limits:        { type: 'object', description: 'Optional overrides: {z0, z_tol_pct, max_il_db, min_rl_db, max_skew_ps_per_m, min_next_db, min_eye_ui}.' },
+      },
+      required: ['protocol'],
+    },
+  },
+  {
     name: 'propose_cost_preset',
     description:
       'Propose a Cost-Calc preset { cable_id, length_m, cu_price_usd_kg, cpk, line_speed_m_min }. The user clicks Apply on the tool pill and the Cost tab refreshes. Pull cu_price from get_company_defaults if you have it.',
@@ -927,6 +947,9 @@ export function dispatchCableTool(name, input) {
           _section: 'eyeTdr',
         };
       }
+      case 'highspeed_compliance_checker': {
+        return checkCableHighspeedCompliance(input);
+      }
       case 'propose_cost_preset': {
         const { label, cable, length_m, cu_price_usd_kg, cpk, line_speed_m_min, rationale } = input;
         if (!label) throw new Error('label required');
@@ -1122,4 +1145,69 @@ export function dispatchCableTool(name, input) {
   } catch (err) {
     return { error: err.message || 'Tool execution failed' };
   }
+}
+
+function cableProtocolLimits(protocol, length_m, custom_limits = {}) {
+  const p = String(protocol || 'custom').toLowerCase().replace(/[\s_-]/g, '');
+  const presets = {
+    usb4:      { name: 'USB4 passive cable', z0: 100, z_tol_pct: 10, max_il_db: 23, min_rl_db: 10, max_skew_ps_per_m: 5,  min_next_db: 26, min_eye_ui: 0.25 },
+    tb4:       { name: 'Thunderbolt / USB4 passive cable', z0: 100, z_tol_pct: 10, max_il_db: 23, min_rl_db: 10, max_skew_ps_per_m: 5,  min_next_db: 26, min_eye_ui: 0.25 },
+    thunderbolt4:{ name: 'Thunderbolt / USB4 passive cable', z0: 100, z_tol_pct: 10, max_il_db: 23, min_rl_db: 10, max_skew_ps_per_m: 5, min_next_db: 26, min_eye_ui: 0.25 },
+    pcie5:     { name: 'PCIe Gen5 cable/channel', z0: 85,  z_tol_pct: 10, max_il_db: 28, min_rl_db: 10, max_skew_ps_per_m: 5,  min_next_db: 30, min_eye_ui: 0.20 },
+    pcie6:     { name: 'PCIe Gen6 cable/channel', z0: 85,  z_tol_pct: 10, max_il_db: 36, min_rl_db: 8,  max_skew_ps_per_m: 3,  min_next_db: 32, min_eye_ui: 0.16 },
+    hdmi21:    { name: 'HDMI 2.1 Ultra High Speed', z0: 100, z_tol_pct: 10, max_il_db: 30, min_rl_db: 10, max_skew_ps_per_m: 15, min_next_db: 25, min_eye_ui: 0.22 },
+    cat6a:     { name: 'Cat 6A channel', z0: 100, z_tol_pct: 15, il_db_per_100m: 30.5, min_rl_db: 8, max_skew_ps_per_m: 45, min_next_db: 39.9, min_eye_ui: 0.30 },
+    cat8:      { name: 'Cat 8 channel', z0: 100, z_tol_pct: 15, il_db_per_100m: 67.0, min_rl_db: 8, max_skew_ps_per_m: 25, min_next_db: 13.1, min_eye_ui: 0.24 },
+    spacewire: { name: 'SpaceWire LVDS cable', z0: 100, z_tol_pct: 10, max_il_db: 6, min_rl_db: 14, max_skew_ps_per_m: 100, min_next_db: 30, min_eye_ui: 0.40 },
+    custom:    { name: 'Custom high-speed limit', z0: 100, z_tol_pct: 10, max_il_db: 20, min_rl_db: 10, max_skew_ps_per_m: 10, min_next_db: 25, min_eye_ui: 0.25 },
+  };
+  const limits = { ...(presets[p] || presets.custom), ...custom_limits };
+  if (limits.il_db_per_100m != null && length_m > 0 && limits.max_il_db == null) {
+    limits.max_il_db = limits.il_db_per_100m * (length_m / 100);
+  }
+  if (limits.max_il_db == null && limits.il_db_per_100m != null) limits.max_il_db = limits.il_db_per_100m;
+  return limits;
+}
+
+function checkCableHighspeedCompliance(input) {
+  const {
+    protocol = 'custom', length_m = 1, z0_ohm, insertion_loss_db, return_loss_db,
+    skew_ps_per_m, next_db, eye_height_ui, custom_limits = {},
+  } = input || {};
+  const limits = cableProtocolLimits(protocol, length_m, custom_limits);
+  const checks = [];
+  const add = (metric, measured, limit, pass, margin, unit, note) => {
+    if (measured == null || !isFinite(measured)) return;
+    checks.push({ metric, measured: num(measured, 3), limit, pass, margin: num(margin, 3), unit, note });
+  };
+
+  if (z0_ohm != null) {
+    const tol = (limits.z_tol_pct || 10) / 100;
+    const lo = limits.z0 * (1 - tol);
+    const hi = limits.z0 * (1 + tol);
+    add('Impedance', z0_ohm, `${num(lo, 1)}-${num(hi, 1)} Ω`, z0_ohm >= lo && z0_ohm <= hi, Math.min(z0_ohm - lo, hi - z0_ohm), 'Ω', 'Measured Z0 must stay inside the protocol impedance window.');
+  }
+  add('Insertion loss', insertion_loss_db, `≤ ${num(limits.max_il_db, 2)} dB`, insertion_loss_db <= limits.max_il_db, limits.max_il_db - insertion_loss_db, 'dB', 'Lower insertion loss leaves more receiver equalization margin.');
+  add('Return loss', return_loss_db, `≥ ${num(limits.min_rl_db, 2)} dB`, return_loss_db >= limits.min_rl_db, return_loss_db - limits.min_rl_db, 'dB', 'Low return loss usually points to impedance bumps, bad launch, or local crush.');
+  add('Skew', skew_ps_per_m, `≤ ${num(limits.max_skew_ps_per_m, 2)} ps/m`, skew_ps_per_m <= limits.max_skew_ps_per_m, limits.max_skew_ps_per_m - skew_ps_per_m, 'ps/m', 'Tight twist symmetry and matched dielectric keep timing aligned.');
+  add('NEXT', next_db, `≥ ${num(limits.min_next_db, 2)} dB`, next_db >= limits.min_next_db, next_db - limits.min_next_db, 'dB', 'Higher isolation means less pair-to-pair noise.');
+  add('Eye opening', eye_height_ui, `≥ ${num(limits.min_eye_ui, 3)} UI`, eye_height_ui >= limits.min_eye_ui, eye_height_ui - limits.min_eye_ui, 'UI', 'Eye opening summarizes jitter/noise margin at the receiver.');
+
+  const failing = checks.filter((c) => !c.pass);
+  const verdict = failing.length === 0 ? 'PASS' : failing.some((c) => c.margin < -3 || (c.unit === 'UI' && c.margin < -0.05)) ? 'FAIL' : 'MARGINAL';
+  return {
+    protocol,
+    profile: limits.name,
+    length_m,
+    verdict,
+    checks,
+    failing_metrics: failing.map((c) => c.metric),
+    first_fix: failing[0]?.metric === 'Insertion loss' ? 'Shorten the run, increase conductor size, or use lower-loss dielectric.'
+      : failing[0]?.metric === 'Return loss' ? 'Inspect connector launch, local crush, foil gap, or dielectric eccentricity.'
+      : failing[0]?.metric === 'Skew' ? 'Tighten pair lay control and match dielectric around both conductors.'
+      : failing[0]?.metric === 'NEXT' ? 'Improve pair spacing, foil continuity, and bundle symmetry.'
+      : failing[0]?.metric === 'Eye opening' ? 'Reduce jitter/noise or raise bandwidth before chasing cosmetic construction changes.'
+      : 'All measured limits clear the selected profile.',
+    _section: 'si',
+  };
 }

@@ -1,6 +1,7 @@
 // Tools exposed to the RF agent. Pure-math + small DBs, client-side dispatch.
 import { getCustomRfCables, addCustomRfCable, deleteCustomRfCable } from './customCableStore.js'
 import { getCompanyDefaults, setCompanyDefaults, resetCompanyDefaults } from './companyDefaults.js'
+import { RF_CABLES, RF_CATEGORIES } from '../data/rfCableLibrary.js'
 
 // ── Material properties database ────────────────────────
 export const MATERIAL_DB = {
@@ -75,70 +76,54 @@ export const STANDARDS_DB = {
   },
 }
 
-// ── RF cable database (50 Ω + 75 Ω) ─────────────────────
-// `datasheet` is an optional URL to the manufacturer datasheet PDF.
-export const RF_CABLE_DB = {
-  'rg-58':   { name: 'RG-58/U',      z0: 50, vf: 0.66, od_mm: 4.95, fmax_ghz: 1.0,
-    atten_db_per_100ft: { 30: 2.5, 100: 4.4, 450: 9.9, 900: 14.8, 1000: 16.0, 2400: 26.0 },
-    datasheet: 'https://www.belden.com/products/cable/coaxial/rg58' },
-  'rg-174':  { name: 'RG-174/U',     z0: 50, vf: 0.66, od_mm: 2.79, fmax_ghz: 3.0,
-    atten_db_per_100ft: { 100: 8.8, 400: 18.0, 900: 28.5, 1000: 30.0, 2400: 50.0, 3000: 56.0 },
-    datasheet: 'https://www.belden.com/products/cable/coaxial/rg174' },
-  'rg-178':  { name: 'RG-178B/U',    z0: 50, vf: 0.69, od_mm: 1.83, fmax_ghz: 3.0,
-    atten_db_per_100ft: { 100: 14.0, 400: 29.0, 1000: 46.0, 3000: 84.0 },
-    datasheet: 'https://www.pasternack.com/images/ProductPDF/RG178B-U.pdf' },
-  'rg-213':  { name: 'RG-213/U',     z0: 50, vf: 0.66, od_mm: 10.3, fmax_ghz: 3.0,
-    atten_db_per_100ft: { 30: 1.0, 100: 1.9, 400: 4.1, 900: 6.4, 1000: 6.9, 2400: 11.5 },
-    datasheet: 'https://www.belden.com/products/cable/coaxial/rg213' },
-  'rg-316':  { name: 'RG-316/U',     z0: 50, vf: 0.69, od_mm: 2.49, fmax_ghz: 3.0,
-    atten_db_per_100ft: { 100: 9.0, 400: 18.5, 1000: 31.0, 3000: 60.0 },
-    datasheet: 'https://www.pasternack.com/images/ProductPDF/RG316-U.pdf' },
-  'rg-393':  { name: 'RG-393/U',     z0: 50, vf: 0.70, od_mm: 9.91, fmax_ghz: 12.4,
-    atten_db_per_100ft: { 1000: 6.8, 5000: 16.2, 10000: 24.5, 12400: 28.0 },
-    datasheet: 'https://www.pasternack.com/images/ProductPDF/RG393-U.pdf' },
-  'lmr-100': { name: 'LMR-100A',     z0: 50, vf: 0.66, od_mm: 2.79, fmax_ghz: 5.8,
-    atten_db_per_100ft: { 100: 7.4, 400: 15.6, 1000: 25.5, 2400: 39.5, 5800: 64.0 },
-    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-100A.pdf' },
-  'lmr-200': { name: 'LMR-200',      z0: 50, vf: 0.83, od_mm: 4.95, fmax_ghz: 5.8,
-    atten_db_per_100ft: { 100: 3.9, 400: 8.0, 1000: 12.7, 2400: 20.5, 5800: 33.0 },
-    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-200.pdf' },
-  'lmr-240': { name: 'LMR-240',      z0: 50, vf: 0.84, od_mm: 6.10, fmax_ghz: 5.8,
-    atten_db_per_100ft: { 100: 3.0, 400: 6.4, 1000: 10.5, 2400: 16.5, 5800: 26.5 },
-    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-240.pdf' },
-  'lmr-400': { name: 'LMR-400',      z0: 50, vf: 0.85, od_mm: 10.29, fmax_ghz: 5.8,
-    atten_db_per_100ft: { 100: 1.5, 400: 3.0, 1000: 4.8, 2400: 7.6, 5800: 12.5 },
-    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-400.pdf' },
-  'lmr-600': { name: 'LMR-600',      z0: 50, vf: 0.87, od_mm: 14.99, fmax_ghz: 5.8,
-    atten_db_per_100ft: { 100: 0.96, 400: 1.96, 1000: 3.1, 2400: 5.0, 5800: 8.2 },
-    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-600.pdf' },
-  'lmr-900': { name: 'LMR-900',      z0: 50, vf: 0.87, od_mm: 22.10, fmax_ghz: 5.0,
-    atten_db_per_100ft: { 100: 0.66, 400: 1.36, 1000: 2.16, 2400: 3.6, 5000: 5.4 },
-    datasheet: 'https://timesmicrowave.com/DataSheets/CableProducts/LMR-900.pdf' },
-  'heliax-ldf4-50a': { name: 'Heliax LDF4-50A (1/2")', z0: 50, vf: 0.88, od_mm: 12.7, fmax_ghz: 8.8,
-    atten_db_per_100ft: { 30: 0.36, 100: 0.66, 400: 1.36, 1000: 2.18, 2400: 3.5, 5800: 5.7 },
-    datasheet: 'https://www.commscope.com/globalassets/digizuite/2719-ldf4-50a-external.pdf' },
-  'heliax-ldf5-50a': { name: 'Heliax LDF5-50A (7/8")', z0: 50, vf: 0.89, od_mm: 22.0, fmax_ghz: 5.0,
-    atten_db_per_100ft: { 100: 0.36, 400: 0.74, 1000: 1.20, 2400: 1.94, 4000: 2.54 },
-    datasheet: 'https://www.commscope.com/globalassets/digizuite/2723-ldf5-50a-external.pdf' },
-  'rg-59':   { name: 'RG-59/U',      z0: 75, vf: 0.66, od_mm: 6.15, fmax_ghz: 1.5,
-    atten_db_per_100ft: { 100: 3.6, 400: 7.5, 900: 11.4, 1500: 14.6 },
-    datasheet: 'https://www.belden.com/products/cable/coaxial/rg59' },
-  'rg-6':    { name: 'RG-6/U (CATV)', z0: 75, vf: 0.83, od_mm: 6.86, fmax_ghz: 3.0,
-    atten_db_per_100ft: { 100: 2.0, 400: 4.0, 900: 5.7, 1000: 6.0, 2400: 9.8 },
-    datasheet: 'https://www.belden.com/products/cable/coaxial/rg6' },
-  'rg-11':   { name: 'RG-11/U (75 Ω)', z0: 75, vf: 0.84, od_mm: 10.30, fmax_ghz: 3.0,
-    atten_db_per_100ft: { 100: 1.4, 400: 3.0, 1000: 5.5, 2400: 9.5 },
-    datasheet: 'https://www.belden.com/products/cable/coaxial/rg11' },
-  'ut-141':  { name: 'UT-141 Semi-Rigid', z0: 50, vf: 0.70, od_mm: 3.58, fmax_ghz: 22,
-    atten_db_per_100ft: { 1000: 14.0, 6000: 36.0, 18000: 67.0, 22000: 75.0 },
-    datasheet: 'https://www.minicircuits.com/pdfs/UT141.pdf' },
-  'ut-085':  { name: 'UT-085 Semi-Rigid', z0: 50, vf: 0.70, od_mm: 2.20, fmax_ghz: 33,
-    atten_db_per_100ft: { 1000: 22.0, 6000: 56.0, 18000: 100.0, 33000: 138.0 },
-    datasheet: 'https://www.minicircuits.com/pdfs/UT085.pdf' },
-  'sucoflex-104': { name: 'Sucoflex 104 (HF Test)', z0: 50, vf: 0.77, od_mm: 6.50, fmax_ghz: 26.5,
-    atten_db_per_100ft: { 1000: 7.7, 10000: 26.5, 18000: 36.4, 26500: 45.7 },
-    datasheet: 'https://www.hubersuhner.com/en/documents-repository/technologies/pdf/data-sheets-rf/sucoflex-104.pdf' },
+// ── Shared RF cable database ───────────────────────────
+// Source tables in rfCableLibrary.js are dB / 100 m for the UI;
+// RF tools expose dB / 100 ft for compatibility with existing tool contracts.
+const _dbPer100mTo100ft = (db) => Number((db * 0.3048).toFixed(3))
+
+function _normaliseLibraryCable(id, cable) {
+  const attenuation100ft = {}
+  const attenuation100m = {}
+  for (const [freq, dbPer100m] of cable.atten || []) {
+    attenuation100m[freq] = dbPer100m
+    attenuation100ft[freq] = _dbPer100mTo100ft(dbPer100m)
+  }
+  return {
+    id,
+    name: cable.name,
+    z0: cable.z,
+    vf: cable.vp ? cable.vp / 100 : undefined,
+    od_mm: cable.OD,
+    conductor_od_mm: cable.d,
+    dielectric_od_mm: cable.D,
+    shield_od_mm: cable.shield,
+    fmax_ghz: cable.fMax,
+    v_max: cable.vMax,
+    capacitance_pf_m: cable.cap,
+    mass_g_m: cable.mass,
+    flex: cable.flex,
+    outdoor: cable.outdoor,
+    power: cable.power,
+    complexity: cable.complexity,
+    category: cable.cat,
+    category_label: RF_CATEGORIES[cable.cat]?.label || cable.cat,
+    alias: cable.alias,
+    notes: cable.apps,
+    makers: cable.makers,
+    construction: cable.cons,
+    process: cable.proc,
+    render: cable.render,
+    model: cable.model,
+    macroModel: cable.macroModel,
+    datasheet: cable.datasheet,
+    atten_db_per_100m: attenuation100m,
+    atten_db_per_100ft: attenuation100ft,
+  }
 }
+
+export const RF_CABLE_DB = Object.fromEntries(
+  Object.entries(RF_CABLES).map(([id, cable]) => [id, _normaliseLibraryCable(id, cable)])
+)
 
 // ── Connector database ─────────────────────────────────
 export const CONNECTOR_DB = {
@@ -157,13 +142,31 @@ export const CONNECTOR_DB = {
 const num = (v, d = 2) => (typeof v === 'number' && isFinite(v) ? Number(v.toFixed(d)) : v)
 
 function searchDB(db, query) {
-  const q = (query || '').toLowerCase().replace(/[\s-/]/g, '')
+  const q = normaliseSearchKey(query)
   const out = []
   for (const [id, item] of Object.entries(db)) {
-    const hay = (id + ' ' + item.name).toLowerCase().replace(/[\s-/]/g, '')
+    const hay = normaliseSearchKey([
+      id, item.name, item.alias, item.notes, item.makers, item.category_label, item.category,
+    ].filter(Boolean).join(' '))
     if (hay.includes(q)) out.push({ id, ...item })
   }
   return out
+}
+
+function normaliseSearchKey(value) {
+  return String(value || '').toLowerCase().replace(/[\s/_().-]/g, '')
+}
+
+function findRfCable(db, cableId) {
+  if (!cableId) return [null, null]
+  if (db[cableId]) return [cableId, db[cableId]]
+  const q = normaliseSearchKey(cableId)
+  const match = Object.entries(db).find(([id, cable]) => {
+    return normaliseSearchKey(id) === q
+      || normaliseSearchKey(cable.name) === q
+      || normaliseSearchKey(cable.alias).includes(q)
+  })
+  return match || [null, null]
 }
 
 function interpAtten(table, freq_mhz) {
@@ -644,6 +647,135 @@ export const RF_TOOLS = [
       required: ['vp', 'layers'],
     },
   },
+  {
+    name: 'connector_launch_analyzer',
+    description:
+      'Analyze an RF connector launch from cable Z0 into pin / dielectric / ferrule geometry. Returns launch impedance, equivalent local Z-step, estimated return loss, VSWR, and practical fixes. Use for SMA/N/2.92/1.85 style launch prep, pin diameter changes, ferrule steps, or bad connector-launch troubleshooting.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        connector_id:          { type: 'string', description: 'Optional connector id from lookup_connector, e.g. sma, n, bnc, 7-16.' },
+        cable_z0_ohm:          { type: 'number', description: 'Cable characteristic impedance in ohms. Default 50.' },
+        pin_diameter_mm:       { type: 'number', description: 'Center pin OD in the launch region.' },
+        dielectric_diameter_mm:{ type: 'number', description: 'Inner diameter of grounded outer / dielectric OD around the pin.' },
+        dielectric_er:         { type: 'number', description: 'Launch dielectric εr. PTFE/FEP usually ~2.05-2.10. Default 2.05.' },
+        ferrule_step_mm:       { type: 'number', description: 'Abrupt OD/ID discontinuity at ferrule or solder cup in mm. 0 if unknown.' },
+        launch_length_mm:      { type: 'number', description: 'Physical length of the suspect launch region. Default 3 mm.' },
+        freq_ghz:              { type: 'number', description: 'Frequency of interest in GHz. Default 6 GHz.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'shielding_effectiveness_predictor',
+    description:
+      'Estimate coax shielding effectiveness from foil overlap, braid coverage, spiral gap, layer count, and frequency. Returns SE in dB, leak risk, weak layer, and build recommendations. Use for EMI / near-field / shield-leak questions before committing a shield stack.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        freq_mhz:           { type: 'number', description: 'Test frequency in MHz. Default 1000.' },
+        foil_overlap_pct:   { type: 'number', description: 'Foil overlap percent, 0-100. Higher helps seam leakage.' },
+        braid_coverage_pct: { type: 'number', description: 'Optical braid coverage percent, 0-100.' },
+        spiral_gap_pct:     { type: 'number', description: 'SPC spiral/flatwire shield open gap percent. 8-13% is common for spiral.' },
+        layer_count:        { type: 'number', description: 'Number of shield layers, excluding jacket. Default inferred from supplied values.' },
+        has_drain:          { type: 'boolean', description: 'True if a drain wire / bonded shield path is present.' },
+        jacket_material:    { type: 'string', description: 'Optional jacket material note: PVC, LSZH, FEP, PE, TPU, etc.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'sparameter_cascade',
+    description:
+      'Cascade a chain of RF cable / connector / passive stages into a quick S-parameter budget. Accepts stages with cable_id+length_ft, connector_id+count, or explicit il_db / return_loss_db. Returns total S21 insertion loss, worst S11 return loss, VSWR, and the dominant stage.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        freq_mhz: { type: 'number', description: 'Frequency in MHz for cable attenuation interpolation. Default 1000.' },
+        z0_ohm:   { type: 'number', description: 'Reference impedance. Default 50.' },
+        stages: {
+          type: 'array',
+          description: 'Array of stages. Each may include {name, cable_id, length_ft, connector_id, count, il_db, return_loss_db, vswr}.',
+          items: { type: 'object' },
+        },
+      },
+      required: ['stages'],
+    },
+  },
+  {
+    name: 'phase_delay_match',
+    description:
+      'Compare two RF cables for phase delay / skew at a frequency and recommend trim length. Use for phase-matched jumpers, antenna arrays, test leads, and differential/high-speed skew checks.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        freq_mhz:           { type: 'number', description: 'Frequency for phase calculation in MHz. Default 1000.' },
+        length_a_m:         { type: 'number', description: 'Cable A length in metres.' },
+        length_b_m:         { type: 'number', description: 'Cable B length in metres.' },
+        vf_a:               { type: 'number', description: 'Velocity factor for cable A, 0..1. Default 0.66.' },
+        vf_b:               { type: 'number', description: 'Velocity factor for cable B, 0..1. Default = vf_a.' },
+        target_skew_ps:     { type: 'number', description: 'Optional desired A-B skew in ps. Default 0.' },
+        target_phase_deg:   { type: 'number', description: 'Optional desired A-B phase at freq, degrees. Default derived from target_skew_ps.' },
+      },
+      required: ['length_a_m', 'length_b_m'],
+    },
+  },
+  {
+    name: 'bend_crush_risk',
+    description:
+      'Estimate impedance disturbance, return loss, and manufacturing risk from bend radius or jacket/dielectric crush. Use when a coax is kinked, clamped, routed too tightly, or fails TDR/VSWR after installation.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cable_id:        { type: 'string', description: 'Optional RF cable id from lookup_rf_cable to infer OD and Z0.' },
+        od_mm:           { type: 'number', description: 'Cable outer diameter if no cable_id is provided.' },
+        z0_ohm:          { type: 'number', description: 'Nominal impedance. Default cable z0 or 50.' },
+        bend_radius_mm:  { type: 'number', description: 'Inside bend radius in mm.' },
+        crush_pct:       { type: 'number', description: 'Estimated local diameter compression percent, 0-40.' },
+        freq_mhz:        { type: 'number', description: 'Frequency for severity note. Default 1000.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'thermal_power_derating',
+    description:
+      'Estimate RF cable heating and power derating from frequency, length, ambient temperature, bundle count, VSWR, and cable attenuation. Returns dissipated watts, derated safe power, thermal margin, and whether the run is safe.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cable_id:      { type: 'string', description: 'RF cable id from lookup_rf_cable.' },
+        freq_mhz:      { type: 'number', description: 'Frequency in MHz.' },
+        power_w:       { type: 'number', description: 'Applied CW RF input power in watts.' },
+        length_ft:     { type: 'number', description: 'Cable length in feet. Default 100.' },
+        ambient_c:     { type: 'number', description: 'Ambient temperature in C. Default 25.' },
+        bundle_count:  { type: 'number', description: 'How many similar cables are bundled together. Default 1.' },
+        airflow:       { type: 'string', description: 'still | normal | forced. Default normal.' },
+        vswr:          { type: 'number', description: 'Load VSWR. Default 1.0.' },
+      },
+      required: ['cable_id', 'freq_mhz', 'power_w'],
+    },
+  },
+  {
+    name: 'highspeed_compliance_checker',
+    description:
+      'Check a high-speed cable/channel against common protocol-style limits: USB4/TB, PCIe, HDMI, Cat6A, Cat8, SpaceWire, or custom. Returns pass/fail checks for Z0, insertion loss, return loss, skew, NEXT, and eye opening. Useful when RF-style physical defects need to be translated into high-speed pass/fail language.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        protocol:             { type: 'string', description: 'usb4 | tb4 | pcie5 | pcie6 | hdmi21 | cat6a | cat8 | spacewire | custom.' },
+        length_m:             { type: 'number', description: 'Channel length in metres.' },
+        z0_ohm:               { type: 'number', description: 'Measured impedance. Differential systems use differential Z0.' },
+        insertion_loss_db:    { type: 'number', description: 'Measured total insertion loss at the relevant Nyquist/frequency.' },
+        return_loss_db:       { type: 'number', description: 'Worst return loss in dB. Higher is better.' },
+        skew_ps_per_m:        { type: 'number', description: 'Intra-pair or pair-to-pair skew in ps/m.' },
+        next_db:              { type: 'number', description: 'Worst NEXT/crosstalk isolation in dB. Higher is better.' },
+        eye_height_ui:        { type: 'number', description: 'Eye height/opening as fraction of UI, 0..1.' },
+        custom_limits:        { type: 'object', description: 'Optional overrides: {z0, z_tol_pct, max_il_db, min_rl_db, max_skew_ps_per_m, min_next_db, min_eye_ui}.' },
+      },
+      required: ['protocol'],
+    },
+  },
 ]
 
 // ── dispatcher ─────────────────────────────────────────
@@ -686,12 +818,13 @@ export function dispatchRfTool(name, input) {
       case 'compute_attenuation': {
         const { cable_id, freq_mhz, length_ft } = input
         const merged = { ...RF_CABLE_DB, ...getCustomRfCables() }
-        const cable = merged[cable_id]
+        const [resolvedId, cable] = findRfCable(merged, cable_id)
         if (!cable) throw new Error(`Unknown cable_id "${cable_id}". Use lookup_rf_cable.`)
         if (!(freq_mhz > 0 && length_ft > 0)) throw new Error('freq_mhz and length_ft must be positive')
         const dbPer100 = interpAtten(cable.atten_db_per_100ft, freq_mhz)
         const total = (dbPer100 / 100) * length_ft
         return {
+          cable_id: resolvedId,
           cable: cable.name,
           freq_mhz, length_ft,
           attenuation_db_per_100ft: num(dbPer100, 2),
@@ -710,8 +843,9 @@ export function dispatchRfTool(name, input) {
         const stages = []
         let p = tx_dbm
         stages.push({ stage: 'TX', delta_db: 0, power_dbm: num(p, 2) })
+        const cableDb = { ...RF_CABLE_DB, ...getCustomRfCables() }
         if (tx_cable_id && tx_cable_ft > 0) {
-          const c = ({ ...RF_CABLE_DB, ...getCustomRfCables() })[tx_cable_id]
+          const [, c] = findRfCable(cableDb, tx_cable_id)
           if (!c) throw new Error(`Unknown tx_cable_id "${tx_cable_id}"`)
           const il = (interpAtten(c.atten_db_per_100ft, freq_mhz) / 100) * tx_cable_ft
           p -= il
@@ -738,7 +872,7 @@ export function dispatchRfTool(name, input) {
           stages.push({ stage: `RX antenna gain ${rx_antenna_gain_dbi} dBi`, delta_db: num(rx_antenna_gain_dbi, 2), power_dbm: num(p, 2) })
         }
         if (rx_cable_id && rx_cable_ft > 0) {
-          const c = ({ ...RF_CABLE_DB, ...getCustomRfCables() })[rx_cable_id]
+          const [, c] = findRfCable(cableDb, rx_cable_id)
           if (!c) throw new Error(`Unknown rx_cable_id "${rx_cable_id}"`)
           const il = (interpAtten(c.atten_db_per_100ft, freq_mhz) / 100) * rx_cable_ft
           p -= il
@@ -808,12 +942,12 @@ export function dispatchRfTool(name, input) {
         if (!(freq_mhz > 0 && length_ft > 0)) throw new Error('freq_mhz and length_ft must be positive')
         const merged = { ...RF_CABLE_DB, ...getCustomRfCables() }
         const rows = cable_ids.map((id) => {
-          const c = merged[id]
+          const [resolvedId, c] = findRfCable(merged, id)
           if (!c) return { id, error: `not found` }
           const dbPer100 = interpAtten(c.atten_db_per_100ft, freq_mhz)
           const total = (dbPer100 / 100) * length_ft
           return {
-            id, name: c.name, z0: c.z0, vf: c.vf, od_mm: c.od_mm, fmax_ghz: c.fmax_ghz,
+            id: resolvedId || id, query_id: id, name: c.name, z0: c.z0, vf: c.vf, od_mm: c.od_mm, fmax_ghz: c.fmax_ghz,
             il_db_per_100ft: num(dbPer100, 2),
             total_il_db: num(total, 2),
           }
@@ -849,12 +983,12 @@ export function dispatchRfTool(name, input) {
       case 'alternatives_finder': {
         const { reference_id, freq_mhz = 1000, max_il_delta_db_per_100ft = 1.5 } = input
         const merged = { ...RF_CABLE_DB, ...getCustomRfCables() }
-        const ref = merged[reference_id]
+        const [resolvedRefId, ref] = findRfCable(merged, reference_id)
         if (!ref) throw new Error(`Unknown reference cable "${reference_id}"`)
         const refIL = interpAtten(ref.atten_db_per_100ft, freq_mhz)
         const alternatives = []
         for (const [id, c] of Object.entries(merged)) {
-          if (id === reference_id) continue
+          if (id === resolvedRefId) continue
           if ((c.z0 || 0) !== ref.z0) continue
           const il = interpAtten(c.atten_db_per_100ft, freq_mhz)
           const delta = il - refIL
@@ -950,7 +1084,7 @@ export function dispatchRfTool(name, input) {
       case 'power_handling': {
         const { cable_id, freq_mhz, ambient_c = 25, vswr = 1.0 } = input
         const merged = { ...RF_CABLE_DB, ...getCustomRfCables() }
-        const c = merged[cable_id]
+        const [, c] = findRfCable(merged, cable_id)
         if (!c) throw new Error(`Unknown cable "${cable_id}"`)
         if (!(freq_mhz > 0)) throw new Error('freq_mhz must be positive')
         const od = c.od_mm || 5
@@ -982,13 +1116,13 @@ export function dispatchRfTool(name, input) {
       case 'generate_touchstone': {
         const { cable_id, length_ft, f_min_mhz = 1, f_max_mhz = 3000, n_points = 1601, defects = [] } = input
         const merged = { ...RF_CABLE_DB, ...getCustomRfCables() }
-        const c = merged[cable_id]
+        const [resolvedId, c] = findRfCable(merged, cable_id)
         if (!c) throw new Error(`Unknown cable "${cable_id}"`)
         const length_m = length_ft / 3.28084
         const c_speed = 299792458
         const vf = c.vf || 0.66
         const tau_end = (2 * length_m) / (vf * c_speed)
-        const lines = [`! Synthesized from rfTools.generate_touchstone`, `! Cable: ${c.name} (${cable_id}), VF=${vf}, length=${length_ft} ft`, `# MHz S MA R 50`]
+        const lines = [`! Synthesized from rfTools.generate_touchstone`, `! Cable: ${c.name} (${resolvedId || cable_id}), VF=${vf}, length=${length_ft} ft`, `# MHz S MA R 50`]
         for (let i = 0; i < n_points; i++) {
           const f_mhz = f_min_mhz + ((f_max_mhz - f_min_mhz) * i) / (n_points - 1)
           const f = f_mhz * 1e6
@@ -1077,6 +1211,27 @@ export function dispatchRfTool(name, input) {
       case 'compute_tape_notches': {
         const result = computeTapeNotches(input)
         return result
+      }
+      case 'connector_launch_analyzer': {
+        return analyzeConnectorLaunch(input)
+      }
+      case 'shielding_effectiveness_predictor': {
+        return predictShieldingEffectiveness(input)
+      }
+      case 'sparameter_cascade': {
+        return cascadeSParameters(input)
+      }
+      case 'phase_delay_match': {
+        return matchPhaseDelay(input)
+      }
+      case 'bend_crush_risk': {
+        return estimateBendCrushRisk(input)
+      }
+      case 'thermal_power_derating': {
+        return estimateThermalDerating(input)
+      }
+      case 'highspeed_compliance_checker': {
+        return checkHighspeedCompliance(input)
       }
       default:
         return { error: `Unknown tool: ${name}` }
@@ -1380,6 +1535,353 @@ function computeTapeNotches(input) {
         ? 'STRONG notches: 2+ tape layers share the same pitch — perturbations add coherently. Stagger pitches or vary tape widths to break the periodicity.'
         : null,
     ].filter(Boolean),
+  }
+}
+
+function _clamp(x, lo, hi) {
+  return Math.min(hi, Math.max(lo, x))
+}
+
+function _mergedRfCables() {
+  return { ...RF_CABLE_DB, ...getCustomRfCables() }
+}
+
+function _rhoFromReturnLoss(rl_db) {
+  return Math.pow(10, -Math.max(0, rl_db) / 20)
+}
+
+function _returnLossFromRho(rho) {
+  const r = Math.abs(rho)
+  return r <= 0 ? 999 : -20 * Math.log10(Math.min(0.999999, r))
+}
+
+function _vswrFromRho(rho) {
+  const r = Math.min(0.999999, Math.abs(rho))
+  return (1 + r) / (1 - r)
+}
+
+function _rlFromZStep(z0, zLocal) {
+  const rho = (zLocal - z0) / (zLocal + z0)
+  return { rho, return_loss_db: _returnLossFromRho(rho), vswr: _vswrFromRho(rho) }
+}
+
+function _protocolLimits(protocol, length_m, custom_limits = {}) {
+  const p = String(protocol || 'custom').toLowerCase().replace(/[\s_-]/g, '')
+  const presets = {
+    usb4:      { name: 'USB4 passive cable', z0: 100, z_tol_pct: 10, max_il_db: 23, min_rl_db: 10, max_skew_ps_per_m: 5,  min_next_db: 26, min_eye_ui: 0.25 },
+    tb4:       { name: 'Thunderbolt / USB4 passive cable', z0: 100, z_tol_pct: 10, max_il_db: 23, min_rl_db: 10, max_skew_ps_per_m: 5,  min_next_db: 26, min_eye_ui: 0.25 },
+    thunderbolt4:{ name: 'Thunderbolt / USB4 passive cable', z0: 100, z_tol_pct: 10, max_il_db: 23, min_rl_db: 10, max_skew_ps_per_m: 5, min_next_db: 26, min_eye_ui: 0.25 },
+    pcie5:     { name: 'PCIe Gen5 cable/channel', z0: 85,  z_tol_pct: 10, max_il_db: 28, min_rl_db: 10, max_skew_ps_per_m: 5,  min_next_db: 30, min_eye_ui: 0.20 },
+    pcie6:     { name: 'PCIe Gen6 cable/channel', z0: 85,  z_tol_pct: 10, max_il_db: 36, min_rl_db: 8,  max_skew_ps_per_m: 3,  min_next_db: 32, min_eye_ui: 0.16 },
+    hdmi21:    { name: 'HDMI 2.1 Ultra High Speed', z0: 100, z_tol_pct: 10, max_il_db: 30, min_rl_db: 10, max_skew_ps_per_m: 15, min_next_db: 25, min_eye_ui: 0.22 },
+    cat6a:     { name: 'Cat 6A channel', z0: 100, z_tol_pct: 15, il_db_per_100m: 30.5, min_rl_db: 8, max_skew_ps_per_m: 45, min_next_db: 39.9, min_eye_ui: 0.30 },
+    cat8:      { name: 'Cat 8 channel', z0: 100, z_tol_pct: 15, il_db_per_100m: 67.0, min_rl_db: 8, max_skew_ps_per_m: 25, min_next_db: 13.1, min_eye_ui: 0.24 },
+    spacewire: { name: 'SpaceWire LVDS cable', z0: 100, z_tol_pct: 10, max_il_db: 6, min_rl_db: 14, max_skew_ps_per_m: 100, min_next_db: 30, min_eye_ui: 0.40 },
+    custom:    { name: 'Custom high-speed limit', z0: 100, z_tol_pct: 10, max_il_db: 20, min_rl_db: 10, max_skew_ps_per_m: 10, min_next_db: 25, min_eye_ui: 0.25 },
+  }
+  const base = { ...(presets[p] || presets.custom), ...custom_limits }
+  if (base.il_db_per_100m != null && length_m > 0 && base.max_il_db == null) {
+    base.max_il_db = base.il_db_per_100m * (length_m / 100)
+  }
+  if (base.max_il_db == null && base.il_db_per_100m != null) base.max_il_db = base.il_db_per_100m
+  return base
+}
+
+function checkHighspeedCompliance(input) {
+  const {
+    protocol = 'custom', length_m = 1, z0_ohm, insertion_loss_db, return_loss_db,
+    skew_ps_per_m, next_db, eye_height_ui, custom_limits = {},
+  } = input || {}
+  const limits = _protocolLimits(protocol, length_m, custom_limits)
+  const checks = []
+  const add = (metric, measured, limit, pass, margin, unit, note) => {
+    if (measured == null || !isFinite(measured)) return
+    checks.push({
+      metric, measured: round(measured, 3), limit, pass,
+      margin: round(margin, 3), unit, note,
+    })
+  }
+
+  if (z0_ohm != null) {
+    const tol = (limits.z_tol_pct || 10) / 100
+    const lo = limits.z0 * (1 - tol)
+    const hi = limits.z0 * (1 + tol)
+    add('Impedance', z0_ohm, `${round(lo, 1)}-${round(hi, 1)} Ω`, z0_ohm >= lo && z0_ohm <= hi, Math.min(z0_ohm - lo, hi - z0_ohm), 'Ω', 'Measured Z0 must stay inside the protocol impedance window.')
+  }
+  add('Insertion loss', insertion_loss_db, `≤ ${round(limits.max_il_db, 2)} dB`, insertion_loss_db <= limits.max_il_db, limits.max_il_db - insertion_loss_db, 'dB', 'Lower insertion loss leaves more receiver equalization margin.')
+  add('Return loss', return_loss_db, `≥ ${round(limits.min_rl_db, 2)} dB`, return_loss_db >= limits.min_rl_db, return_loss_db - limits.min_rl_db, 'dB', 'Low return loss usually points to impedance bumps, bad launch, or local crush.')
+  add('Skew', skew_ps_per_m, `≤ ${round(limits.max_skew_ps_per_m, 2)} ps/m`, skew_ps_per_m <= limits.max_skew_ps_per_m, limits.max_skew_ps_per_m - skew_ps_per_m, 'ps/m', 'Tight twist symmetry and matched dielectric keep timing aligned.')
+  add('NEXT', next_db, `≥ ${round(limits.min_next_db, 2)} dB`, next_db >= limits.min_next_db, next_db - limits.min_next_db, 'dB', 'Higher isolation means less pair-to-pair noise.')
+  add('Eye opening', eye_height_ui, `≥ ${round(limits.min_eye_ui, 3)} UI`, eye_height_ui >= limits.min_eye_ui, eye_height_ui - limits.min_eye_ui, 'UI', 'Eye opening summarizes jitter/noise margin at the receiver.')
+
+  const failing = checks.filter((c) => !c.pass)
+  const verdict = failing.length === 0 ? 'PASS' : failing.some((c) => c.margin < -3 || (c.unit === 'UI' && c.margin < -0.05)) ? 'FAIL' : 'MARGINAL'
+  const first_fix = failing[0]?.metric === 'Insertion loss' ? 'Shorten the run, increase conductor size, or use lower-loss dielectric.'
+    : failing[0]?.metric === 'Return loss' ? 'Inspect local geometry: connector launch, crush, shield step, dielectric eccentricity.'
+    : failing[0]?.metric === 'Skew' ? 'Tighten pair lay control and match dielectric around both conductors.'
+    : failing[0]?.metric === 'NEXT' ? 'Improve pair spacing, foil continuity, and bundle symmetry.'
+    : failing[0]?.metric === 'Eye opening' ? 'Reduce jitter/noise or raise bandwidth before chasing cosmetic construction changes.'
+    : 'All measured limits clear the selected profile.'
+
+  return {
+    protocol,
+    profile: limits.name,
+    length_m,
+    verdict,
+    checks,
+    failing_metrics: failing.map((c) => c.metric),
+    first_fix,
+    _section: 'si',
+  }
+}
+
+function analyzeConnectorLaunch(input) {
+  const {
+    connector_id, cable_z0_ohm = 50, pin_diameter_mm, dielectric_diameter_mm,
+    dielectric_er = 2.05, ferrule_step_mm = 0, launch_length_mm = 3, freq_ghz = 6,
+  } = input || {}
+  if (!(cable_z0_ohm > 0)) throw new Error('cable_z0_ohm must be positive')
+  const conn = connector_id ? CONNECTOR_DB[String(connector_id).toLowerCase()] : null
+  let zLaunch = cable_z0_ohm
+  let geometry_note = 'No pin/dielectric geometry provided; using ferrule-step estimate only.'
+  if (pin_diameter_mm > 0 && dielectric_diameter_mm > pin_diameter_mm && dielectric_er > 0) {
+    zLaunch = (60 / Math.sqrt(dielectric_er)) * Math.log(dielectric_diameter_mm / pin_diameter_mm)
+    geometry_note = 'Coax launch impedance from Z0=(60/sqrt(er))*ln(D/d).'
+  }
+  const bareStepOhm = (zLaunch - cable_z0_ohm) + ferrule_step_mm * 7 * (cable_z0_ohm / 50)
+  const vf = 1 / Math.sqrt(Math.max(1, dielectric_er || 2.05))
+  const wavelength_mm = (299792458 * vf) / (Math.max(0.001, freq_ghz) * 1e9) * 1000
+  const electrical_len_deg = 360 * (launch_length_mm / wavelength_mm)
+  const shortStepFactor = _clamp(electrical_len_deg / 45, 0.15, 1)
+  const zLocal = Math.max(1, cable_z0_ohm + bareStepOhm * shortStepFactor)
+  const refl = _rlFromZStep(cable_z0_ohm, zLocal)
+  const verdict = refl.return_loss_db >= 24 ? 'CLEAN'
+    : refl.return_loss_db >= 18 ? 'USABLE'
+    : refl.return_loss_db >= 12 ? 'MARGINAL'
+    : 'FAIL'
+  return {
+    connector: conn ? conn.name : connector_id || 'custom launch',
+    freq_ghz,
+    cable_z0_ohm: round(cable_z0_ohm, 2),
+    launch_z0_ohm: round(zLaunch, 2),
+    effective_local_z0_ohm: round(zLocal, 2),
+    local_step_ohm: round(zLocal - cable_z0_ohm, 2),
+    electrical_length_deg: round(electrical_len_deg, 1),
+    return_loss_db: round(refl.return_loss_db, 2),
+    vswr: round(refl.vswr, 3),
+    rho: round(refl.rho, 4),
+    verdict,
+    connector_datasheet_rl_db: conn?.return_loss_db,
+    fixes: [
+      Math.abs(zLaunch - cable_z0_ohm) > 2 ? 'Resize pin or dielectric bore to pull launch Z0 back toward cable Z0.' : null,
+      Math.abs(ferrule_step_mm) > 0.05 ? 'Reduce ferrule/solder-cup step; taper the transition instead of an abrupt shoulder.' : null,
+      electrical_len_deg > 30 ? 'Shorten the exposed launch region; long discontinuities become visible at this band.' : null,
+      'Keep braid/foil termination 360° around the connector body and avoid pigtail drain launches.',
+    ].filter(Boolean),
+    notes: [geometry_note, conn && freq_ghz > conn.fmax_ghz ? `${conn.name} is above its nominal ${conn.fmax_ghz} GHz range.` : null].filter(Boolean),
+  }
+}
+
+function predictShieldingEffectiveness(input) {
+  const {
+    freq_mhz = 1000, foil_overlap_pct = 0, braid_coverage_pct = 0,
+    spiral_gap_pct = 100, layer_count, has_drain = false, jacket_material,
+  } = input || {}
+  const foil = _clamp(foil_overlap_pct, 0, 100)
+  const braid = _clamp(braid_coverage_pct, 0, 100)
+  const gap = _clamp(spiral_gap_pct, 0, 100)
+  const inferredLayers = layer_count ?? [foil > 5, braid > 5, gap < 95].filter(Boolean).length
+  const freqPenalty = Math.max(0, 8 * Math.log10(Math.max(1, freq_mhz) / 1000))
+  let se = 18 + 0.42 * foil + 0.58 * braid + (100 - gap) * 0.18 + Math.max(0, inferredLayers - 1) * 7
+  if (has_drain) se += 3
+  if (foil <= 5) se -= 10
+  if (braid <= 20) se -= 12
+  se -= freqPenalty
+  se = _clamp(se, 10, 125)
+  const leakRisk = _clamp(105 - se * 0.78 + gap * 0.35 + freqPenalty * 1.5, 1, 95)
+  const weak_layer = foil < 20 ? 'foil seam / no foil'
+    : braid < 70 ? 'braid optical coverage'
+    : gap > 13 ? 'SPC spiral gap'
+    : freqPenalty > 8 ? 'high-frequency transfer impedance'
+    : 'none obvious'
+  const verdict = se >= 95 ? 'EXCELLENT'
+    : se >= 75 ? 'STRONG'
+    : se >= 55 ? 'OK'
+    : 'LEAK RISK'
+  return {
+    freq_mhz,
+    shielding_effectiveness_db: round(se, 1),
+    leak_risk_percent: round(leakRisk, 1),
+    weak_layer,
+    verdict,
+    inputs: { foil_overlap_pct: foil, braid_coverage_pct: braid, spiral_gap_pct: gap, layer_count: inferredLayers, has_drain, jacket_material },
+    recommendations: [
+      foil < 25 ? 'Add bonded foil with 25-40% overlap before braid for seam control.' : null,
+      braid < 85 ? 'Raise braid coverage or use smaller wire / higher picks to close optical windows.' : null,
+      gap > 13 ? 'For SPC spiral, bring gap toward 8-13%; for helical flatwire, use overlap instead of gap.' : null,
+      freq_mhz > 6000 ? 'At microwave bands, connector backshell bonding can dominate the shield stack.' : null,
+    ].filter(Boolean),
+  }
+}
+
+function cascadeSParameters(input) {
+  const { freq_mhz = 1000, z0_ohm = 50, stages = [] } = input || {}
+  if (!Array.isArray(stages) || stages.length === 0) throw new Error('stages must be a non-empty array')
+  const cables = _mergedRfCables()
+  let totalIl = 0
+  let worstRl = Infinity
+  const rows = stages.map((stage, i) => {
+    const count = Math.max(1, Number(stage.count) || 1)
+    let il = Number(stage.il_db) || 0
+    let rl = Number(stage.return_loss_db) || null
+    let label = stage.name || `Stage ${i + 1}`
+    if (stage.cable_id) {
+      const [, c] = findRfCable(cables, stage.cable_id)
+      if (!c) throw new Error(`Unknown cable_id "${stage.cable_id}"`)
+      const length_ft = Number(stage.length_ft) || 0
+      il += (interpAtten(c.atten_db_per_100ft, freq_mhz) / 100) * length_ft
+      rl = rl || 26
+      label = stage.name || `${c.name} ${round(length_ft, 2)} ft`
+    }
+    if (stage.connector_id) {
+      const conn = CONNECTOR_DB[String(stage.connector_id).toLowerCase()]
+      if (!conn) throw new Error(`Unknown connector_id "${stage.connector_id}"`)
+      il += (conn.il_db || 0) * count
+      rl = rl || conn.return_loss_db || 20
+      label = stage.name || `${count}× ${conn.name}`
+    }
+    if (stage.vswr != null && !rl) {
+      const rho = (stage.vswr - 1) / (stage.vswr + 1)
+      rl = _returnLossFromRho(rho)
+    }
+    rl = rl || 30
+    totalIl += il
+    worstRl = Math.min(worstRl, rl)
+    return { stage: label, il_db: round(il, 3), return_loss_db: round(rl, 2) }
+  })
+  const rho = _rhoFromReturnLoss(worstRl)
+  const dominant = rows.reduce((a, b) => (b.il_db || 0) > (a.il_db || 0) ? b : a, rows[0])
+  return {
+    freq_mhz,
+    z0_ohm,
+    stages: rows,
+    s21_db: round(-totalIl, 3),
+    total_insertion_loss_db: round(totalIl, 3),
+    worst_s11_return_loss_db: round(worstRl, 2),
+    worst_vswr: round(_vswrFromRho(rho), 3),
+    dominant_loss_stage: dominant.stage,
+    verdict: worstRl >= 20 && totalIl < 3 ? 'CLEAN' : worstRl >= 14 ? 'USABLE' : 'REFLECTION RISK',
+  }
+}
+
+function matchPhaseDelay(input) {
+  const {
+    freq_mhz = 1000, length_a_m, length_b_m, vf_a = 0.66, vf_b = vf_a,
+    target_skew_ps = 0, target_phase_deg,
+  } = input || {}
+  if (!(length_a_m >= 0 && length_b_m >= 0)) throw new Error('length_a_m and length_b_m are required')
+  if (!(vf_a > 0 && vf_a <= 1 && vf_b > 0 && vf_b <= 1)) throw new Error('vf_a/vf_b must be 0..1')
+  const c = 299792458
+  const delayAps = length_a_m / (vf_a * c) * 1e12
+  const delayBps = length_b_m / (vf_b * c) * 1e12
+  const skewPs = delayAps - delayBps
+  const phaseDeg = 360 * (freq_mhz * 1e6) * (skewPs * 1e-12)
+  const wrapped = ((phaseDeg + 180) % 360 + 360) % 360 - 180
+  const targetPs = target_phase_deg != null
+    ? (target_phase_deg / 360) / (freq_mhz * 1e6) * 1e12
+    : target_skew_ps
+  const excessPs = skewPs - targetPs
+  const trimAmm = excessPs > 0 ? excessPs * 1e-12 * vf_a * c * 1000 : 0
+  const trimBmm = excessPs < 0 ? -excessPs * 1e-12 * vf_b * c * 1000 : 0
+  return {
+    freq_mhz,
+    delay_a_ps: round(delayAps, 2),
+    delay_b_ps: round(delayBps, 2),
+    skew_a_minus_b_ps: round(skewPs, 2),
+    phase_a_minus_b_deg: round(phaseDeg, 2),
+    wrapped_phase_deg: round(wrapped, 2),
+    trim_to_target: {
+      target_skew_ps: round(targetPs, 2),
+      trim_a_mm: round(trimAmm, 3),
+      trim_b_mm: round(trimBmm, 3),
+      instruction: trimAmm > 0 ? 'Trim cable A' : trimBmm > 0 ? 'Trim cable B' : 'Already at target within rounding',
+    },
+  }
+}
+
+function estimateBendCrushRisk(input) {
+  const { cable_id, od_mm, z0_ohm, bend_radius_mm, crush_pct = 0, freq_mhz = 1000 } = input || {}
+  const [, cable] = cable_id ? findRfCable(_mergedRfCables(), cable_id) : [null, null]
+  if (cable_id && !cable) throw new Error(`Unknown cable_id "${cable_id}"`)
+  const od = od_mm || cable?.od_mm
+  const z0 = z0_ohm || cable?.z0 || 50
+  if (!(od > 0)) throw new Error('Provide od_mm or a cable_id with OD data')
+  const ratio = bend_radius_mm > 0 ? bend_radius_mm / od : null
+  const crush = _clamp(crush_pct, 0, 40)
+  const bendStep = ratio == null ? 0 : Math.max(0, 15 - ratio) * 0.28
+  const crushStep = crush * 0.22
+  const zLocal = Math.max(5, z0 - bendStep - crushStep)
+  const refl = _rlFromZStep(z0, zLocal)
+  const risk = ratio != null && ratio < 5 || crush > 15 ? 'HIGH'
+    : ratio != null && ratio < 10 || crush > 7 ? 'MEDIUM'
+    : 'LOW'
+  return {
+    cable: cable?.name || 'custom cable',
+    freq_mhz,
+    od_mm: round(od, 3),
+    bend_radius_mm: bend_radius_mm ?? null,
+    bend_radius_x_od: ratio != null ? round(ratio, 2) : null,
+    recommended_static_radius_mm: round(10 * od, 1),
+    recommended_dynamic_radius_mm: round(15 * od, 1),
+    crush_pct: crush,
+    estimated_local_z0_ohm: round(zLocal, 2),
+    z_step_ohm: round(zLocal - z0, 2),
+    return_loss_db: round(refl.return_loss_db, 2),
+    vswr: round(refl.vswr, 3),
+    risk,
+    first_fix: risk === 'HIGH' ? 'Open the bend radius, remove clamp pressure, then re-run TDR/VSWR before shipping.' : 'Keep bend above 10×OD static / 15×OD dynamic and avoid hard tie points.',
+  }
+}
+
+function estimateThermalDerating(input) {
+  const {
+    cable_id, freq_mhz, power_w, length_ft = 100, ambient_c = 25,
+    bundle_count = 1, airflow = 'normal', vswr = 1,
+  } = input || {}
+  const [, cable] = findRfCable(_mergedRfCables(), cable_id)
+  if (!cable) throw new Error(`Unknown cable_id "${cable_id}". Use lookup_rf_cable.`)
+  if (!(freq_mhz > 0 && power_w > 0 && length_ft > 0)) throw new Error('freq_mhz, power_w, and length_ft must be positive')
+  const od = cable.od_mm || 5
+  const ilDb = (interpAtten(cable.atten_db_per_100ft, freq_mhz) / 100) * length_ft
+  const pOut = power_w * Math.pow(10, -ilDb / 10)
+  const pDiss = Math.max(0, power_w - pOut)
+  const airflowFactor = airflow === 'forced' ? 1.35 : airflow === 'still' ? 0.72 : 1
+  const ambientFactor = _clamp((90 - ambient_c) / (90 - 25), 0.12, 1.15)
+  const bundleFactor = 1 / (1 + 0.16 * Math.max(0, bundle_count - 1))
+  const vswrFactor = 1 / Math.max(1, Math.sqrt(vswr || 1))
+  const freqFactor = Math.sqrt(1000 / Math.max(100, freq_mhz))
+  const safePower = Math.pow(od / 5, 1.75) * 42 * ambientFactor * bundleFactor * airflowFactor * vswrFactor * freqFactor
+  const thermalR = (18 / Math.pow(od / 5, 1.15)) / airflowFactor * (1 + 0.08 * Math.max(0, bundle_count - 1))
+  const tempRiseC = pDiss * thermalR / Math.max(1, length_ft / 10)
+  const conductorTempC = ambient_c + tempRiseC
+  const margin = safePower - power_w
+  const verdict = margin >= power_w * 0.25 && conductorTempC < 75 ? 'SAFE'
+    : margin >= 0 && conductorTempC < 90 ? 'WARM'
+    : 'DERATE'
+  return {
+    cable: cable.name,
+    freq_mhz,
+    length_ft,
+    input_power_w: round(power_w, 2),
+    insertion_loss_db: round(ilDb, 2),
+    output_power_w: round(pOut, 2),
+    dissipated_power_w: round(pDiss, 2),
+    estimated_safe_cw_power_w: round(safePower, 1),
+    thermal_margin_w: round(margin, 1),
+    estimated_conductor_temp_c: round(conductorTempC, 1),
+    verdict,
+    limiting_factor: ambient_c > 60 ? 'ambient temperature' : bundle_count > 3 ? 'bundle heating' : vswr > 1.8 ? 'standing-wave hot spots' : 'cable attenuation heat',
+    note: 'First-order derating for engineering triage; verify mission-critical runs against manufacturer Pmax curves.',
   }
 }
 

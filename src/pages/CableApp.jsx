@@ -337,6 +337,7 @@ const CABLE_TOOL_TO_SECTION = {
   propose_tdr_scenario:  { id: 'tdr',   label: 'TDR Sim' },
   propose_atten_preset:  { id: 'atten', label: 'Atten' },
   propose_eye_preset:    { id: 'eyeTdr', label: 'Eye + TDR Lab' },
+  highspeed_compliance_checker: { id: 'si', label: 'SI Diagnostics' },
   propose_cost_preset:   { id: 'cost',  label: 'Cost' },
   compute_attenuation:   { id: 'atten', label: 'Atten' },
   pair_lay_skew:         { id: 'lay',   label: 'Lay Design' },
