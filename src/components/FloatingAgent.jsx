@@ -12,6 +12,57 @@ const DEFAULT_MODELS = [
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5',  tier: 'fast' },
 ]
 
+function redactDownloadPayload(value) {
+  if (!value || typeof value !== 'object') return value
+  const clone = Array.isArray(value) ? [...value] : { ...value }
+  if (clone._download && typeof clone._download === 'object') {
+    const { text, content, base64, data, ...meta } = clone._download
+    const bytes = typeof text === 'string' ? text.length
+      : typeof content === 'string' ? content.length
+        : typeof base64 === 'string' ? Math.round(base64.length * 0.75)
+          : undefined
+    clone._download = {
+      ...meta,
+      bytes,
+      payload: bytes ? 'redacted from model context; click Download in the tool card' : undefined,
+    }
+  }
+  return clone
+}
+
+function sanitizeToolResultContent(content) {
+  if (typeof content !== 'string') return content
+  try {
+    const parsed = JSON.parse(content)
+    return JSON.stringify(redactDownloadPayload(parsed))
+  } catch {
+    return content
+  }
+}
+
+function downloadToolFile(spec) {
+  if (!spec || typeof window === 'undefined') return
+  const filename = spec.filename || 'tool-result.txt'
+  const mime = spec.mime || 'application/octet-stream'
+  let blob
+  if (spec.base64) {
+    const binary = atob(spec.base64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    blob = new Blob([bytes], { type: mime })
+  } else {
+    blob = new Blob([spec.text ?? spec.content ?? spec.data ?? ''], { type: mime })
+  }
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 export default function FloatingAgent({
   accent = '#c97b3f',
   accentBright = '#e89357',
@@ -329,7 +380,7 @@ export default function FloatingAgent({
               return { type: 'tool_use', id: b.id, name: b.name, input: b.input || {} }
             }
             if (b.type === 'tool_result') {
-              return { type: 'tool_result', tool_use_id: b.tool_use_id, content: b.content }
+              return { type: 'tool_result', tool_use_id: b.tool_use_id, content: sanitizeToolResultContent(b.content) }
             }
             if (b.type === 'text') return { type: 'text', text: b.text || '' }
             if (b.type === 'image') return { type: 'image', source: b.source }
@@ -1066,7 +1117,7 @@ export default function FloatingAgent({
             // Force-show actionable tool pills (one-click preset apply) even when "hide tools" is on
             let r = item.result
             if (typeof r === 'string') { try { r = JSON.parse(r) } catch {} }
-            return r?._apply_preset != null
+            return r?._apply_preset != null || r?._download != null
           })
           .map((item, i) => (
             <ViewItem
@@ -1959,7 +2010,9 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
   const presetSection = parsedResult?._section
   const presetData = parsedResult?._apply_preset
   const presetLabel = parsedResult?.label
+  const downloadSpec = parsedResult?._download
   const canApplyPreset = presetSection && presetData && !partial && !parsedResult?.error
+  const canDownload = downloadSpec && !partial && !parsedResult?.error
   const applyPreset = () => {
     if (onJumpToSection) onJumpToSection(presetSection)
     window.dispatchEvent(new CustomEvent('cable-suite:apply-preset', {
@@ -2010,6 +2063,22 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
         )}
 
         {/* Inline Apply button when the tool result carries a preset */}
+        {canDownload && (
+          <div className="flex items-center justify-between px-2.5 py-1.5 border-t" style={{ borderColor: '#1a2226', background: '#0a0d0f' }}>
+            <div className="text-[11px] text-[#a7b0b6] flex items-center gap-2 min-w-0">
+              <Download size={12} style={{ color: accent }} />
+              <span className="truncate">{downloadSpec.label || downloadSpec.filename || 'Download file'}</span>
+            </div>
+            <button
+              onClick={() => downloadToolFile(downloadSpec)}
+              className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider rounded border hover:bg-[#1f1610] transition-colors flex items-center gap-1 shrink-0"
+              style={{ color: accent, borderColor: accent + '60', background: 'transparent' }}
+            >
+              <Download size={11} />
+              Download
+            </button>
+          </div>
+        )}
         {canApplyPreset && (
           <div className="flex items-center justify-between px-2.5 py-1.5 border-t" style={{ borderColor: '#1a2226', background: '#0a0d0f' }}>
             <div className="text-[11px] flex items-center gap-2">
@@ -2046,7 +2115,7 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
                 <pre
                   className="font-mono text-[11px] whitespace-pre-wrap break-all"
                   style={{ color: parsedResult?.error ? '#f87171' : '#f0ebe2' }}
-                >{typeof parsedResult === 'object' ? JSON.stringify(parsedResult, null, 2) : String(parsedResult)}</pre>
+                >{typeof parsedResult === 'object' ? JSON.stringify(redactDownloadPayload(parsedResult), null, 2) : String(parsedResult)}</pre>
               </>
             )}
             {canJump && (

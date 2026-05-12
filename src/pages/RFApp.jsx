@@ -7,6 +7,7 @@ import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
 import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
 import CompanyDefaultsPanel from "../components/CompanyDefaultsPanel.jsx";
 import RFStackLab from "../components/RFStackLab.jsx";
+import MaterialLibrary from "../components/MaterialLibrary.jsx";
 import { useIsMobile } from "../components/useIsMobile.js";
 import {
   RF_CABLES as CABLES,
@@ -58,6 +59,9 @@ Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP a
 - The user describes a target — e.g. "conductor 0.045 inch, hit 80% VP at 50 Ω". Call \`design_dielectric_stack\` with the parsed targets. The tool returns a complete layer recipe AND a one-click apply preset that the chat surfaces as an "Apply" button. The user clicks → the RF Stack Lab tab is auto-filled.
 - Auto-detect units: if the conductor OD is between 0.005 and 0.5 it is almost certainly inches (RF inner conductors are 0.020 / 0.032 / 0.045 / 0.057"); pass it as \`conductor_od_inch\`. If between 0.5 and 30 and the user said "mm", pass as \`conductor_od_mm\`.
 - Default to a HD-inside / LD-outside MIX unless the user specifies otherwise — it gives the lowest dielectric loss while still hitting target VP.
+- PTFE tape must come from the Material Library. Use real 962-96000 tape part numbers returned by \`design_dielectric_stack\` / \`lookup_material_library\`; do not invent tape thickness, density, or width when a library match exists.
+- If the user asks for a blank manufacturing instruction / MI template, call \`generate_blank_mi_template\`; it returns a downloadable Excel workbook.
+- When \`design_dielectric_stack\` is used for a factory build, the tool returns a downloadable filled MI Excel workbook. Tell the user to download it from the tool card; it includes selected Material Library tape, lay direction, pitch set-point, tension, and OD after each wrap.
 - Manufacturing rule (enforced by the tool): if conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm). The tool reports the clamp in its notes — surface that fact to the user so they understand why the recipe uses thinner tape with more passes.
 - After designing, ALSO call \`compute_tape_notches\` in the same turn (parallel) to flag Bragg suckouts the build will produce. Warn explicitly when 2+ tape layers share the same pitch (coherent → strong notch).
 - In the chat reply, summarise: targets → composition (HD% + LD%) → predicted final OD/VP/Z₀ → notch frequencies → "click Apply to build it on the RF Stack Lab tab". Always cite the small-conductor clamp note when it fires.
@@ -100,6 +104,7 @@ const RF_SECTION_LABELS = {
   stack: 'RF Stack Lab',
   suckout: 'RF Stack Lab',
   dielectric: 'RF Stack Lab',
+  materials: 'Material Library',
   wizard: 'Wizard',
   cheat: 'Cheat Sheet',
   compare: 'Compare',
@@ -171,6 +176,12 @@ const RF_SECTION_STARTERS = {
     'Compare foil overlap vs braid coverage for shield leakage',
     'How do SPC flatwire spiral and helical shields affect notches?',
   ],
+  materials: [
+    'Generate a blank MI Excel template',
+    'Build me a cable: conductor 0.0113", 75% VP, 50 ohm, then generate MI',
+    'Find a 5 mil low-density PTFE tape around 0.75 inch wide',
+    'Decode 962-96000-05L0750',
+  ],
   dielectric: [
     'Build a cable: conductor 0.045", target 80% VP, 50 Ω',
     'Build a 75 Ω cable, conductor 0.032", VP 70%, all HD PTFE',
@@ -193,6 +204,8 @@ const RF_TOOL_TO_SECTION = {
   compute_attenuation:      { id: 'tools',      label: 'Tools' },
   lookup_rf_cable:          { id: 'library',    label: 'Library' },
   lookup_connector:         { id: 'connectors', label: 'Connectors' },
+  lookup_material_library:  { id: 'materials', label: 'Material Library' },
+  generate_blank_mi_template:{ id: 'materials', label: 'Material Library' },
   design_dielectric_stack:  { id: 'stack', label: 'RF Stack Lab' },
   compute_tape_notches:     { id: 'stack', label: 'RF Stack Lab' },
   connector_launch_analyzer:{ id: 'tools', label: 'Tools' },
@@ -1194,6 +1207,7 @@ export default function RFCableSuite() {
       group: "build", label: "Build",
       children: [
         { id: "stack", label: "RF Stack Lab" },
+        { id: "materials", label: "Material Library" },
       ],
     },
     {
@@ -1564,6 +1578,7 @@ export default function RFCableSuite() {
           {tab === "shielding" && <ShieldingEffectivenessLab />}
           {tab === "scanner" && <NearFieldEmiScannerLab />}
           {(tab === "stack" || tab === "suckout" || tab === "dielectric") && <RFStackLab />}
+          {tab === "materials" && <MaterialLibrary />}
           {tab === "wizard" && <WizardView openInLibrary={openInLibrary} toggleCompare={toggleCompare} comparedCables={comparedCables} />}
           {tab === "cheat" && <CheatSheetView />}
           {tab === "compare" && <CompareView comparedCables={comparedCables} setComparedCables={setComparedCables} openInLibrary={openInLibrary} />}

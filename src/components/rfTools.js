@@ -2,6 +2,19 @@
 import { getCustomRfCables, addCustomRfCable, deleteCustomRfCable } from './customCableStore.js'
 import { getCompanyDefaults, setCompanyDefaults, resetCompanyDefaults } from './companyDefaults.js'
 import { RF_CABLES, RF_CATEGORIES, getRfCableSourceMeta } from '../data/rfCableLibrary.js'
+import {
+  FOIL_TAPE_MATERIALS,
+  PTFE_TAPE_MATERIALS,
+  SPC_FLATWIRE_MATERIALS,
+  findFoilTapeByPart,
+  findNearestFoilTape,
+  findNearestPtfeTape,
+  findNearestSpcFlatwire,
+  findPtfeTapeByPart,
+  findSpcFlatwireByPart,
+  ptfeTapeToToolLayer,
+} from '../data/materialLibrary.js'
+import { makeBlankMiWorkbook, makePtfeMiWorkbook } from '../data/miTemplate.js'
 
 // ── Material properties database ────────────────────────
 export const MATERIAL_DB = {
@@ -176,6 +189,200 @@ function findRfCable(db, cableId) {
   return match || [null, null]
 }
 
+function materialPublic(tape) {
+  return {
+    part_number: tape.partNumber,
+    family: tape.family,
+    material: tape.material,
+    thickness_mil: tape.thicknessMil,
+    thickness_mm: num(tape.thicknessMm, 4),
+    density_code: tape.densityCode,
+    density_label: tape.densityLabel,
+    density_gcc: tape.densityGcc,
+    width_in: num(tape.widthIn, 4),
+    width_mm: num(tape.widthMm, 3),
+    variant: tape.variant || null,
+  }
+}
+
+function flatwirePublic(flatwire) {
+  return {
+    part_number: flatwire.partNumber,
+    family: flatwire.family,
+    base_part: flatwire.basePart,
+    material: flatwire.material,
+    plating: flatwire.plating,
+    plating_label: flatwire.platingLabel,
+    shield_use: flatwire.shieldUse,
+    spool_label: flatwire.spoolLabel,
+    thickness_mil: flatwire.thicknessMil,
+    thickness_mm: flatwire.thicknessMm == null ? null : num(flatwire.thicknessMm, 4),
+    width_code: flatwire.widthCode,
+    width_in: num(flatwire.widthIn, 5),
+    width_mm: num(flatwire.widthMm, 4),
+  }
+}
+
+function foilPublic(foil) {
+  return {
+    part_number: foil.partNumber,
+    source_part_number: foil.sourcePartNumber,
+    aliases: foil.aliases,
+    family: foil.family,
+    base_part: foil.basePart,
+    material: foil.material,
+    laminate: foil.laminate,
+    laminate_label: foil.laminateLabel,
+    thickness_mil: foil.thicknessMil,
+    thickness_mm: num(foil.thicknessMm, 4),
+    width_code: foil.widthCode,
+    width_in: num(foil.widthIn, 5),
+    width_mm: num(foil.widthMm, 4),
+  }
+}
+
+function lookupMaterialLibrary(input = {}) {
+  const query = String(input.query || '').trim()
+  const inferredFamily = /^962-9600[14]/i.test(query) ? 'spc_flatwire'
+    : /^962-96003/i.test(query) ? 'foil_tape'
+      : 'ptfe_tape'
+  const family = String(input.family || inferredFamily).toLowerCase()
+  if (family !== 'ptfe_tape' && family !== 'spc_flatwire' && family !== 'foil_tape') {
+    return {
+      family,
+      matches: [],
+      note: 'PTFE tape, SPC flatwire, and foil tape are active right now. Braid and jacket material libraries are ready as next tabs.',
+      available_families: ['ptfe_tape', 'spc_flatwire', 'foil_tape'],
+    }
+  }
+
+  if (family === 'spc_flatwire') {
+    const exact = findSpcFlatwireByPart(query)
+    const shieldUse = String(input.shield_use || input.use || '').toLowerCase()
+    const thicknessMil = Number(input.thickness_mil)
+    const widthMm = Number(input.width_mm ?? (Number.isFinite(Number(input.width_in)) ? Number(input.width_in) * 25.4 : NaN))
+    const q = query.toLowerCase()
+    const limit = Math.min(50, Math.max(1, Math.round(Number(input.limit) || 12)))
+
+    let matches = SPC_FLATWIRE_MATERIALS
+    if (shieldUse === 'spiral' || shieldUse === 'helical') matches = matches.filter((item) => item.shieldUse === shieldUse)
+    if (Number.isFinite(thicknessMil) && thicknessMil > 0) matches = matches.filter((item) => Math.abs((item.thicknessMil ?? 999) - thicknessMil) <= 0.01)
+    if (Number.isFinite(widthMm) && widthMm > 0) matches = matches.filter((item) => Math.abs(item.widthMm - widthMm) <= 0.025)
+    if (q && !exact) {
+      matches = matches.filter((item) => [
+        item.partNumber,
+        item.basePart,
+        item.plating,
+        item.shieldUse,
+        item.spoolLabel,
+        `${item.thicknessMil ?? ''}mil`,
+        `${item.widthIn.toFixed(4)}`,
+        `${item.widthMm.toFixed(3)}mm`,
+      ].join(' ').toLowerCase().includes(q))
+    }
+
+    const nearest = findNearestSpcFlatwire({
+      partNumber: exact?.partNumber || query,
+      shieldUse,
+      thicknessMil,
+      widthMm,
+    })
+    const outputMatches = exact ? [exact] : matches
+    return {
+      family: 'spc_flatwire',
+      base_parts: {
+        '962-96001': 'SPC spiral flatwire bobbin stock',
+        '962-96004': 'SPC helical flatwire large spool stock',
+      },
+      count: outputMatches.length,
+      nearest: nearest ? flatwirePublic(nearest) : null,
+      matches: outputMatches.slice(0, limit).map(flatwirePublic),
+      decoder: '962-96001-SPC-2.5-0500 = spiral flatwire, silver-plated copper, 2.5 mil thickness, 0.0050 inch width. For SPC flatwire, width code 1250 = 0.0125 inch.',
+    }
+  }
+
+  if (family === 'foil_tape') {
+    const exact = findFoilTapeByPart(query)
+    const thicknessMil = Number(input.thickness_mil)
+    const widthMm = Number(input.width_mm ?? (Number.isFinite(Number(input.width_in)) ? Number(input.width_in) * 25.4 : NaN))
+    const q = query.toLowerCase()
+    const limit = Math.min(50, Math.max(1, Math.round(Number(input.limit) || 12)))
+
+    let matches = FOIL_TAPE_MATERIALS
+    if (Number.isFinite(thicknessMil) && thicknessMil > 0) matches = matches.filter((item) => Math.abs(item.thicknessMil - thicknessMil) <= 0.01)
+    if (Number.isFinite(widthMm) && widthMm > 0) matches = matches.filter((item) => Math.abs(item.widthMm - widthMm) <= 0.025)
+    if (q && !exact) {
+      matches = matches.filter((item) => [
+        item.partNumber,
+        item.sourcePartNumber,
+        ...(item.aliases || []),
+        item.laminate,
+        item.laminateLabel,
+        `${item.thicknessMil}mil`,
+        `${item.widthIn.toFixed(4)}`,
+        `${item.widthMm.toFixed(3)}mm`,
+      ].join(' ').toLowerCase().includes(q))
+    }
+
+    const nearest = findNearestFoilTape({
+      partNumber: exact?.partNumber || query,
+      thicknessMil,
+      widthMm,
+    })
+    const outputMatches = exact ? [exact] : matches
+    return {
+      family: 'foil_tape',
+      base_part: '962-96003',
+      count: outputMatches.length,
+      nearest: nearest ? foilPublic(nearest) : null,
+      matches: outputMatches.slice(0, limit).map(foilPublic),
+      decoder: '962-96003-ALK-1.4-0311 = foil tape, ALK aluminum/Kapton laminate, 1.4 mil thickness, 0.0311 inch width. Legacy parts missing ALK are normalized to ALK.',
+    }
+  }
+
+  const exact = findPtfeTapeByPart(input.query)
+  const density = String(input.density_code || '').toUpperCase()
+  const thicknessMil = Number(input.thickness_mil)
+  const widthMm = Number(input.width_mm ?? (Number.isFinite(Number(input.width_in)) ? Number(input.width_in) * 25.4 : NaN))
+  const maxMil = Number(input.max_thickness_mil)
+  const q = String(input.query || '').trim().toLowerCase()
+  const limit = Math.min(50, Math.max(1, Math.round(Number(input.limit) || 12)))
+
+  let matches = PTFE_TAPE_MATERIALS
+  if (density === 'H' || density === 'L') matches = matches.filter((item) => item.densityCode === density)
+  if (Number.isFinite(thicknessMil) && thicknessMil > 0) matches = matches.filter((item) => Math.abs(item.thicknessMil - thicknessMil) <= 0.01)
+  if (Number.isFinite(widthMm) && widthMm > 0) matches = matches.filter((item) => Math.abs(item.widthMm - widthMm) <= 0.35)
+  if (Number.isFinite(maxMil) && maxMil > 0) matches = matches.filter((item) => item.thicknessMil <= maxMil)
+  if (q && !exact) {
+    matches = matches.filter((item) => [
+      item.partNumber,
+      item.densityCode,
+      item.densityLabel,
+      `${item.thicknessMil}mil`,
+      `${item.widthIn}`,
+      `${item.widthMm.toFixed(2)}mm`,
+    ].join(' ').toLowerCase().includes(q))
+  }
+
+  const nearest = findNearestPtfeTape({
+    partNumber: exact?.partNumber || input.query,
+    densityCode: density,
+    thicknessMil,
+    widthMm,
+    maxThicknessMil: maxMil,
+  })
+
+  const outputMatches = exact ? [exact] : matches
+  return {
+    family: 'ptfe_tape',
+    base_part: '962-96000',
+    count: outputMatches.length,
+    nearest: nearest ? materialPublic(nearest) : null,
+    matches: outputMatches.slice(0, limit).map(materialPublic),
+    decoder: '962-96000-05L0750 = PTFE family, 05 mil, L low density (H = high density), 0750 = 0.750 inch tape width.',
+  }
+}
+
 function interpAtten(table, freq_mhz) {
   const tbl = Object.entries(table).map(([f, db]) => [parseFloat(f), db]).sort((a, b) => a[0] - b[0])
   const fLo = tbl[0][0], fHi = tbl[tbl.length - 1][0]
@@ -211,6 +418,41 @@ export const RF_TOOLS = [
       type: 'object',
       properties: { query: { type: 'string', description: 'Connector type or query (e.g., "N", "SMA", "BNC")' } },
       required: ['query'],
+    },
+  },
+  {
+    name: 'lookup_material_library',
+    description:
+      'Search the factory material library. Includes 962-96000 PTFE tape, 962-96003 ALK foil tape, and SPC flatwire shield stock: 962-96001 for spiral bobbins, 962-96004 for helical large spools. Use before recommending PTFE/foil/SPC material or decoding parts.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Part number or search text, e.g. 962-96000-05L0750, 05L, 0.750, low density.' },
+        family: { type: 'string', description: 'Material family: ptfe_tape, foil_tape, or spc_flatwire.' },
+        density_code: { type: 'string', description: 'H or L.' },
+        shield_use: { type: 'string', description: 'For SPC flatwire: spiral or helical.' },
+        thickness_mil: { type: 'number', description: 'Desired tape thickness in mil.' },
+        width_in: { type: 'number', description: 'Desired tape width in inches.' },
+        width_mm: { type: 'number', description: 'Desired tape width in millimetres.' },
+        max_thickness_mil: { type: 'number', description: 'Optional maximum thickness in mil.' },
+        limit: { type: 'number', description: 'Max rows to return. Default 12.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'generate_blank_mi_template',
+    description:
+      'Generate a blank company-style MI workbook in Excel format. Use when the engineer asks for a blank MI/template before filling process values. The workbook has cover, PTFE tape, conditioning, shield, braid, jacket, SI, packaging, and inspection sheets.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        mi_number: { type: 'string', description: 'Optional MI number/title, e.g. MI-ST962-032-200.' },
+        part_number: { type: 'string', description: 'Optional finished cable part number.' },
+        by: { type: 'string', description: 'Prepared-by initials.' },
+        date: { type: 'string', description: 'Date to put in the workbook. Default today.' },
+      },
+      required: [],
     },
   },
   {
@@ -630,10 +872,17 @@ export const RF_TOOLS = [
         conductor_od_inch: { type: 'number', description: 'Inner conductor OD in inches. Will be converted to mm. Common RF inner-conductor sizes: 0.020 / 0.032 / 0.045 / 0.057 inch.' },
         target_vp:         { type: 'number', description: 'Target velocity factor as a fraction (0.65 .. 0.92). e.g. 0.80 for 80% VP. Optional if target_z0_ohm is given.' },
         target_z0_ohm:     { type: 'number', description: 'Target characteristic impedance in ohms (typically 50, 75, 100). Optional if only sizing for VP.' },
+        tape_part_number:  { type: 'string', description: 'Optional PTFE tape part number from Material Library, e.g. 962-96000-05L0750.' },
         tape_thickness_mm: { type: 'number', description: 'Nominal tape thickness in mm. Default 0.10 mm (typical PTFE skived tape).' },
         tape_width_mm:     { type: 'number', description: 'Tape width in mm. Default 6.35 mm (1/4 inch).' },
         overlap:           { type: 'string', description: 'Overlap mode: "butt" / "1/2" / "2/3" / "3/4". Default "1/2".' },
         tension_factor:    { type: 'number', description: 'WTM tension factor τ (0.7..1.0). Lower = tighter wrap, more compression. Default 0.92.' },
+        tension_n:         { type: 'number', description: 'WTM tape tension in newtons for the MI sheet. Default 4.0 N.' },
+        line_speed_ft_min:  { type: 'number', description: 'Line speed for the MI sheet. Default 7 ft/min.' },
+        mi_number:         { type: 'string', description: 'Optional MI number/title for the Excel download.' },
+        finished_part_number:{ type: 'string', description: 'Optional finished cable part number for the MI workbook.' },
+        prepared_by:       { type: 'string', description: 'Prepared-by initials for the MI workbook.' },
+        mi_date:           { type: 'string', description: 'Date to put in the MI workbook. Default today.' },
         prefer:            { type: 'string', description: '"hd" (all 1.6 g/cm³), "ld" (all 0.7 g/cm³), or "mix" (HD inside + LD outside). Default "mix".' },
       },
       required: [],
@@ -821,6 +1070,39 @@ export function dispatchRfTool(name, input) {
         const matches = searchDB(CONNECTOR_DB, input.query)
         if (matches.length === 0) return { matches: [], available_ids: Object.keys(CONNECTOR_DB), note: `No match for "${input.query}".` }
         return { matches: matches.slice(0, 6) }
+      }
+      case 'lookup_material_library': {
+        return lookupMaterialLibrary(input)
+      }
+      case 'generate_blank_mi_template': {
+        const filenameBase = String(input?.mi_number || 'MI-blank-template')
+          .replace(/[^a-z0-9._-]+/gi, '-')
+          .replace(/^-+|-+$/g, '') || 'MI-blank-template'
+        return {
+          ok: true,
+          label: 'Blank MI Excel template',
+          template: 'company_mi_blank',
+          sheets: [
+            'Cover',
+            'PTFE Tape',
+            'Tape Conditioning',
+            'Spiral Shield',
+            'Braiding',
+            'Extrusion',
+            'SI',
+            'Package',
+          ],
+          _download: {
+            filename: `${filenameBase}.xls`,
+            mime: 'application/vnd.ms-excel',
+            text: makeBlankMiWorkbook({
+              miNumber: input?.mi_number || 'MI-ST962-____-___',
+              partNumber: input?.part_number || '',
+              by: input?.by || '',
+              date: input?.date || new Date().toLocaleDateString('en-US'),
+            }),
+          },
+        }
       }
       case 'compute_attenuation': {
         const { cable_id, freq_mhz, length_ft } = input
@@ -1275,8 +1557,12 @@ function _overlapLayers(o) {
 
 function designDielectricStack(input) {
   let { conductor_od_mm, conductor_od_inch, target_vp, target_z0_ohm,
+        tape_part_number,
         tape_thickness_mm = 0.10, tape_width_mm = 6.35,
-        overlap = '1/2', tension_factor = 0.92, prefer = 'mix' } = input || {}
+        overlap = '1/2', tension_factor = 0.92, prefer = 'mix',
+        tension_n = 4.0, line_speed_ft_min = 7,
+        mi_number = 'MI-ST962-AUTO', finished_part_number = '',
+        prepared_by = '', mi_date } = input || {}
 
   if (conductor_od_mm == null && conductor_od_inch == null) {
     throw new Error('Need conductor_od_mm or conductor_od_inch.')
@@ -1297,6 +1583,21 @@ function designDielectricStack(input) {
       clamped_mil: SMALL_MAX_TAPE_MM / MIL,
     }
     tape_thickness_mm = SMALL_MAX_TAPE_MM
+  }
+
+  const requestedTape = { thickness_mm: tape_thickness_mm, width_mm: tape_width_mm }
+  const maxThicknessMil = d <= SMALL_OD_MM + 0.001 ? 10 : Infinity
+  const baseDensityCode = String(prefer).toLowerCase() === 'ld' ? 'L' : 'H'
+  const baseTape = findNearestPtfeTape({
+    partNumber: tape_part_number,
+    thicknessMm: tape_thickness_mm,
+    widthMm: tape_width_mm,
+    densityCode: baseDensityCode,
+    maxThicknessMil,
+  })
+  if (baseTape) {
+    tape_thickness_mm = baseTape.thicknessMm
+    tape_width_mm = baseTape.widthMm
   }
 
   const eps_HD = _densityToEps(1.6)
@@ -1362,35 +1663,25 @@ function designDielectricStack(input) {
   // Build the layer recipe (HD goes inside since high-εᵣ closer to conductor lowers loss
   // contribution from peripheral E-field; LD outside lifts VP)
   const layers = []
-  if (HD_passes > 0) {
-    layers.push({
-      preset: 'high_density',
-      density: 1.6,
-      tape_thickness_mm,
-      tape_width_mm,
+  const makeMaterialLayer = (preset, density, passes) => {
+    const tape = findNearestPtfeTape({
+      thicknessMm: tape_thickness_mm,
+      widthMm: tape_width_mm,
+      densityCode: density >= 1.1 ? 'H' : 'L',
+      maxThicknessMil,
+    })
+    return ptfeTapeToToolLayer(tape, {
+      preset,
       overlap: ovr,
       tension_factor,
-      passes: HD_passes,
+      passes,
     })
   }
-  if (LD_passes > 0) {
-    layers.push({
-      preset: 'low_density',
-      density: 0.7,
-      tape_thickness_mm,
-      tape_width_mm,
-      overlap: ovr,
-      tension_factor,
-      passes: LD_passes,
-    })
-  }
+  if (HD_passes > 0) layers.push(makeMaterialLayer('high_density', 1.6, HD_passes))
+  if (LD_passes > 0) layers.push(makeMaterialLayer('low_density', 0.7, LD_passes))
   // If everything rounded to zero (very thin dielectric), force at least one pass
   if (layers.length === 0) {
-    layers.push({
-      preset: 'high_density', density: 1.6,
-      tape_thickness_mm, tape_width_mm, overlap: ovr, tension_factor,
-      passes: 1,
-    })
+    layers.push(makeMaterialLayer('high_density', 1.6, 1))
   }
 
   // Predict actual achieved geometry from the chosen integer passes
@@ -1400,7 +1691,17 @@ function designDielectricStack(input) {
     const t_total = L.tape_thickness_mm * _overlapLayers(L.overlap) * L.tension_factor * L.passes
     const eps_r = _densityToEps(L.density)
     stackOut.push({
-      preset: L.preset, density: L.density, passes: L.passes,
+      preset: L.preset,
+      part_number: L.part_number,
+      material_id: L.material_id,
+      density_code: L.density_code,
+      density_label: L.density_label,
+      density: L.density,
+      passes: L.passes,
+      tape_thickness_mm: round(L.tape_thickness_mm, 4),
+      tape_thickness_mil: L.tape_thickness_mil,
+      tape_width_mm: round(L.tape_width_mm, 3),
+      tape_width_in: L.tape_width_in,
       thickness_mm: round(t_total, 4), eps_r: round(eps_r, 4),
       OD_after_mm: round(2 * (r + t_total), 4),
     })
@@ -1425,9 +1726,40 @@ function designDielectricStack(input) {
   const notch1 = (() => {
     const P_axial = tape_width_mm * (1 - _overlapFraction(ovr))  // mm/rev
     if (P_axial <= 0) return null
-    const f_GHz = (1e3 * 299792458 * VP_actual) / (2 * P_axial * 1e-3 * 1e9)
+    const f_GHz = (299792458 * VP_actual) / (2 * P_axial * 1e-3 * 1e9)
     return round(f_GHz, 2)
   })()
+
+  const selectedParts = Array.from(new Set(layers.map((L) => L.part_number).filter(Boolean)))
+  const snappedTape = baseTape && (
+    Math.abs(baseTape.thicknessMm - requestedTape.thickness_mm) > 0.002
+    || Math.abs(baseTape.widthMm - requestedTape.width_mm) > 0.2
+  )
+
+  const predicted = {
+    final_od_mm: round(finalOD, 4),
+    eps_eff: round(eps_eff_actual, 4),
+    vp: round(VP_actual, 4),
+    z0_ohm: round(Z0_actual, 3),
+    delta_z0: round(Z0_actual - (target_z0_ohm || 0), 2),
+    delta_vp: target_vp != null ? round(VP_actual - target_vp, 4) : null,
+    bragg_notch_1_ghz: notch1,
+  }
+  const targetSummary = `${target_z0_ohm ? `${round(target_z0_ohm, 2)} ohm` : ''}${target_vp ? ` ${round(target_vp * 100, 1)}% VP` : ''} conductor ${round(d / 25.4, 4)} in`.trim()
+  const miWorkbook = makePtfeMiWorkbook({
+    miNumber: mi_number || 'MI-ST962-AUTO',
+    partNumber: finished_part_number || '',
+    by: prepared_by || '',
+    date: mi_date || new Date().toLocaleDateString('en-US'),
+    targetSummary,
+    conductorOdMm: d,
+    layers,
+    overlap,
+    tensionN: tension_n,
+    lineSpeedFtMin: line_speed_ft_min,
+    predicted,
+  })
+  const miFilename = `${String(mi_number || 'MI-ST962-AUTO').replace(/[^a-z0-9._-]+/gi, '-')}-${round(d / 25.4, 4)}in-${Math.round((target_vp || VP_actual) * 100)}vp.xls`
 
   return {
     targets: {
@@ -1443,15 +1775,7 @@ function designDielectricStack(input) {
       eps_LD: round(eps_LD, 3),
     },
     layers: stackOut,
-    predicted: {
-      final_od_mm: round(finalOD, 4),
-      eps_eff: round(eps_eff_actual, 4),
-      vp: round(VP_actual, 4),
-      z0_ohm: round(Z0_actual, 3),
-      delta_z0: round(Z0_actual - (target_z0_ohm || 0), 2),
-      delta_vp: target_vp != null ? round(VP_actual - target_vp, 4) : null,
-      bragg_notch_1_ghz: notch1,
-    },
+    predicted,
     label: `${target_z0_ohm ? `${target_z0_ohm} Ω` : ''}${target_vp ? ` · ${(target_vp*100).toFixed(0)}% VP` : ''} · d=${d.toFixed(3)} mm`.trim(),
     _section: 'stack',
     _apply_preset: {
@@ -1459,15 +1783,33 @@ function designDielectricStack(input) {
       target_z0: target_z0_ohm,
       layers: layers.map((L) => ({
         preset: L.preset,
+        part_number: L.part_number,
+        material_id: L.material_id,
+        density_code: L.density_code,
+        density_label: L.density_label,
         density: L.density,
         tape_thickness_mm: L.tape_thickness_mm,
+        tape_thickness_mil: L.tape_thickness_mil,
         tape_width_mm: L.tape_width_mm,
+        tape_width_in: L.tape_width_in,
         overlap: L.overlap,
         tension_factor: L.tension_factor,
         passes: L.passes,
       })),
     },
+    _download: {
+      filename: miFilename,
+      mime: 'application/vnd.ms-excel',
+      text: miWorkbook,
+      label: 'Download filled MI Excel',
+    },
     notes: [
+      selectedParts.length
+        ? `Material Library: selected ${selectedParts.join(', ')} from the 962-96000 PTFE tape catalog.`
+        : null,
+      snappedTape
+        ? `Tape request snapped to stocked material: ${baseTape.partNumber} (${baseTape.thicknessMil} mil, ${baseTape.densityCode}, ${baseTape.widthIn.toFixed(3)} in).`
+        : null,
       smallCableClamp
         ? `⚠ Small-conductor rule: d=${(d/25.4).toFixed(3)}" ≤ 0.091". Auto-clamped tape from ${smallCableClamp.original_mil.toFixed(1)} mil → ${smallCableClamp.clamped_mil.toFixed(1)} mil (thicker tape wrinkles on tight radii).`
         : null,

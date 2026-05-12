@@ -1,6 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, Layers, Play, Plus, RotateCcw, ShieldCheck, Trash2, Zap } from 'lucide-react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import {
+  FOIL_TAPE_MATERIALS,
+  PTFE_TAPE_MATERIALS,
+  SPC_FLATWIRE_MATERIALS,
+  findNearestFoilTape,
+  findNearestPtfeTape,
+  findNearestSpcFlatwire,
+  foilTapeToLayer,
+  ptfeTapeToLayer,
+  spcFlatwireToLayer,
+} from '../data/materialLibrary.js'
 
 const C = {
   bg: '#090d0e',
@@ -186,6 +197,23 @@ function makeAnimationKey(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 }
 
+function makePtfeLayer(layer = {}, preset = PRESETS.phaseStable, index = 0) {
+  const tape = findNearestPtfeTape({
+    partNumber: layer.partNumber || layer.part_number,
+    thicknessMil: layer.mil ?? layer.tape_thickness_mil ?? (layer.tape_thickness_mm ? layer.tape_thickness_mm / MIL_TO_MM : preset.ptfeMil),
+    widthMm: layer.width ?? layer.tape_width_mm ?? preset.ptfeWidth,
+    densityGcc: layer.density ?? preset.ptfeDensity,
+    densityCode: layer.densityCode || layer.density_code,
+  })
+  return ptfeTapeToLayer(tape, {
+    id: makePtfeId(),
+    passes: clamp(Math.round(layer.passes || 1), 1, 12),
+    overlap: clamp(Number(layer.overlap ?? preset.ptfeOverlap ?? 50), 0, 80),
+    direction: layer.direction === 'S' || index % 2 ? 'S' : 'Z',
+    animateKey: makeAnimationKey('ptfe'),
+  })
+}
+
 function makeShieldLayer(type, source = PRESETS.phaseStable) {
   if (type === 'jacket') {
     return {
@@ -199,9 +227,10 @@ function makeShieldLayer(type, source = PRESETS.phaseStable) {
     }
   }
   if (type === 'flatwire') {
-    const width = source.helicalWidth ?? 1.4
+    const material = findNearestSpcFlatwire({ use: 'helical', thicknessMil: 2.5, widthIn: 0.0075 })
+    const width = material?.widthMm ?? source.helicalWidth ?? 0.19
     const overlap = source.helicalOverlap ?? 45
-    return {
+    return spcFlatwireToLayer(material, {
       id: makeShieldId(),
       type,
       label: 'SPC flatwire helical',
@@ -211,17 +240,18 @@ function makeShieldLayer(type, source = PRESETS.phaseStable) {
       pitch: helicalPitchFromOverlap(overlap, width),
       overlap,
       animateKey: makeAnimationKey('shield'),
-    }
+    })
   }
   if (type === 'foil') {
-    return {
+    const material = findNearestFoilTape({ thicknessMil: 1.4, widthIn: 0.0311 })
+    return foilTapeToLayer(material, {
       id: makeShieldId(),
       type,
       label: 'Foil shield',
       length: 152,
       overlap: source.foilOverlap ?? 25,
       animateKey: makeAnimationKey('shield'),
-    }
+    })
   }
   if (type === 'braid') {
     return {
@@ -237,9 +267,10 @@ function makeShieldLayer(type, source = PRESETS.phaseStable) {
       animateKey: makeAnimationKey('shield'),
     }
   }
-  const width = source.spiralWidth ?? 1.0
+  const material = findNearestSpcFlatwire({ use: 'spiral', thicknessMil: 2.5, widthIn: 0.005 })
+  const width = material?.widthMm ?? source.spiralWidth ?? 0.13
   const gap = source.spiralGap ?? 10
-  return {
+  return spcFlatwireToLayer(material, {
     id: makeShieldId(),
     type: 'spiral',
     label: 'SPC flatwire spiral',
@@ -250,7 +281,7 @@ function makeShieldLayer(type, source = PRESETS.phaseStable) {
     bobbins: source.spiralBobbins ?? 8,
     gap,
     animateKey: makeAnimationKey('shield'),
-  }
+  })
 }
 
 function makePresetShieldStack(preset) {
@@ -267,16 +298,7 @@ function makePresetStack(preset) {
   const source = Array.isArray(preset.ptfeStack) && preset.ptfeStack.length
     ? preset.ptfeStack
     : [{ passes: preset.ptfeLayers || 1, mil: preset.ptfeMil || 2, width: preset.ptfeWidth || 6, overlap: preset.ptfeOverlap || 50, density: preset.ptfeDensity || 0.78, direction: 'Z' }]
-  return source.map((layer, index) => ({
-    id: makePtfeId(),
-    passes: clamp(Math.round(layer.passes || 1), 1, 12),
-    mil: clamp(Number(layer.mil ?? layer.ptfeMil ?? preset.ptfeMil ?? 2), 0.5, 5),
-    width: clamp(Number(layer.width ?? preset.ptfeWidth ?? 6), 2, 14),
-    overlap: clamp(Number(layer.overlap ?? preset.ptfeOverlap ?? 50), 0, 80),
-    density: clamp(Number(layer.density ?? preset.ptfeDensity ?? 0.78), 0.45, 1.65),
-    direction: layer.direction === 'S' || index % 2 ? 'S' : 'Z',
-    animateKey: makeAnimationKey('ptfe'),
-  }))
+  return source.map((layer, index) => makePtfeLayer(layer, preset, index))
 }
 
 function stackSummary(stack, suckout = 0) {
@@ -807,7 +829,7 @@ function useRfStackModel(config) {
               return
             }
 
-            const width = clamp(Number(layer.width) || 1.2, 0.35, 10)
+            const width = clamp(Number(layer.width) || 0.13, 0.03, 10)
             const handedness = (layer.direction || (type === 'flatwire' ? 'S' : 'Z')) === 'S' ? -1 : 1
 
             if (type === 'spiral') {
@@ -1093,7 +1115,7 @@ function PTFELayerCard({ layer, index, canRemove, onUpdate, onReplay, onRemove }
         <div style={S.ptfeLayerTitle}>
           <span style={{ ...S.layerDot, background: accent }} />
           <strong>PTFE L{index + 1}</strong>
-          <small>{direction}-wrap · {fmt(layer.width, 1)} mm tape</small>
+          <small>{direction}-wrap · {layer.partNumber || `${fmt(layer.width, 1)} mm tape`}</small>
         </div>
         <div style={S.ptfeLayerActions}>
           <button type="button" aria-label={`Replay PTFE layer ${index + 1}`} title={`Replay PTFE layer ${index + 1}`} onClick={onReplay} style={{ ...S.iconBtn, color: C.teal }}>
@@ -1112,6 +1134,20 @@ function PTFELayerCard({ layer, index, canRemove, onUpdate, onReplay, onRemove }
         </div>
       </div>
       <div style={S.ptfeLayerGrid}>
+        <label style={{ ...S.materialSelect, gridColumn: '1 / -1' }}>
+          <span style={S.materialLabel}>Material</span>
+          <select
+            value={layer.partNumber || ''}
+            onChange={(event) => onUpdate({ partNumber: event.target.value })}
+            style={S.select}
+          >
+            {PTFE_TAPE_MATERIALS.map((tape) => (
+              <option key={tape.partNumber} value={tape.partNumber}>
+                {tape.partNumber} · {tape.thicknessMil} mil {tape.densityCode} · {tape.widthIn.toFixed(3)} in
+              </option>
+            ))}
+          </select>
+        </label>
         <Slider label="Width" value={layer.width} setValue={(value) => onUpdate({ width: value })} min={2} max={14} step={0.1} unit=" mm" accent={accent} />
         <Slider label="Passes" value={layer.passes} setValue={(value) => onUpdate({ passes: Math.round(value) })} min={1} max={12} step={1} accent={accent} />
         <Slider label="Mil" value={layer.mil} setValue={(value) => onUpdate({ mil: value })} min={0.5} max={5} step={0.1} unit=" mil" accent="#fff2c4" />
@@ -1126,6 +1162,10 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
   const type = layer.type || 'spiral'
   const isFlatwire = type === 'spiral' || type === 'flatwire'
   const accent = type === 'jacket' ? C.sky : type === 'braid' ? C.braid : type === 'foil' ? C.foil : type === 'flatwire' ? C.sky : C.amber
+  const flatwireOptions = isFlatwire
+    ? SPC_FLATWIRE_MATERIALS.filter((item) => type === 'spiral' ? item.shieldUse === 'spiral' : item.shieldUse === 'helical')
+    : []
+  const foilOptions = type === 'foil' ? FOIL_TAPE_MATERIALS : []
   const title = type === 'spiral' ? 'SPC flatwire spiral'
     : type === 'flatwire' ? 'SPC flatwire helical'
       : type === 'foil' ? 'Foil shield'
@@ -1169,6 +1209,28 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
             Spiral starts with separated SPC flatwire bobbins; 8 bobbins and 8-13% gap is the normal window.
           </div>
           <div style={S.ptfeLayerGrid}>
+            <label style={{ ...S.materialSelect, gridColumn: '1 / -1' }}>
+              <span style={S.materialLabel}>SPC material</span>
+              <select
+                value={layer.partNumber || ''}
+                onChange={(event) => {
+                  const material = findNearestSpcFlatwire({ partNumber: event.target.value })
+                  const nextWidth = material.widthMm
+                  onUpdate({
+                    ...spcFlatwireToLayer(material),
+                    gap: spiralGap,
+                    pitch: spiralPitchFromGap(spiralGap, nextWidth),
+                  })
+                }}
+                style={S.select}
+              >
+                {flatwireOptions.map((item) => (
+                  <option key={item.partNumber} value={item.partNumber}>
+                    {item.partNumber} · {item.thicknessMil ?? 'TBD'} mil · {item.widthIn.toFixed(4)} in
+                  </option>
+                ))}
+              </select>
+            </label>
             <DimensionSlider label="Spiral length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unitMode={unitMode} accent={accent} />
             <DimensionSlider
               label="Flatwire width"
@@ -1177,9 +1239,9 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
                 const nextGap = spiralGapFromPitch(spiralPitch, value)
                 onUpdate({ width: value, gap: nextGap, pitch: spiralPitch })
               }}
-              min={0.35}
-              max={10}
-              step={0.05}
+              min={0.03}
+              max={0.8}
+              step={0.005}
               unitMode={unitMode}
               accent={accent}
             />
@@ -1205,6 +1267,28 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
             Pitch controls tapping spin: lower pitch closes the overlap, higher pitch opens it up.
           </div>
           <div style={S.ptfeLayerGrid}>
+            <label style={{ ...S.materialSelect, gridColumn: '1 / -1' }}>
+              <span style={S.materialLabel}>SPC material</span>
+              <select
+                value={layer.partNumber || ''}
+                onChange={(event) => {
+                  const material = findNearestSpcFlatwire({ partNumber: event.target.value })
+                  const nextWidth = material.widthMm
+                  onUpdate({
+                    ...spcFlatwireToLayer(material),
+                    overlap: helicalOverlap,
+                    pitch: helicalPitchFromOverlap(helicalOverlap, nextWidth),
+                  })
+                }}
+                style={S.select}
+              >
+                {flatwireOptions.map((item) => (
+                  <option key={item.partNumber} value={item.partNumber}>
+                    {item.partNumber} · {item.thicknessMil ?? 'TBD'} mil · {item.widthIn.toFixed(4)} in
+                  </option>
+                ))}
+              </select>
+            </label>
             <DimensionSlider label="Helical length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unitMode={unitMode} accent={accent} />
             <DimensionSlider
               label="Flatwire width"
@@ -1213,9 +1297,9 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
                 const nextOverlap = helicalOverlapFromPitch(helicalPitch, value)
                 onUpdate({ width: value, overlap: nextOverlap, pitch: helicalPitch })
               }}
-              min={0.35}
-              max={10}
-              step={0.05}
+              min={0.03}
+              max={0.8}
+              step={0.005}
               unitMode={unitMode}
               accent={accent}
             />
@@ -1236,7 +1320,28 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
 
       {type === 'foil' && (
         <div style={S.ptfeLayerGrid}>
+          <label style={{ ...S.materialSelect, gridColumn: '1 / -1' }}>
+            <span style={S.materialLabel}>Foil material</span>
+            <select
+              value={layer.partNumber || ''}
+              onChange={(event) => {
+                const material = findNearestFoilTape({ partNumber: event.target.value })
+                onUpdate({
+                  ...foilTapeToLayer(material),
+                  overlap: layer.overlap,
+                })
+              }}
+              style={S.select}
+            >
+              {foilOptions.map((item) => (
+                <option key={item.partNumber} value={item.partNumber}>
+                  {item.partNumber} · {item.thicknessMil} mil · {item.widthIn.toFixed(4)} in
+                </option>
+              ))}
+            </select>
+          </label>
           <DimensionSlider label="Foil length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unitMode={unitMode} accent={accent} />
+          <DimensionSlider label="Foil width" value={layer.width || 0.79} setValue={(value) => onUpdate({ width: value })} min={0.1} max={6} step={0.01} unitMode={unitMode} accent={accent} />
           <Slider label="Overlap" value={layer.overlap} setValue={(value) => onUpdate({ overlap: value })} min={0} max={70} step={1} unit="%" accent={accent} />
         </div>
       )}
@@ -1293,7 +1398,14 @@ export default function RFStackLab() {
   }
 
   const updatePtfeLayer = (id, patch) => {
-    setPtfeStack((current) => current.map((layer) => layer.id === id ? { ...layer, ...patch } : layer))
+    setPtfeStack((current) => current.map((layer) => {
+      if (layer.id !== id) return layer
+      if (patch.partNumber) {
+        const tape = findNearestPtfeTape({ partNumber: patch.partNumber })
+        return ptfeTapeToLayer(tape, { ...layer, ...patch, partNumber: tape.partNumber })
+      }
+      return { ...layer, ...patch }
+    }))
     setActivePreset('')
   }
 
@@ -1301,18 +1413,20 @@ export default function RFStackLab() {
     setPtfeStack((current) => {
       const last = current[current.length - 1] || makePresetStack(PRESETS.phaseStable)[0]
       const nextDirection = direction || (last.direction === 'Z' ? 'S' : 'Z')
+      const tape = findNearestPtfeTape({
+        thicknessMil: last.mil * 0.86,
+        widthMm: last.width - 1.2,
+        densityCode: last.densityCode || (last.density >= 1.1 ? 'H' : 'L'),
+      })
       return [
         ...current,
-        {
+        ptfeTapeToLayer(tape, {
           id: makePtfeId(),
           passes: 1,
-          mil: clamp(last.mil * 0.86, 0.5, 5),
-          width: clamp(last.width - 1.2, 2, 14),
           overlap: clamp(last.overlap + (nextDirection === 'S' ? 4 : -3), 0, 80),
-          density: clamp(last.density + 0.02, 0.45, 1.65),
           direction: nextDirection,
           animateKey: makeAnimationKey('ptfe'),
-        },
+        }),
       ].slice(0, 8)
     })
     setActivePreset('')
@@ -1368,16 +1482,11 @@ export default function RFStackLab() {
         ? layers.reduce((sum, layer) => sum + (Number(layer.density) || 0.78) * Math.max(1, Number(layer.passes) || 1), 0) / Math.max(1, totalPasses)
         : 0.78
       if (layers.length) {
-        setPtfeStack(layers.map((layer, index) => ({
-          id: makePtfeId(),
-          passes: clamp(Math.round(Number(layer.passes) || 1), 1, 12),
-          mil: clamp((Number(layer.tape_thickness_mm) || 0.05) / MIL_TO_MM, 0.5, 5),
-          width: clamp(Number(layer.tape_width_mm) || 6.35, 2, 14),
+        setPtfeStack(layers.map((layer, index) => makePtfeLayer({
+          ...layer,
           overlap: clamp(overlapToPct(layer.overlap), 0, 80),
-          density: clamp(Number(layer.density) || avgDensity || 0.78, 0.45, 1.65),
           direction: index % 2 ? 'S' : 'Z',
-          animateKey: makeAnimationKey('ptfe'),
-        })))
+        }, PRESETS.phaseStable, index)))
       }
       setParams((current) => ({
         ...current,
@@ -1800,6 +1909,9 @@ const S = {
   directionBtn: { minWidth: 34, minHeight: 28, background: '#070b0c', border: '1px solid', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: 11, cursor: 'pointer' },
   iconBtn: { width: 30, height: 28, display: 'grid', placeItems: 'center', background: '#070b0c', border: `1px solid ${C.border}`, color: C.dim, cursor: 'pointer' },
   ptfeLayerGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 9 },
+  materialSelect: { display: 'grid', gap: 6, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.3 },
+  materialLabel: { color: C.muted },
+  select: { width: '100%', minHeight: 34, background: '#070b0c', color: C.text, border: `1px solid ${C.borderHi}`, padding: '0 10px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, outline: 0 },
   slider: { display: 'grid', gap: 6, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.3 },
   sliderTop: { display: 'flex', justifyContent: 'space-between', gap: 8 },
   metrics: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 },
