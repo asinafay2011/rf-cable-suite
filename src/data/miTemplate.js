@@ -101,21 +101,25 @@ function toleranceTriplet(nominalIn, tol = 0.001) {
 
 function overlapText(overlap) {
   const raw = String(overlap || '1/2').trim()
-  if (raw.toLowerCase() === 'butt') return 'BUTT WRAP'
   if (raw.includes('/')) return `${raw} WRAP`
   const n = Number(raw)
   if (isFinite(n)) {
-    if (Math.abs(n - 0.5) < 0.02) return '1/2 WRAP'
-    if (Math.abs(n - 2 / 3) < 0.03) return '2/3 WRAP'
-    if (Math.abs(n - 0.75) < 0.03) return '3/4 WRAP'
+    const f = n > 1 ? n / 100 : n
+    if (Math.abs(f - 0.5) < 0.02) return '1/2 WRAP'
+    if (Math.abs(f - 2 / 3) < 0.03) return '2/3 WRAP'
+    if (Math.abs(f - 0.75) < 0.03) return '3/4 WRAP'
   }
   return `${raw} WRAP`.toUpperCase()
 }
 
 function overlapFraction(overlap) {
-  if (typeof overlap === 'number') return Math.max(0, Math.min(0.95, overlap))
+  if (typeof overlap === 'number') {
+    const f = overlap > 1 ? overlap / 100 : overlap
+    if (Math.abs(f - 2 / 3) < 0.03) return 2 / 3
+    if (Math.abs(f - 0.75) < 0.03) return 0.75
+    return 0.5
+  }
   const key = String(overlap || '').toLowerCase()
-  if (key === 'butt') return 0
   if (key === '1/2') return 0.5
   if (key === '2/3') return 2 / 3
   if (key === '3/4') return 0.75

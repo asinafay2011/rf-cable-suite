@@ -1,5 +1,14 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { Plus, Trash2, Info, Layers, Settings, ChevronUp, ChevronDown, Zap, AlertTriangle } from 'lucide-react'
+import {
+  PTFE_WRAP_PRESETS,
+  SMALL_CABLE_MAX_PTFE_WIDTH_IN,
+  SMALL_CABLE_MAX_PTFE_WIDTH_MM,
+  SMALL_CABLE_TAPE_OD_IN,
+  SMALL_CABLE_TAPE_OD_MM,
+  normalizePtfeWrap,
+  recommendPtfeWrapForCable,
+} from '../data/materialLibrary.js'
 
 // ─────────────────────────────────────────────────────────
 // Dielectric Stack Designer
@@ -64,10 +73,9 @@ const PRESETS = {
 }
 
 const OVERLAP_PRESETS = {
-  butt: { fraction: 0,     label: 'Butt',  hint: 'No overlap',   layers: 1 },
-  '1/2': { fraction: 0.5,  label: '1/2',   hint: '50% overlap',  layers: 2 },
-  '2/3': { fraction: 0.667,label: '2/3',   hint: '67% overlap',  layers: 3 },
-  '3/4': { fraction: 0.75, label: '3/4',   hint: '75% overlap',  layers: 4 },
+  '1/2': { fraction: 0.5, label: '1/2', hint: '50% overlap', layers: 2 },
+  '2/3': { fraction: 2 / 3, label: '2/3', hint: '66.7% overlap', layers: 3 },
+  '3/4': { fraction: 0.75, label: '3/4', hint: '75% overlap', layers: 4 },
 }
 
 // ─── Tape thickness preset pills (mils) ───
@@ -99,6 +107,14 @@ function violatesSmallCableRule(conductorOD_mm, tape_thickness_mm) {
   )
 }
 
+function smallCableTapingGuidance(odBeforeMm, layer) {
+  return recommendPtfeWrapForCable({
+    cableOdMm: odBeforeMm,
+    tapeWidthMm: layer.tape_width_mm,
+    overlap: layer.overlap,
+  })
+}
+
 // ─── Unit conversion helpers ───
 const UNIT_KEY = 'cablelab.dsd.unit'
 const UnitContext = React.createContext({ unit: 'inch', setUnit: () => {} })
@@ -126,8 +142,8 @@ function newLayer(idx) {
     preset: 'high_density',
     density: 1.6,
     tape_thickness_mm: 0.10,
-    tape_width_mm: 6.35,
-    overlap: '1/2',
+    tape_width_mm: 0.635,
+    overlap: '2/3',
     tension_factor: 0.92,
     passes: 1,
   }
@@ -161,8 +177,8 @@ export default function DielectricStackDesigner() {
 
   const [conductorOD_mm, setConductorOD_mm] = useState(0.96) // 18 AWG ≈ 1.024 mm; 19 AWG ≈ 0.912; 18.5 AWG ≈ 0.96
   const [layers, setLayers] = useState(() => [
-    { ...newLayer(0), preset: 'low_density',  density: 0.7, tape_thickness_mm: 2 * MIL_TO_MM, overlap: '1/2', passes: 2 },  // 2 mil LD
-    { ...newLayer(1), preset: 'high_density', density: 1.6, tape_thickness_mm: 2 * MIL_TO_MM, overlap: '1/2', passes: 1 },  // 2 mil HD
+    { ...newLayer(0), preset: 'low_density',  density: 0.7, tape_thickness_mm: 2 * MIL_TO_MM, overlap: '2/3', passes: 2 },  // 2 mil LD
+    { ...newLayer(1), preset: 'high_density', density: 1.6, tape_thickness_mm: 2 * MIL_TO_MM, overlap: '2/3', passes: 1 },  // 2 mil HD
   ])
   const [targetZ0, setTargetZ0] = useState(50)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -193,8 +209,8 @@ export default function DielectricStackDesigner() {
             preset: L.preset || 'high_density',
             density: L.density ?? 1.6,
             tape_thickness_mm: L.tape_thickness_mm ?? 0.10,
-            tape_width_mm: L.tape_width_mm ?? 6.35,
-            overlap: L.overlap || '1/2',
+            tape_width_mm: L.tape_width_mm ?? 0.635,
+            overlap: normalizePtfeWrap(L.overlap || '2/3').key,
             tension_factor: L.tension_factor ?? 0.92,
             passes: Math.max(1, Math.round(L.passes ?? 1)),
           }))
@@ -459,6 +475,7 @@ export default function DielectricStackDesigner() {
               layer={L}
               compute={computed.stack[i]}
               ruleViolation={ruleViolations.includes(i)}
+              smallCableGuidance={computed.stack[i] ? smallCableTapingGuidance(computed.stack[i].OD_before_mm, L) : null}
               onChange={(patch) => updateLayer(i, patch)}
               onRemove={() => removeLayer(i)}
               onUp={() => moveLayer(i, -1)}
@@ -476,7 +493,7 @@ export default function DielectricStackDesigner() {
       </div>
 
       {/* WTM pitch calculator */}
-      <PitchCalculator defaultWidth={layers[0]?.tape_width_mm || 6.35} cableOD={computed.finalOD_mm || conductorOD_mm} />
+      <PitchCalculator defaultWidth={layers[0]?.tape_width_mm || 0.635} cableOD={computed.finalOD_mm || conductorOD_mm} />
 
       {/* Bragg notch detector */}
       <NotchDetector layers={layers} VP={computed.VP || 0.7} hasStack={computed.stack.length > 0} />
@@ -490,10 +507,11 @@ export default function DielectricStackDesigner() {
           <div style={{ marginTop: 10, fontSize: 11, color: COLORS.textDim, lineHeight: 1.6 }}>
             <p><strong style={{ color: COLORS.text }}>εᵣ from density (Looyenga):</strong> εᵣ_eff^⅓ = vf·εᵣ_PTFE^⅓ + (1−vf), where vf = ρ/ρ_solid. ρ_solid = 2.15 g/cm³, εᵣ_solid = 2.10. So 1.6 g/cm³ → εᵣ ≈ {densityToEps(1.6).toFixed(3)}; 0.7 g/cm³ → εᵣ ≈ {densityToEps(0.7).toFixed(3)}.</p>
             <p><strong style={{ color: COLORS.text }}>Layered εᵣ_eff (Wadell):</strong> εᵣ_eff = ln(D/d) / Σᵢ ln(rᵢ₊₁/rᵢ)/εᵣ,ᵢ. Phase velocity VP = 1/√εᵣ_eff. Z₀ = (60/√εᵣ_eff)·ln(D/d).</p>
-            <p><strong style={{ color: COLORS.text }}>OD per pass:</strong> ΔOD = 2 · n_overlap · t_tape · τ. n_overlap = round(1/(1−overlap)) = 1 (butt) / 2 (½) / 3 (⅔) / 4 (¾). τ ∈ [0.7, 1.0] is the tension factor — high τ = light tension (full thickness retained); low τ = WTM puts the tape under tension and squeezes it thinner.</p>
-            <p><strong style={{ color: COLORS.text }}>Pitch (WTM lead screw):</strong> P = W · (1 − overlap). For a 6.35 mm tape: ½ wrap → 3.175 mm/rev; ⅔ wrap → 2.117 mm/rev; ¾ wrap → 1.588 mm/rev. The compensated pitch accounts for helix angle on large-OD cables (≪5% correction for typical RF coax).</p>
+            <p><strong style={{ color: COLORS.text }}>OD per pass:</strong> ΔOD = 2 · n_overlap · t_tape · τ. n_overlap = 2 (½) / 3 (⅔) / 4 (¾). τ ∈ [0.7, 1.0] is the tension factor — high τ = light tension (full thickness retained); low τ = WTM puts the tape under tension and squeezes it thinner.</p>
+            <p><strong style={{ color: COLORS.text }}>Pitch (WTM lead screw):</strong> P = W · (1 − overlap). PTFE tape uses the shop settings {PTFE_WRAP_PRESETS.map((wrap) => `${wrap.percent}% (${wrap.key})`).join(', ')}. For a 0.0250 in tape: ½ wrap → 0.0125 in/rev; ⅔ wrap → 0.0083 in/rev; ¾ wrap → 0.0063 in/rev. The compensated pitch accounts for helix angle on large-OD cables (≪5% correction for typical RF coax).</p>
             <p style={{ color: COLORS.textMuted }}>Note: Looyenga is one of several mixing rules. For 0.5–1.0 g/cm³ foamed PTFE, manufacturer εᵣ data typically lies within ±0.05 of the Looyenga prediction. Calibrate against your in-house measurement if needed.</p>
             <p><strong style={{ color: COLORS.text }}>Small-conductor rule:</strong> for inner conductor OD ≤ 0.091&quot; ({SMALL_CABLE_MAX_OD_MM.toFixed(3)} mm), tape thickness must be ≤ {SMALL_CABLE_MAX_TAPE_MIL} mil ({SMALL_CABLE_MAX_TAPE_MM.toFixed(3)} mm). Thicker tape can&apos;t conform to the tight radius — it wrinkles, opens air gaps under the wrap, and produces inconsistent OD build. Use more passes of thinner tape instead.</p>
+            <p><strong style={{ color: COLORS.text }}>Small-cable taping:</strong> for cable OD ≤ {SMALL_CABLE_TAPE_OD_IN.toFixed(3)}&quot; ({SMALL_CABLE_TAPE_OD_MM.toFixed(3)} mm), avoid {SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)}&quot; ({SMALL_CABLE_MAX_PTFE_WIDTH_MM.toFixed(3)} mm) PTFE tape and wider. Default to 2/3 wrap to reduce shrink-back; use 1/2 wrap only when the lower OD build is the target. A single 2/3 wrap builds 3 tape thicknesses, still smaller than two 1/2 wraps at 4 tape thicknesses.</p>
           </div>
         )}
       </div>
@@ -510,10 +528,12 @@ function Label({ children }) {
 // ─────────────────────────────────────────────────────────
 // Layer card
 // ─────────────────────────────────────────────────────────
-function LayerCard({ index, layer, compute, ruleViolation, onChange, onRemove, onUp, onDown, canUp, canDown }) {
+function LayerCard({ index, layer, compute, ruleViolation, smallCableGuidance, onChange, onRemove, onUp, onDown, canUp, canDown }) {
   const preset = PRESETS[layer.preset] || PRESETS.high_density
   const ovr = OVERLAP_PRESETS[layer.overlap] || OVERLAP_PRESETS['1/2']
   const { unit } = useUnit()
+  const smallCableWrapWarning = smallCableGuidance?.smallCable && layer.overlap !== '2/3'
+  const smallCableWidthWarning = Boolean(smallCableGuidance?.avoidWidth)
 
   // Match the tape thickness to the closest mil preset for highlight
   const currentMil = layer.tape_thickness_mm / MIL_TO_MM
@@ -622,13 +642,14 @@ function LayerCard({ index, layer, compute, ruleViolation, onChange, onRemove, o
           label="Tape width"
           valueMm={layer.tape_width_mm}
           onChangeMm={(v) => onChange({ tape_width_mm: v })}
-          stepMm={0.1}
-          stepInch={0.005}
-          minMm={1}
-          maxMm={50}
-          decMm={2}
-          decInch={3}
-          hint="For pitch calc"
+          stepMm={0.025}
+          stepInch={0.0005}
+          minMm={0.1}
+          maxMm={4}
+          decMm={3}
+          decInch={4}
+          error={smallCableWidthWarning}
+          hint={smallCableWidthWarning ? `Avoid ≥ ${SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)} in below ${SMALL_CABLE_TAPE_OD_IN.toFixed(3)} in OD` : 'For pitch calc'}
         />
 
         {/* Overlap */}
@@ -649,6 +670,11 @@ function LayerCard({ index, layer, compute, ruleViolation, onChange, onRemove, o
           <div style={{ fontSize: 9, color: COLORS.textMuted, marginTop: 3, fontFamily: 'JetBrains Mono, monospace' }}>
             {ovr.hint} → {ovr.layers}× tape thickness
           </div>
+          {smallCableWrapWarning && (
+            <div style={{ fontSize: 9, color: COLORS.copperBright, marginTop: 4, fontFamily: 'JetBrains Mono, monospace', lineHeight: 1.35 }}>
+              Small OD: use 2/3 wrap for shrink-back unless 1/2 is needed to hold OD.
+            </div>
+          )}
         </div>
 
         {/* Tension */}
@@ -886,14 +912,11 @@ function Legend({ stack }) {
 // ─────────────────────────────────────────────────────────
 function PitchCalculator({ defaultWidth, cableOD }) {
   const { unit } = useUnit()
-  const [width, setWidth] = useState(defaultWidth || 6.35)
+  const [width, setWidth] = useState(defaultWidth || 0.635)
   const [overlap, setOverlap] = useState('1/2')
-  const [customOverlap, setCustomOverlap] = useState(50)
   const [compensate, setCompensate] = useState(false)
 
-  const overlapFraction =
-    overlap === 'custom' ? Math.min(0.95, Math.max(0, customOverlap / 100)) :
-    OVERLAP_PRESETS[overlap]?.fraction ?? 0.5
+  const overlapFraction = OVERLAP_PRESETS[normalizePtfeWrap(overlap).key]?.fraction ?? 0.5
 
   // Simple: P = W × (1 − overlap)
   const pitchSimple = width * (1 - overlapFraction)
@@ -930,12 +953,12 @@ function PitchCalculator({ defaultWidth, cableOD }) {
           label="Tape width (W)"
           valueMm={width}
           onChangeMm={setWidth}
-          stepMm={0.1}
-          stepInch={0.005}
-          minMm={1}
-          maxMm={50}
-          decMm={2}
-          decInch={3}
+          stepMm={0.025}
+          stepInch={0.0005}
+          minMm={0.1}
+          maxMm={4}
+          decMm={3}
+          decInch={4}
         />
         <div>
           <Label>Target overlap</Label>
@@ -950,29 +973,7 @@ function PitchCalculator({ defaultWidth, cableOD }) {
                 {o.label}
               </button>
             ))}
-            <button
-              onClick={() => setOverlap('custom')}
-              className={`dsd-pill ${overlap === 'custom' ? 'dsd-pill-active' : ''}`}
-            >
-              Custom
-            </button>
           </div>
-          {overlap === 'custom' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-              <input
-                type="range"
-                min="0"
-                max="95"
-                step="1"
-                value={customOverlap}
-                onChange={(e) => setCustomOverlap(parseFloat(e.target.value))}
-                style={{ flex: 1, accentColor: COLORS.copper }}
-              />
-              <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: COLORS.copperBright, width: 40, textAlign: 'right' }}>
-                {customOverlap}%
-              </span>
-            </div>
-          )}
         </div>
         <div>
           <Label>Helix compensation</Label>
@@ -1019,8 +1020,8 @@ function PitchCalculator({ defaultWidth, cableOD }) {
         <strong style={{ color: COLORS.copperBright }}>
           {unit === 'inch' ? `${(pitch / 25.4).toFixed(4)} in/rev (${(pitch / MIL_TO_MM).toFixed(1)} mil/rev)` : `${pitch.toFixed(3)} mm/rev`}
         </strong>
-        {' '}for a {OVERLAP_PRESETS[overlap]?.hint || `${customOverlap}% overlap`} on a{' '}
-        {unit === 'inch' ? `${(width / 25.4).toFixed(3)}" (${(width / MIL_TO_MM).toFixed(0)} mil)` : `${width.toFixed(2)} mm`} tape.
+        {' '}for a {OVERLAP_PRESETS[overlap]?.hint || normalizePtfeWrap(overlap).label} on a{' '}
+        {unit === 'inch' ? `${(width / 25.4).toFixed(4)}" (${(width / MIL_TO_MM).toFixed(1)} mil)` : `${width.toFixed(3)} mm`} tape.
         Operator-side units: ≈ {turnsPerInch.toFixed(1)} turns per inch of cable advance.
       </div>
     </div>
@@ -1040,7 +1041,7 @@ function NotchDetector({ layers, VP, hasStack }) {
     if (!hasStack || !VP || VP <= 0 || layers.length === 0) return null
     const c = 299792458
     const perLayer = layers.map((L, i) => {
-      const W = L.tape_width_mm || 6.35
+      const W = L.tape_width_mm || 0.635
       const ovr = OVERLAP_PRESETS[L.overlap] || OVERLAP_PRESETS['1/2']
       const f_overlap = ovr.fraction
       const pitch_mm = W * (1 - f_overlap)

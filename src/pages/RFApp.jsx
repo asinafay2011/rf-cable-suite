@@ -60,6 +60,8 @@ Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP a
 - Auto-detect units: if the conductor OD is between 0.005 and 0.5 it is almost certainly inches (RF inner conductors are 0.020 / 0.032 / 0.045 / 0.057"); pass it as \`conductor_od_inch\`. If between 0.5 and 30 and the user said "mm", pass as \`conductor_od_mm\`.
 - Default to a HD-inside / LD-outside MIX unless the user specifies otherwise — it gives the lowest dielectric loss while still hitting target VP.
 - PTFE tape must come from the Material Library. Use real 962-96000 tape part numbers returned by \`design_dielectric_stack\` / \`lookup_material_library\`; do not invent tape thickness, density, or width when a library match exists.
+- PTFE tape overlap is always one of the standard wraps: 50% (1/2 wrap), 66.7% (2/3 wrap), or 75% (3/4 wrap). For cable OD ≤ 0.051", avoid 0.0375" tape width and use 2/3 wrap to reduce shrink-back; use 1/2 wrap only when the target OD requires the lower build. One 2/3 wrap builds 3 tape thicknesses, smaller than two 1/2 wraps at 4 tape thicknesses.
+- SPC spiral flatwire width rule: width = dielectric OD × 3.14 ÷ 8 bobbins minus 10% gap. Use 962-96001 spiral stock and snap to the nearest catalog width.
 - If the user asks for a blank manufacturing instruction / MI template, call \`generate_blank_mi_template\`; it returns a downloadable Excel workbook.
 - When \`design_dielectric_stack\` is used for a factory build, the tool returns a downloadable filled MI Excel workbook. Tell the user to download it from the tool card; it includes selected Material Library tape, lay direction, pitch set-point, tension, and OD after each wrap.
 - Manufacturing rule (enforced by the tool): if conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm). The tool reports the clamp in its notes — surface that fact to the user so they understand why the recipe uses thinner tape with more passes.
@@ -179,13 +181,13 @@ const RF_SECTION_STARTERS = {
   materials: [
     'Generate a blank MI Excel template',
     'Build me a cable: conductor 0.0113", 75% VP, 50 ohm, then generate MI',
-    'Find a 5 mil low-density PTFE tape around 0.75 inch wide',
+    'Find a 5 mil low-density PTFE tape around 0.0750 inch wide',
     'Decode 962-96000-05L0750',
   ],
   dielectric: [
     'Build a cable: conductor 0.045", target 80% VP, 50 Ω',
     'Build a 75 Ω cable, conductor 0.032", VP 70%, all HD PTFE',
-    'I have 6.35 mm tape — what pitch for 2/3 wrap?',
+    'I have 0.0250 inch PTFE tape — what pitch for 2/3 wrap?',
     'Stack 2 layers of HD PTFE at the same pitch — what notch frequencies?',
     'Why does foamed PTFE have lower εᵣ?',
   ],

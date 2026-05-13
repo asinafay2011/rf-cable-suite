@@ -8,6 +8,11 @@ import {
   formatFoilTapeLabel,
   formatPtfeTapeLabel,
   formatSpcFlatwireLabel,
+  DEFAULT_SPIRAL_BOBBINS,
+  DEFAULT_SPIRAL_GAP_PCT,
+  PTFE_WRAP_PRESETS,
+  SMALL_CABLE_MAX_PTFE_WIDTH_IN,
+  SMALL_CABLE_TAPE_OD_IN,
 } from '../data/materialLibrary.js'
 
 const C = {
@@ -164,7 +169,7 @@ export default function MaterialLibrary() {
         <div style={S.statPanel}>
           <p style={S.eyebrow}>Fine width</p>
           <strong style={S.statValue}>{inRangeSummary(stats.foilWidths.map((v) => v.toFixed(4)), 'in')}</strong>
-          <span style={S.statSub}>foil/SPC code 0311 = 0.0311 in</span>
+          <span style={S.statSub}>four-decimal inch width codes</span>
         </div>
       </div>
 
@@ -192,7 +197,7 @@ export default function MaterialLibrary() {
             </div>
             <div style={S.decoderCell}>
               <span>0750</span>
-              <strong>0.750 in width</strong>
+              <strong>0.0750 in width</strong>
             </div>
             <div style={S.decoderCell}>
               <span>962-96001</span>
@@ -208,7 +213,7 @@ export default function MaterialLibrary() {
             </div>
             <div style={S.decoderCell}>
               <span>0500</span>
-              <strong>0.0050 in width</strong>
+              <strong>0.0500 in width</strong>
             </div>
             <div style={S.decoderCell}>
               <span>962-96003</span>
@@ -237,7 +242,7 @@ export default function MaterialLibrary() {
             </div>
           </div>
           <p style={S.body}>
-            The dielectric-stack tool snaps PTFE to stocked tape. Shield layers now use 962-96001 for spiral flatwire, 962-96004 for helical spool stock, and 962-96003 for ALK foil tape.
+            The dielectric-stack tool snaps PTFE to stocked tape and the standard wrap choices: {PTFE_WRAP_PRESETS.map((wrap) => `${wrap.percent}% (${wrap.key})`).join(', ')}. For cable OD {SMALL_CABLE_TAPE_OD_IN.toFixed(3)} in and below, the recipe avoids {SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)} in PTFE tape and defaults to 2/3 wrap for shrink-back control. Spiral SPC flatwire uses dielectric OD x pi / {DEFAULT_SPIRAL_BOBBINS} bobbins minus {DEFAULT_SPIRAL_GAP_PCT}% gap.
           </p>
           <div style={S.familyGrid}>
             {MATERIAL_FAMILIES.map((family) => (
@@ -361,7 +366,7 @@ export default function MaterialLibrary() {
                   <td style={S.td}><strong style={S.part}>{item.partNumber}</strong></td>
                   <td style={S.td}>{densityBadge(item.densityCode)}</td>
                   <td style={S.td}>{item.thicknessMil} mil <span style={S.muted}>{item.thicknessMm.toFixed(3)} mm</span></td>
-                  <td style={S.td}>{item.widthIn.toFixed(3)} in <span style={S.muted}>{item.widthMm.toFixed(2)} mm</span></td>
+                  <td style={S.td}>{item.widthIn.toFixed(4)} in <span style={S.muted}>{item.widthMm.toFixed(3)} mm</span></td>
                   <td style={S.td}><span style={S.muted}>{formatPtfeTapeLabel(item)}</span></td>
                 </tr>
               ))}

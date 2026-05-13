@@ -1,10 +1,111 @@
 const INCH_TO_MM = 25.4
 const MIL_TO_MM = 0.0254
+const WIDTH_CODE_TO_INCH = 10000
 
 export const PTFE_TAPE_BASE_PART = '962-96000'
 export const SPC_SPIRAL_BASE_PART = '962-96001'
 export const FOIL_TAPE_BASE_PART = '962-96003'
 export const SPC_HELICAL_BASE_PART = '962-96004'
+
+export const DEFAULT_SPIRAL_BOBBINS = 8
+export const DEFAULT_SPIRAL_GAP_PCT = 10
+export const SMALL_CABLE_TAPE_OD_IN = 0.051
+export const SMALL_CABLE_TAPE_OD_MM = SMALL_CABLE_TAPE_OD_IN * INCH_TO_MM
+export const SMALL_CABLE_MAX_PTFE_WIDTH_IN = 0.0375
+export const SMALL_CABLE_MAX_PTFE_WIDTH_MM = SMALL_CABLE_MAX_PTFE_WIDTH_IN * INCH_TO_MM
+
+export const PTFE_WRAP_PRESETS = [
+  { key: '1/2', label: '1/2 wrap', percent: 50, fraction: 0.5, layers: 2 },
+  { key: '2/3', label: '2/3 wrap', percent: 66.7, fraction: 2 / 3, layers: 3 },
+  { key: '3/4', label: '3/4 wrap', percent: 75, fraction: 0.75, layers: 4 },
+]
+
+export function widthCodeToInch(widthCode) {
+  const n = Number(String(widthCode || '').padStart(4, '0'))
+  return Number.isFinite(n) ? n / WIDTH_CODE_TO_INCH : 0
+}
+
+export function normalizePtfeWrap(value = '1/2') {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (raw === '1/2' || raw === 'half' || raw === '50%' || raw === '50') return PTFE_WRAP_PRESETS[0]
+  if (raw === '2/3' || raw === '66.7%' || raw === '66.7' || raw === '67%' || raw === '67') return PTFE_WRAP_PRESETS[1]
+  if (raw === '3/4' || raw === '75%' || raw === '75') return PTFE_WRAP_PRESETS[2]
+
+  const numeric = Number(value)
+  const fraction = Number.isFinite(numeric)
+    ? (numeric > 1 ? numeric / 100 : numeric)
+    : 0.5
+
+  return PTFE_WRAP_PRESETS
+    .map((preset) => ({ preset, delta: Math.abs(preset.fraction - fraction) }))
+    .sort((a, b) => a.delta - b.delta)[0].preset
+}
+
+export function ptfeWrapFraction(value = '1/2') {
+  return normalizePtfeWrap(value).fraction
+}
+
+export function ptfeWrapLayers(value = '1/2') {
+  return normalizePtfeWrap(value).layers
+}
+
+export function ptfeWrapPercent(value = '1/2') {
+  return normalizePtfeWrap(value).percent
+}
+
+export function isSmallCableTapeOd(odInOrMm, unit = 'in') {
+  const odIn = unit === 'mm' ? Number(odInOrMm) / INCH_TO_MM : Number(odInOrMm)
+  return Number.isFinite(odIn) && odIn > 0 && odIn <= SMALL_CABLE_TAPE_OD_IN + 0.00001
+}
+
+export function shouldAvoidPtfeTapeWidthForSmallCable(tapeWidthIn, cableOdIn) {
+  return (
+    isSmallCableTapeOd(cableOdIn, 'in')
+    && Number(tapeWidthIn) >= SMALL_CABLE_MAX_PTFE_WIDTH_IN - 0.00001
+  )
+}
+
+export function recommendPtfeWrapForCable(input = {}) {
+  const cableOdIn = Number(input.cableOdIn ?? input.odIn ?? (input.cableOdMm != null ? input.cableOdMm / INCH_TO_MM : NaN))
+  const tapeWidthIn = Number(input.tapeWidthIn ?? (input.tapeWidthMm != null ? input.tapeWidthMm / INCH_TO_MM : NaN))
+  const requested = normalizePtfeWrap(input.overlap ?? input.wrap ?? '1/2')
+  const smallCable = isSmallCableTapeOd(cableOdIn, 'in')
+  const avoidWidth = shouldAvoidPtfeTapeWidthForSmallCable(tapeWidthIn, cableOdIn)
+  const recommended = smallCable ? normalizePtfeWrap('2/3') : requested
+
+  return {
+    smallCable,
+    avoidWidth,
+    requested,
+    recommended,
+    overlap: recommended.key,
+    overlapPercent: recommended.percent,
+    maxTapeWidthIn: smallCable ? SMALL_CABLE_MAX_PTFE_WIDTH_IN : null,
+    maxTapeWidthMm: smallCable ? SMALL_CABLE_MAX_PTFE_WIDTH_MM : null,
+    note: smallCable
+      ? `Small cable OD <= ${SMALL_CABLE_TAPE_OD_IN.toFixed(3)} in: use 2/3 wrap to resist shrink-back; avoid ${SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)} in tape width and wider unless target OD forces 1/2 wrap.`
+      : '',
+  }
+}
+
+export function spiralFlatwireWidthFromDielectricOd(input = {}) {
+  const dielectricOdIn = Number(input.dielectricOdIn ?? input.odIn ?? (input.dielectricOdMm != null ? input.dielectricOdMm / INCH_TO_MM : NaN))
+  const bobbins = Math.max(1, Math.round(Number(input.bobbins ?? DEFAULT_SPIRAL_BOBBINS) || DEFAULT_SPIRAL_BOBBINS))
+  const gapPct = Math.max(0, Math.min(50, Number(input.gapPct ?? input.gap_percent ?? DEFAULT_SPIRAL_GAP_PCT)))
+  const widthIn = Number.isFinite(dielectricOdIn) && dielectricOdIn > 0
+    ? ((dielectricOdIn * Math.PI) / bobbins) * (1 - gapPct / 100)
+    : NaN
+
+  return {
+    dielectricOdIn,
+    dielectricOdMm: Number.isFinite(dielectricOdIn) ? dielectricOdIn * INCH_TO_MM : NaN,
+    bobbins,
+    gapPct,
+    widthIn,
+    widthMm: Number.isFinite(widthIn) ? widthIn * INCH_TO_MM : NaN,
+    formula: 'width = dielectric OD * pi / bobbins * (1 - gap)',
+  }
+}
 
 export const PTFE_TAPE_PART_NUMBERS = Array.from(new Set([
   '962-96000-04H0375',
@@ -137,7 +238,7 @@ export function parsePtfeTapePartNumber(partNumber) {
   const [, milCode, densityCode, widthCodeRaw, variant] = match
   const widthCode = widthCodeRaw.padStart(4, '0')
   const thicknessMil = Number(milCode)
-  const widthIn = Number(widthCode) / 1000
+  const widthIn = widthCodeToInch(widthCode)
   const densityLabel = densityCode === 'H' ? 'High density' : 'Low density'
   const densityGcc = densityCode === 'H' ? 1.6 : 0.7
 
@@ -179,7 +280,7 @@ export function parseSpcFlatwirePartNumber(partNumber) {
   const thicknessMil = thicknessRaw == null ? null : Number(thicknessRaw)
   const widthCode = widthCodeA || widthCodeB
   const shieldUse = basePart === SPC_SPIRAL_BASE_PART ? 'spiral' : 'helical'
-  const widthIn = Number(widthCode) / 100000
+  const widthIn = widthCodeToInch(widthCode)
 
   return {
     id: raw.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -260,7 +361,7 @@ export const FOIL_TAPE_MATERIALS = Array.from(
 
 export function formatPtfeTapeLabel(tape) {
   if (!tape) return 'Select PTFE tape'
-  const width = tape.widthIn < 1 ? tape.widthIn.toFixed(3) : tape.widthIn.toFixed(2)
+  const width = tape.widthIn < 0.1 ? tape.widthIn.toFixed(4) : tape.widthIn.toFixed(3)
   return `${tape.partNumber} · ${tape.thicknessMil} mil ${tape.densityCode} · ${width} in`
 }
 
@@ -303,12 +404,30 @@ function densityCodeFrom(input = {}) {
 
 export function findNearestPtfeTape(input = {}) {
   const byPart = findPtfeTapeByPart(input.partNumber || input.materialPart || input.material_id)
-  const desiredDensity = densityCodeFrom(input)
-  const desiredMil = Number(input.thicknessMil ?? input.mil ?? (input.thicknessMm || input.tape_thickness_mm) / MIL_TO_MM)
-  const desiredWidthMm = Number(input.widthMm ?? input.width ?? input.tape_width_mm ?? input.widthIn * INCH_TO_MM)
+  const desiredDensity = densityCodeFrom(input) || byPart?.densityCode || ''
+  const explicitMil = Number(input.thicknessMil ?? input.mil)
+  const explicitThicknessMm = Number(input.thicknessMm ?? input.tape_thickness_mm)
+  const desiredMil = Number.isFinite(explicitMil)
+    ? explicitMil
+    : Number.isFinite(explicitThicknessMm)
+      ? explicitThicknessMm / MIL_TO_MM
+      : Number(byPart?.thicknessMil)
+  const explicitWidthMm = Number(input.widthMm ?? input.width ?? input.tape_width_mm)
+  const explicitWidthIn = Number(input.widthIn)
+  const desiredWidthMm = Number.isFinite(explicitWidthMm)
+    ? explicitWidthMm
+    : Number.isFinite(explicitWidthIn)
+      ? explicitWidthIn * INCH_TO_MM
+      : Number(byPart?.widthMm)
   const maxThicknessMil = Number(input.maxThicknessMil || input.maxMil || Infinity)
-  if (byPart && byPart.thicknessMil <= maxThicknessMil + 0.0001) return byPart
-  const candidates = PTFE_TAPE_MATERIALS.filter((tape) => tape.thicknessMil <= maxThicknessMil + 0.0001)
+  const cableOdIn = Number(input.cableOdIn ?? (input.cableOdMm != null ? input.cableOdMm / INCH_TO_MM : NaN))
+  const smallCable = isSmallCableTapeOd(cableOdIn, 'in')
+  const widthAllowed = (tape) => !smallCable || tape.widthIn < SMALL_CABLE_MAX_PTFE_WIDTH_IN - 0.00001
+  if (byPart && byPart.thicknessMil <= maxThicknessMil + 0.0001 && widthAllowed(byPart)) return byPart
+  const candidates = PTFE_TAPE_MATERIALS.filter((tape) => (
+    tape.thicknessMil <= maxThicknessMil + 0.0001
+    && widthAllowed(tape)
+  ))
   const pool = candidates.length ? candidates : PTFE_TAPE_MATERIALS
 
   return pool
@@ -328,7 +447,8 @@ export function findNearestSpcFlatwire(input = {}) {
 
   const desiredUse = String(input.shieldUse || input.use || input.type || '').toLowerCase()
   const desiredMil = Number(input.thicknessMil ?? input.mil ?? (input.thicknessMm ? input.thicknessMm / MIL_TO_MM : NaN))
-  const desiredWidthMm = Number(input.widthMm ?? input.width ?? (input.widthIn ? input.widthIn * INCH_TO_MM : NaN))
+  const spiralWidth = spiralFlatwireWidthFromDielectricOd(input)
+  const desiredWidthMm = Number(input.widthMm ?? input.width ?? (input.widthIn ? input.widthIn * INCH_TO_MM : spiralWidth.widthMm))
   const poolByUse = SPC_FLATWIRE_MATERIALS.filter((item) => {
     if (desiredUse === 'spiral') return item.shieldUse === 'spiral'
     if (desiredUse === 'flatwire' || desiredUse === 'helical') return item.shieldUse === 'helical'

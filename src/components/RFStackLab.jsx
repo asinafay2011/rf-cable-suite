@@ -9,8 +9,17 @@ import {
   findNearestPtfeTape,
   findNearestSpcFlatwire,
   foilTapeToLayer,
+  normalizePtfeWrap,
+  ptfeWrapLayers,
+  ptfeWrapPercent,
   ptfeTapeToLayer,
+  recommendPtfeWrapForCable,
+  spiralFlatwireWidthFromDielectricOd,
   spcFlatwireToLayer,
+  DEFAULT_SPIRAL_BOBBINS,
+  DEFAULT_SPIRAL_GAP_PCT,
+  SMALL_CABLE_MAX_PTFE_WIDTH_IN,
+  SMALL_CABLE_TAPE_OD_IN,
 } from '../data/materialLibrary.js'
 
 const C = {
@@ -39,13 +48,13 @@ const PRESETS = {
     conductorOD: 0.92,
     ptfeLayers: 9,
     ptfeMil: 2,
-    ptfeWidth: 6.0,
-    ptfeOverlap: 50,
+    ptfeWidth: 0.635,
+    ptfeOverlap: 66.7,
     ptfeDensity: 0.78,
     ptfeStack: [
-      { passes: 4, mil: 2.0, width: 6.0, overlap: 50, density: 0.78, direction: 'Z' },
-      { passes: 3, mil: 1.5, width: 4.8, overlap: 54, density: 0.72, direction: 'S' },
-      { passes: 2, mil: 1.0, width: 3.2, overlap: 45, density: 0.86, direction: 'Z' },
+      { passes: 4, mil: 2.0, width: 0.635, overlap: 66.7, density: 0.78, direction: 'Z' },
+      { passes: 3, mil: 1.5, width: 0.508, overlap: 50, density: 0.72, direction: 'S' },
+      { passes: 2, mil: 1.0, width: 0.381, overlap: 75, density: 0.86, direction: 'Z' },
     ],
     suckout: 6,
     spiralWidth: 1.0,
@@ -63,13 +72,13 @@ const PRESETS = {
     conductorOD: 0.92,
     ptfeLayers: 10,
     ptfeMil: 1.5,
-    ptfeWidth: 7.2,
-    ptfeOverlap: 47,
+    ptfeWidth: 0.635,
+    ptfeOverlap: 66.7,
     ptfeDensity: 0.72,
     ptfeStack: [
-      { passes: 4, mil: 1.5, width: 7.2, overlap: 47, density: 0.70, direction: 'Z' },
-      { passes: 3, mil: 1.2, width: 5.6, overlap: 53, density: 0.72, direction: 'S' },
-      { passes: 3, mil: 1.0, width: 3.8, overlap: 42, density: 0.75, direction: 'Z' },
+      { passes: 4, mil: 1.5, width: 0.635, overlap: 66.7, density: 0.70, direction: 'Z' },
+      { passes: 3, mil: 1.2, width: 0.508, overlap: 50, density: 0.72, direction: 'S' },
+      { passes: 3, mil: 1.0, width: 0.381, overlap: 75, density: 0.75, direction: 'Z' },
     ],
     suckout: 2,
     spiralWidth: 0.9,
@@ -87,13 +96,13 @@ const PRESETS = {
     conductorOD: 1.02,
     ptfeLayers: 8,
     ptfeMil: 2.5,
-    ptfeWidth: 6.5,
-    ptfeOverlap: 55,
+    ptfeWidth: 0.635,
+    ptfeOverlap: 66.7,
     ptfeDensity: 0.86,
     ptfeStack: [
-      { passes: 3, mil: 2.5, width: 6.5, overlap: 55, density: 0.86, direction: 'Z' },
-      { passes: 3, mil: 2.0, width: 5.0, overlap: 58, density: 0.86, direction: 'S' },
-      { passes: 2, mil: 1.5, width: 3.6, overlap: 50, density: 0.92, direction: 'Z' },
+      { passes: 3, mil: 2.5, width: 0.635, overlap: 66.7, density: 0.86, direction: 'Z' },
+      { passes: 3, mil: 2.0, width: 0.508, overlap: 50, density: 0.86, direction: 'S' },
+      { passes: 2, mil: 1.5, width: 0.381, overlap: 75, density: 0.92, direction: 'Z' },
     ],
     suckout: 9,
     spiralWidth: 1.4,
@@ -164,8 +173,16 @@ function spiralPitchFromGap(gapPct, widthMm) {
   return clamp(Math.max(widthMm, 0.1) * 14 * (1 + clamp(gapPct, 0, 28) / 100), 1, 140)
 }
 
-function spiralGapFromPitch(pitchMm, widthMm) {
-  return clamp((Number(pitchMm) / Math.max(0.1, Number(widthMm) * 14) - 1) * 100, 0, 28)
+function spiralCoverageFromWidth(widthMm, dielectricOdMm, bobbins = DEFAULT_SPIRAL_BOBBINS) {
+  const circ = Math.PI * Number(dielectricOdMm)
+  const count = Math.max(1, Math.round(Number(bobbins) || DEFAULT_SPIRAL_BOBBINS))
+  const width = Number(widthMm)
+  if (!Number.isFinite(circ) || circ <= 0 || !Number.isFinite(width) || width <= 0) return 0
+  return clamp((count * width) / circ * 100, 0, 100)
+}
+
+function spiralCoverageGapFromWidth(widthMm, dielectricOdMm, bobbins = DEFAULT_SPIRAL_BOBBINS) {
+  return clamp(100 - spiralCoverageFromWidth(widthMm, dielectricOdMm, bobbins), 0, 50)
 }
 
 function helicalPitchFromOverlap(overlapPct, widthMm) {
@@ -177,12 +194,15 @@ function helicalOverlapFromPitch(pitchMm, widthMm) {
 }
 
 function overlapToPct(value) {
-  if (typeof value === 'number') return clamp(value * 100, 0, 80)
-  if (value === 'butt') return 0
-  if (value === '1/2') return 50
-  if (value === '2/3') return 67
-  if (value === '3/4') return 75
-  return 50
+  return ptfeWrapPercent(value)
+}
+
+function ptfeOverlapKey(value) {
+  return normalizePtfeWrap(value).key
+}
+
+function ptfeOverlapLayerCount(value) {
+  return ptfeWrapLayers(value)
 }
 
 function makePtfeId() {
@@ -204,11 +224,12 @@ function makePtfeLayer(layer = {}, preset = PRESETS.phaseStable, index = 0) {
     widthMm: layer.width ?? layer.tape_width_mm ?? preset.ptfeWidth,
     densityGcc: layer.density ?? preset.ptfeDensity,
     densityCode: layer.densityCode || layer.density_code,
+    cableOdMm: preset.conductorOD,
   })
   return ptfeTapeToLayer(tape, {
     id: makePtfeId(),
     passes: clamp(Math.round(layer.passes || 1), 1, 12),
-    overlap: clamp(Number(layer.overlap ?? preset.ptfeOverlap ?? 50), 0, 80),
+    overlap: overlapToPct(layer.overlap ?? preset.ptfeOverlap ?? 66.7),
     direction: layer.direction === 'S' || index % 2 ? 'S' : 'Z',
     animateKey: makeAnimationKey('ptfe'),
   })
@@ -267,9 +288,20 @@ function makeShieldLayer(type, source = PRESETS.phaseStable) {
       animateKey: makeAnimationKey('shield'),
     }
   }
-  const material = findNearestSpcFlatwire({ use: 'spiral', thicknessMil: 2.5, widthIn: 0.005 })
-  const width = material?.widthMm ?? source.spiralWidth ?? 0.13
-  const gap = source.spiralGap ?? 10
+  const bobbins = clamp(Math.round(source.spiralBobbins ?? DEFAULT_SPIRAL_BOBBINS), 1, DEFAULT_SPIRAL_BOBBINS)
+  const gap = source.spiralGap ?? DEFAULT_SPIRAL_GAP_PCT
+  const calculatedWidth = spiralFlatwireWidthFromDielectricOd({
+    dielectricOdMm: source.dielectricOD,
+    bobbins,
+    gapPct: gap,
+  })
+  const material = findNearestSpcFlatwire({
+    use: 'spiral',
+    widthMm: Number.isFinite(calculatedWidth.widthMm) ? calculatedWidth.widthMm : source.spiralWidth,
+  })
+  const width = Number.isFinite(calculatedWidth.widthMm)
+    ? calculatedWidth.widthMm
+    : material?.widthMm ?? source.spiralWidth ?? 0.5
   return spcFlatwireToLayer(material, {
     id: makeShieldId(),
     type: 'spiral',
@@ -278,7 +310,7 @@ function makeShieldLayer(type, source = PRESETS.phaseStable) {
     length: 155,
     width,
     pitch: spiralPitchFromGap(gap, width),
-    bobbins: source.spiralBobbins ?? 8,
+    bobbins,
     gap,
     animateKey: makeAnimationKey('shield'),
   })
@@ -297,7 +329,7 @@ function makePresetShieldStack(preset) {
 function makePresetStack(preset) {
   const source = Array.isArray(preset.ptfeStack) && preset.ptfeStack.length
     ? preset.ptfeStack
-    : [{ passes: preset.ptfeLayers || 1, mil: preset.ptfeMil || 2, width: preset.ptfeWidth || 6, overlap: preset.ptfeOverlap || 50, density: preset.ptfeDensity || 0.78, direction: 'Z' }]
+    : [{ passes: preset.ptfeLayers || 1, mil: preset.ptfeMil || 2, width: preset.ptfeWidth || 0.635, overlap: preset.ptfeOverlap || 66.7, density: preset.ptfeDensity || 0.78, direction: 'Z' }]
   return source.map((layer, index) => makePtfeLayer(layer, preset, index))
 }
 
@@ -591,6 +623,41 @@ function useRfStackModel(config) {
           return mesh
         }
 
+        const makeSpiralBandMesh = ({ name, x0, x1, radius, turns, phase, angularWidth, handedness, material, progress = 1, thickness = 0.008, widthSegments = 5, renderOrder = 8 }) => {
+          const p = clamp(progress, 0.02, 1)
+          const lengthSegments = Math.max(16, Math.round(220 * p))
+          const across = Math.max(1, Math.round(widthSegments))
+          const verts = []
+          const faces = []
+          for (let i = 0; i <= lengthSegments; i++) {
+            const t = (i / lengthSegments) * p
+            const x = x0 + (x1 - x0) * t
+            const center = phase + handedness * turns * Math.PI * 2 * t
+            for (let j = 0; j <= across; j++) {
+              const offset = (j / across - 0.5) * angularWidth
+              const angle = center + offset
+              verts.push(x, (radius + thickness) * Math.cos(angle), (radius + thickness) * Math.sin(angle))
+            }
+          }
+          const stride = across + 1
+          for (let i = 0; i < lengthSegments; i++) {
+            const row = i * stride
+            const nextRow = (i + 1) * stride
+            for (let j = 0; j < across; j++) {
+              faces.push(row + j, row + j + 1, nextRow + j + 1)
+              faces.push(row + j, nextRow + j + 1, nextRow + j)
+            }
+          }
+          const geometry = new THREE.BufferGeometry()
+          geometry.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+          geometry.setIndex(faces)
+          geometry.computeVertexNormals()
+          const mesh = new THREE.Mesh(geometry, material)
+          mesh.name = name
+          mesh.renderOrder = renderOrder
+          return mesh
+        }
+
         const makeBraidStrand = ({ name, x0, x1, radius, turns, phase, handedness, material, strandRadius, carrierCount, progress = 1 }) => {
           const points = []
           const p = clamp(progress, 0.025, 1)
@@ -636,6 +703,8 @@ function useRfStackModel(config) {
           const copperMat = new THREE.MeshStandardMaterial({ name: 'live polished copper conductor', color: 0xd77828, roughness: 0.16, metalness: 0.9 })
           const flatwireMat = new THREE.MeshStandardMaterial({ name: 'live SPC flatwire shield', color: 0xf2f1e8, roughness: 0.14, metalness: 0.94, side: THREE.DoubleSide })
           const flatwireDark = new THREE.MeshStandardMaterial({ name: 'live SPC flatwire shadow', color: 0xa9adad, roughness: 0.28, metalness: 0.82, side: THREE.DoubleSide })
+          const flatwireGlint = new THREE.MeshStandardMaterial({ name: 'live SPC flatwire narrow highlight', color: 0xffffff, roughness: 0.1, metalness: 1, transparent: true, opacity: 0.46, side: THREE.DoubleSide, depthWrite: false })
+          const spiralGapMat = new THREE.MeshStandardMaterial({ name: 'live visible spiral between-wire gap', color: 0x6e7068, roughness: 0.7, metalness: 0, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false })
           const foilMat = new THREE.MeshStandardMaterial({ name: 'live deep golden foil shield', color: 0xd39a22, roughness: 0.2, metalness: 0.94, transparent: true, opacity: 0.94, side: THREE.DoubleSide, depthWrite: true })
           const foilSeamMat = new THREE.MeshStandardMaterial({ name: 'live golden foil overlap seam', color: 0xffcf57, roughness: 0.22, metalness: 0.82, transparent: true, opacity: 0.88, side: THREE.DoubleSide, depthWrite: false })
           const braidBright = new THREE.MeshStandardMaterial({ name: 'live braid bright carrier', color: 0xd8d2bd, roughness: 0.24, metalness: 0.82 })
@@ -833,39 +902,63 @@ function useRfStackModel(config) {
             const handedness = (layer.direction || (type === 'flatwire' ? 'S' : 'Z')) === 'S' ? -1 : 1
 
             if (type === 'spiral') {
-              const bobbins = clamp(Math.round(Number(layer.bobbins) || 8), 1, 16)
+              const bobbins = clamp(Math.round(Number(layer.bobbins) || DEFAULT_SPIRAL_BOBBINS), 1, DEFAULT_SPIRAL_BOBBINS)
               const pitch = clamp(Number(layer.pitch) || spiralPitchFromGap(Number(layer.gap) || 10, width), 1, 140)
-              const gap = clamp(Number(layer.gap) || 10, 0, 28)
-              const tapeWidth = clamp(width * 0.032, 0.018, 0.36)
+              const gap = clamp(Number(layer.gap ?? DEFAULT_SPIRAL_GAP_PCT), 0, 50)
+              const slotAngle = (Math.PI * 2) / Math.max(1, bobbins)
+              const bandAngle = slotAngle * (1 - gap / 100)
+              const gapAngle = Math.max(0, slotAngle - bandAngle)
               const turns = clamp(((x1 - x0) * 13) / Math.max(1, pitch), 1.2, 18)
               for (let bobbin = 0; bobbin < bobbins; bobbin++) {
                 const phase = (Math.PI * 2 * bobbin) / bobbins + shieldIndex * 0.33
-                dynamicGroup.add(makeRibbonMesh({
+                dynamicGroup.add(makeSpiralBandMesh({
                   name: `live SPC flatwire spiral bobbin ${bobbin + 1}`,
                   x0,
                   x1,
                   radius,
                   turns,
                   phase,
-                  tapeWidth,
+                  angularWidth: bandAngle,
                   handedness,
                   material: bobbin % 2 ? flatwireDark : flatwireMat,
                   progress: layerProgress,
-                  thickness: 0.006,
+                  thickness: 0.014,
+                  widthSegments: 5,
                 }))
-                dynamicGroup.add(makeRibbonMesh({
-                  name: `live SPC flatwire spiral glint ${bobbin + 1}`,
-                  x0,
-                  x1,
-                  radius: radius + 0.006,
-                  turns,
-                  phase: phase + 0.012,
-                  tapeWidth: tapeWidth * 0.34,
-                  handedness,
-                  material: flatwireMat,
-                  progress: layerProgress,
-                  thickness: 0.008,
-                }))
+                if (bandAngle > 0.04) {
+                  dynamicGroup.add(makeSpiralBandMesh({
+                    name: `live SPC flatwire spiral highlight ${bobbin + 1}`,
+                    x0,
+                    x1,
+                    radius,
+                    turns,
+                    phase: phase - bandAngle * 0.18,
+                    angularWidth: Math.min(bandAngle * 0.12, slotAngle * 0.08),
+                    handedness,
+                    material: flatwireGlint,
+                    progress: layerProgress,
+                    thickness: 0.019,
+                    widthSegments: 1,
+                    renderOrder: 9,
+                  }))
+                }
+                if (gapAngle > 0.006) {
+                  dynamicGroup.add(makeSpiralBandMesh({
+                    name: `live spiral gap between bobbin ${bobbin + 1} and ${bobbin === bobbins - 1 ? 1 : bobbin + 2}`,
+                    x0,
+                    x1,
+                    radius,
+                    turns,
+                    phase: phase + slotAngle / 2,
+                    angularWidth: Math.max(0.006, gapAngle * 0.68),
+                    handedness,
+                    material: spiralGapMat,
+                    progress: layerProgress,
+                    thickness: 0.021,
+                    widthSegments: 1,
+                    renderOrder: 10,
+                  }))
+                }
               }
             } else {
               const overlap = clamp(Number(layer.overlap) || 45, 0, 80)
@@ -1106,9 +1199,15 @@ function LayerRail({ computed }) {
   )
 }
 
-function PTFELayerCard({ layer, index, canRemove, onUpdate, onReplay, onRemove }) {
+function PTFELayerCard({ layer, index, canRemove, conductorOD, onUpdate, onReplay, onRemove }) {
   const direction = layer.direction === 'S' ? 'S' : 'Z'
   const accent = direction === 'Z' ? C.amber : C.sky
+  const wrapKey = ptfeOverlapKey(layer.overlap)
+  const smallCableGuidance = recommendPtfeWrapForCable({
+    cableOdMm: conductorOD,
+    tapeWidthMm: layer.width,
+    overlap: layer.overlap,
+  })
   return (
     <div style={{ ...S.ptfeLayerCard, border: `1px solid ${accent}66` }}>
       <div style={S.ptfeLayerTop}>
@@ -1143,22 +1242,49 @@ function PTFELayerCard({ layer, index, canRemove, onUpdate, onReplay, onRemove }
           >
             {PTFE_TAPE_MATERIALS.map((tape) => (
               <option key={tape.partNumber} value={tape.partNumber}>
-                {tape.partNumber} · {tape.thicknessMil} mil {tape.densityCode} · {tape.widthIn.toFixed(3)} in
+                {tape.partNumber} · {tape.thicknessMil} mil {tape.densityCode} · {tape.widthIn.toFixed(4)} in
               </option>
             ))}
           </select>
         </label>
-        <Slider label="Width" value={layer.width} setValue={(value) => onUpdate({ width: value })} min={2} max={14} step={0.1} unit=" mm" accent={accent} />
+        <Slider label="Width" value={layer.width} setValue={(value) => onUpdate({ width: value })} min={0.1} max={4} step={0.025} unit=" mm" accent={smallCableGuidance.avoidWidth ? C.red : accent} displayDigits={3} />
         <Slider label="Passes" value={layer.passes} setValue={(value) => onUpdate({ passes: Math.round(value) })} min={1} max={12} step={1} accent={accent} />
         <Slider label="Mil" value={layer.mil} setValue={(value) => onUpdate({ mil: value })} min={0.5} max={5} step={0.1} unit=" mil" accent="#fff2c4" />
-        <Slider label="Overlap" value={layer.overlap} setValue={(value) => onUpdate({ overlap: value })} min={0} max={80} step={1} unit="%" accent={C.amber} />
+        <div style={S.wrapPresetGroup}>
+          <div style={S.sliderTop}>
+            <span>Overlap</span>
+            <strong style={{ color: C.amber }}>{normalizePtfeWrap(layer.overlap).percent}%</strong>
+          </div>
+          <div style={S.wrapPresetBtns}>
+            {['1/2', '2/3', '3/4'].map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => onUpdate({ overlap: ptfeWrapPercent(key) })}
+                style={{ ...S.wrapPresetBtn, ...(wrapKey === key ? S.wrapPresetBtnActive : {}) }}
+              >
+                {key}
+              </button>
+            ))}
+          </div>
+          {smallCableGuidance.smallCable && wrapKey !== '2/3' && (
+            <small style={{ color: C.amber, lineHeight: 1.35 }}>
+              OD ≤ {SMALL_CABLE_TAPE_OD_IN.toFixed(3)} in: 2/3 wrap resists shrink-back; 1/2 is for target OD.
+            </small>
+          )}
+          {smallCableGuidance.avoidWidth && (
+            <small style={{ color: C.red, lineHeight: 1.35 }}>
+              Avoid ≥ {SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)} in tape on this small core.
+            </small>
+          )}
+        </div>
         <Slider label="Density" value={layer.density} setValue={(value) => onUpdate({ density: value })} min={0.45} max={1.65} step={0.01} unit=" g/cc" accent={C.sky} />
       </div>
     </div>
   )
 }
 
-function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
+function ShieldLayerCard({ layer, index, unitMode, dielectricOD, onUpdate, onRemove }) {
   const type = layer.type || 'spiral'
   const isFlatwire = type === 'spiral' || type === 'flatwire'
   const accent = type === 'jacket' ? C.sky : type === 'braid' ? C.braid : type === 'foil' ? C.foil : type === 'flatwire' ? C.sky : C.amber
@@ -1172,8 +1298,17 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
         : type === 'braid' ? 'Braid shield'
           : 'Outer jacket'
   const width = Number(layer.width) || 1
-  const spiralPitch = Number(layer.pitch) || spiralPitchFromGap(Number(layer.gap) || 10, width)
-  const spiralGap = spiralGapFromPitch(spiralPitch, width)
+  const spiralBobbins = clamp(Math.round(Number(layer.bobbins) || DEFAULT_SPIRAL_BOBBINS), 1, DEFAULT_SPIRAL_BOBBINS)
+  const spiralGapInput = Number(layer.gap)
+  const spiralGap = Number.isFinite(spiralGapInput)
+    ? clamp(spiralGapInput, 0, 50)
+    : spiralCoverageGapFromWidth(width, dielectricOD, spiralBobbins)
+  const spiralPitch = Number(layer.pitch) || spiralPitchFromGap(spiralGap, width)
+  const spiralRule = spiralFlatwireWidthFromDielectricOd({
+    dielectricOdMm: dielectricOD,
+    bobbins: spiralBobbins,
+    gapPct: spiralGap,
+  })
   const helicalPitch = Number(layer.pitch) || helicalPitchFromOverlap(Number(layer.overlap) || 45, width)
   const helicalOverlap = helicalOverlapFromPitch(helicalPitch, width)
   return (
@@ -1206,7 +1341,8 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
       {type === 'spiral' && (
         <>
           <div style={S.shieldHint}>
-            Spiral starts with separated SPC flatwire bobbins; 8 bobbins and 8-13% gap is the normal window.
+            Spiral is 8 separate flatwires with no overlap; gap is the open space between each neighboring bobbin.
+            {Number.isFinite(spiralRule.widthMm) ? ` Current OD at ${spiralBobbins} bobbins and ${fmt(spiralGap, 0)}% between-wire gap calls for ${unitMode === 'inch' ? `${(spiralRule.widthMm / MM_PER_IN).toFixed(4)} in` : `${spiralRule.widthMm.toFixed(3)} mm`}.` : ''}
           </div>
           <div style={S.ptfeLayerGrid}>
             <label style={{ ...S.materialSelect, gridColumn: '1 / -1' }}>
@@ -1216,10 +1352,12 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
                 onChange={(event) => {
                   const material = findNearestSpcFlatwire({ partNumber: event.target.value })
                   const nextWidth = material.widthMm
+                  const nextGap = spiralCoverageGapFromWidth(nextWidth, dielectricOD, spiralBobbins)
                   onUpdate({
                     ...spcFlatwireToLayer(material),
-                    gap: spiralGap,
-                    pitch: spiralPitchFromGap(spiralGap, nextWidth),
+                    gap: nextGap,
+                    bobbins: spiralBobbins,
+                    pitch: spiralPitch,
                   })
                 }}
                 style={S.select}
@@ -1236,27 +1374,85 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
               label="Flatwire width"
               value={layer.width}
               setValue={(value) => {
-                const nextGap = spiralGapFromPitch(spiralPitch, value)
+                const nextGap = spiralCoverageGapFromWidth(value, dielectricOD, spiralBobbins)
                 onUpdate({ width: value, gap: nextGap, pitch: spiralPitch })
               }}
               min={0.03}
-              max={0.8}
+              max={6.5}
               step={0.005}
               unitMode={unitMode}
               accent={accent}
             />
+            <button
+              type="button"
+              onClick={() => {
+                const defaultRule = spiralFlatwireWidthFromDielectricOd({
+                  dielectricOdMm: dielectricOD,
+                  bobbins: DEFAULT_SPIRAL_BOBBINS,
+                  gapPct: DEFAULT_SPIRAL_GAP_PCT,
+                })
+                if (!Number.isFinite(defaultRule.widthMm)) return
+                const material = findNearestSpcFlatwire({ use: 'spiral', widthMm: defaultRule.widthMm })
+                const nextWidth = defaultRule.widthMm
+                onUpdate({
+                  ...spcFlatwireToLayer(material),
+                  width: nextWidth,
+                  bobbins: DEFAULT_SPIRAL_BOBBINS,
+                  gap: DEFAULT_SPIRAL_GAP_PCT,
+                  pitch: spiralPitchFromGap(DEFAULT_SPIRAL_GAP_PCT, nextWidth),
+                })
+              }}
+              style={{ ...S.toolBtn, color: C.teal, border: `1px solid ${C.teal}66` }}
+            >
+              Apply 8 bobbin width
+            </button>
             <DimensionSlider
               label="Pitch"
               value={spiralPitch}
-              setValue={(value) => onUpdate({ pitch: value, gap: spiralGapFromPitch(value, width) })}
+              setValue={(value) => onUpdate({ pitch: value })}
               min={1}
               max={140}
               step={0.1}
               unitMode={unitMode}
               accent={C.teal}
             />
-            <Slider label="Bobbins" value={layer.bobbins} setValue={(value) => onUpdate({ bobbins: Math.round(value) })} min={1} max={16} step={1} accent={accent} />
-            <Slider label="Gap" value={spiralGap} setValue={(value) => onUpdate({ gap: value, pitch: spiralPitchFromGap(value, width) })} min={0} max={28} step={1} unit="%" accent={spiralGap >= 8 && spiralGap <= 13 ? C.teal : C.amber} />
+            <Slider
+              label="Bobbins"
+              value={spiralBobbins}
+              setValue={(value) => {
+                const nextBobbins = clamp(Math.round(value), 1, DEFAULT_SPIRAL_BOBBINS)
+                const nextRule = spiralFlatwireWidthFromDielectricOd({
+                  dielectricOdMm: dielectricOD,
+                  bobbins: nextBobbins,
+                  gapPct: spiralGap,
+                })
+                const nextWidth = Number.isFinite(nextRule.widthMm) ? nextRule.widthMm : width
+                onUpdate({ bobbins: nextBobbins, width: nextWidth, gap: spiralGap, pitch: spiralPitch })
+              }}
+              min={1}
+              max={DEFAULT_SPIRAL_BOBBINS}
+              step={1}
+              accent={accent}
+            />
+            <Slider
+              label="Between-wire gap"
+              value={spiralGap}
+              setValue={(value) => {
+                const nextGap = clamp(value, 0, 50)
+                const nextRule = spiralFlatwireWidthFromDielectricOd({
+                  dielectricOdMm: dielectricOD,
+                  bobbins: spiralBobbins,
+                  gapPct: nextGap,
+                })
+                const nextWidth = Number.isFinite(nextRule.widthMm) ? nextRule.widthMm : width
+                onUpdate({ width: nextWidth, gap: nextGap, pitch: spiralPitch })
+              }}
+              min={0}
+              max={28}
+              step={1}
+              unit="%"
+              accent={spiralGap >= 8 && spiralGap <= 13 ? C.teal : C.amber}
+            />
           </div>
         </>
       )}
@@ -1264,7 +1460,7 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
       {type === 'flatwire' && (
         <>
           <div style={S.shieldHint}>
-            Pitch controls tapping spin: lower pitch closes the overlap, higher pitch opens it up.
+            Pitch controls taping spin: lower pitch closes the overlap, higher pitch opens it up.
           </div>
           <div style={S.ptfeLayerGrid}>
             <label style={{ ...S.materialSelect, gridColumn: '1 / -1' }}>
@@ -1298,7 +1494,7 @@ function ShieldLayerCard({ layer, index, unitMode, onUpdate, onRemove }) {
                 onUpdate({ width: value, overlap: nextOverlap, pitch: helicalPitch })
               }}
               min={0.03}
-              max={0.8}
+              max={6.5}
               step={0.005}
               unitMode={unitMode}
               accent={accent}
@@ -1401,7 +1597,7 @@ export default function RFStackLab() {
     setPtfeStack((current) => current.map((layer) => {
       if (layer.id !== id) return layer
       if (patch.partNumber) {
-        const tape = findNearestPtfeTape({ partNumber: patch.partNumber })
+        const tape = findNearestPtfeTape({ partNumber: patch.partNumber, cableOdMm: params.conductorOD })
         return ptfeTapeToLayer(tape, { ...layer, ...patch, partNumber: tape.partNumber })
       }
       return { ...layer, ...patch }
@@ -1415,15 +1611,16 @@ export default function RFStackLab() {
       const nextDirection = direction || (last.direction === 'Z' ? 'S' : 'Z')
       const tape = findNearestPtfeTape({
         thicknessMil: last.mil * 0.86,
-        widthMm: last.width - 1.2,
+        widthMm: Math.max(0.3175, last.width * 0.82),
         densityCode: last.densityCode || (last.density >= 1.1 ? 'H' : 'L'),
+        cableOdMm: params.conductorOD,
       })
       return [
         ...current,
         ptfeTapeToLayer(tape, {
           id: makePtfeId(),
           passes: 1,
-          overlap: clamp(last.overlap + (nextDirection === 'S' ? 4 : -3), 0, 80),
+          overlap: overlapToPct(nextDirection === 'S' ? '1/2' : '2/3'),
           direction: nextDirection,
           animateKey: makeAnimationKey('ptfe'),
         }),
@@ -1444,7 +1641,7 @@ export default function RFStackLab() {
   }
 
   const addShieldLayer = (type) => {
-    const layer = makeShieldLayer(type, params)
+    const layer = makeShieldLayer(type, type === 'spiral' ? { ...params, dielectricOD: computed.dielectricOD } : params)
     setShieldStack((current) => [...current, layer].slice(0, 8))
     if (type === 'braid') {
       setParams((current) => ({ ...current, braidCoverage: layer.coverage }))
@@ -1484,7 +1681,7 @@ export default function RFStackLab() {
       if (layers.length) {
         setPtfeStack(layers.map((layer, index) => makePtfeLayer({
           ...layer,
-          overlap: clamp(overlapToPct(layer.overlap), 0, 80),
+          overlap: overlapToPct(layer.overlap),
           direction: index % 2 ? 'S' : 'Z',
         }, PRESETS.phaseStable, index)))
       }
@@ -1493,8 +1690,8 @@ export default function RFStackLab() {
         conductorOD: Number(preset.conductor_od_mm) || current.conductorOD,
         ptfeLayers: clamp(Math.round(totalPasses || current.ptfeLayers), 1, 16),
         ptfeMil: firstLayer.tape_thickness_mm ? clamp(firstLayer.tape_thickness_mm / MIL_TO_MM, 0.5, 5) : current.ptfeMil,
-        ptfeWidth: firstLayer.tape_width_mm ? clamp(firstLayer.tape_width_mm, 2, 14) : current.ptfeWidth,
-        ptfeOverlap: clamp(overlapToPct(firstLayer.overlap), 0, 80),
+        ptfeWidth: firstLayer.tape_width_mm ? clamp(firstLayer.tape_width_mm, 0.1, 4) : current.ptfeWidth,
+        ptfeOverlap: overlapToPct(firstLayer.overlap),
         ptfeDensity: clamp(avgDensity || current.ptfeDensity, 0.45, 1.65),
       }))
       setActivePreset('')
@@ -1510,9 +1707,8 @@ export default function RFStackLab() {
     const braidLayer = shieldStack.find((layer) => layer.type === 'braid')
     const jacketLayer = shieldStack.find((layer) => layer.type === 'jacket')
     const spiralWidth = Number(spiralLayer?.width ?? params.spiralWidth)
-    const spiralBobbins = Math.round(Number(spiralLayer?.bobbins ?? params.spiralBobbins))
-    const spiralPitchMm = Number(spiralLayer?.pitch ?? spiralPitchFromGap(Number(spiralLayer?.gap ?? params.spiralGap), spiralWidth))
-    const spiralGapPct = spiralLayer ? spiralGapFromPitch(spiralPitchMm, spiralWidth) : Number(params.spiralGap)
+    const spiralBobbins = clamp(Math.round(Number(spiralLayer?.bobbins ?? params.spiralBobbins)), 1, DEFAULT_SPIRAL_BOBBINS)
+    const spiralGapInput = Number(spiralLayer?.gap ?? params.spiralGap)
     const helicalWidth = Number(helicalLayer?.width ?? params.helicalWidth)
     const helicalPitchMm = Number(helicalLayer?.pitch ?? helicalPitchFromOverlap(Number(helicalLayer?.overlap ?? params.helicalOverlap ?? 45), helicalWidth))
     const helicalOverlapPct = helicalLayer ? helicalOverlapFromPitch(helicalPitchMm, helicalWidth) : Number(params.helicalOverlap ?? 45)
@@ -1528,8 +1724,8 @@ export default function RFStackLab() {
     const layerBuilds = ptfeStack.map((layer) => {
       const passes = Math.max(1, Number(layer.passes) || 1)
       const mil = Number(layer.mil) || 2
-      const overlap = Number(layer.overlap) || 0
-      const radial = passes * mil * MIL_TO_MM * (1 + clamp(overlap / 100, 0, 0.9)) * tension
+      const overlap = overlapToPct(layer.overlap)
+      const radial = passes * mil * MIL_TO_MM * ptfeOverlapLayerCount(overlap) * tension
       return { ...layer, passes, mil, overlap, radial, eps: densityToEps(Number(layer.density) || summary.avgDensity) }
     })
     const rawDielectricWall = layerBuilds.reduce((sum, layer) => sum + layer.radial, 0)
@@ -1541,6 +1737,10 @@ export default function RFStackLab() {
     const eps = epsBase * (1 + params.suckout * 0.0018)
     const vp = 1 / Math.sqrt(eps)
     const z0 = z0From(params.conductorOD, dielectricOD, eps)
+    const spiralGapPct = Number.isFinite(spiralGapInput)
+      ? clamp(spiralGapInput, 0, 50)
+      : spiralCoverageGapFromWidth(spiralWidth, dielectricOD, spiralBobbins)
+    const spiralPitchMm = Number(spiralLayer?.pitch ?? spiralPitchFromGap(spiralGapPct, spiralWidth))
     const ptfeNotches = layerBuilds.map((layer, index) => {
       const layerOD = params.conductorOD + 2 * layerBuilds.slice(0, index + 1).reduce((sum, item) => sum + item.radial, 0)
       const pitch = pitchFrom(layer.width, layer.overlap, layerOD, 1)
@@ -1560,10 +1760,16 @@ export default function RFStackLab() {
     const pitchHelical = helicalLayer ? Math.max(0.01, helicalPitchMm) : pitchFrom(helicalWidth, helicalOverlapPct, dielectricOD + 0.48, 1)
     const spiralNotch = notchGHz(pitchSpiral, vp)
     const helicalNotch = notchGHz(pitchHelical, vp)
-    const circ = Math.PI * (dielectricOD + 0.3)
-    const spiralRawCoverage = clamp((spiralBobbins * spiralWidth) / circ * 100, 0, 100)
+    const spiralCirc = Math.PI * dielectricOD
+    const shieldCirc = Math.PI * (dielectricOD + 0.3)
+    const spiralWidthRule = spiralFlatwireWidthFromDielectricOd({
+      dielectricOdMm: dielectricOD,
+      bobbins: spiralBobbins,
+      gapPct: spiralGapPct,
+    })
+    const spiralRawCoverage = clamp((spiralBobbins * spiralWidth) / Math.max(0.001, spiralCirc) * 100, 0, 100)
     const spiralCoverage = spiralLayer ? clamp(Math.min(100 - spiralGapPct, spiralRawCoverage), 0, 100) : 0
-    const helicalCoverage = helicalLayer ? clamp((helicalWidth * (1 + helicalOverlapPct / 80)) / circ * 100, 0, 100) : 0
+    const helicalCoverage = helicalLayer ? clamp((helicalWidth * (1 + helicalOverlapPct / 80)) / shieldCirc * 100, 0, 100) : 0
     const foilCoverage = foilLayer ? clamp(100 - Math.max(0, 18 - foilOverlap) * 1.6, 82, 100) : 0
     const braidCoverageEffective = braidLayer ? clamp(braidCoverage, 65, 99) : 0
     const shieldCoverage = clamp(100 * (1 - (1 - spiralCoverage / 100) * (1 - helicalCoverage / 100) * (1 - foilCoverage / 100) * (1 - braidCoverageEffective / 100)), 0, 100)
@@ -1592,6 +1798,7 @@ export default function RFStackLab() {
       vp,
       z0,
       spiralWidth,
+      spiralWidthRule,
       spiralPitch: spiralPitchMm,
       spiralGap: spiralGapPct,
       spiralBobbins,
@@ -1732,6 +1939,7 @@ export default function RFStackLab() {
                     layer={layer}
                     index={index}
                     canRemove={ptfeStack.length > 1}
+                    conductorOD={params.conductorOD}
                     onUpdate={(patch) => updatePtfeLayer(layer.id, patch)}
                     onReplay={() => updatePtfeLayer(layer.id, { animateKey: makeAnimationKey('ptfe') })}
                     onRemove={() => removePtfeLayer(layer.id)}
@@ -1784,6 +1992,7 @@ export default function RFStackLab() {
                     layer={layer}
                     index={index}
                     unitMode={unitMode}
+                    dielectricOD={computed.dielectricOD}
                     onUpdate={(patch) => updateShieldLayer(layer.id, patch)}
                     onRemove={() => removeShieldLayer(layer.id)}
                   />
@@ -1816,7 +2025,10 @@ export default function RFStackLab() {
           PTFE is the dielectric wrap, not a shield. The RF shields start at SPC flatwire spiral/helical layers, then foil, then braid; jacket is the final mechanical sleeve. Coverage is compounded as independent leak paths, so foil + braid + flatwire rapidly pushes shielding effectiveness up.
         </p>
         <p>
-          Tape suckout is still here, but now it is tied to the same build recipe: changing PTFE overlap, suckout, flatwire pitch, or braid coverage updates Z0, TDR, insertion loss, return loss, VSWR, and coverage together.
+          PTFE overlap is locked to 50%, 66.7%, or 75%. For OD {SMALL_CABLE_TAPE_OD_IN.toFixed(3)} in and below, use 2/3 wrap to control shrink-back and avoid {SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)} in tape unless the target OD needs 1/2 wrap.
+        </p>
+        <p>
+          Tape suckout is still here, but now it is tied to the same build recipe: changing PTFE wrap, suckout, calculated flatwire width, or braid coverage updates Z0, TDR, insertion loss, return loss, VSWR, and coverage together.
         </p>
       </div>
     </section>
@@ -1914,6 +2126,10 @@ const S = {
   select: { width: '100%', minHeight: 34, background: '#070b0c', color: C.text, border: `1px solid ${C.borderHi}`, padding: '0 10px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, outline: 0 },
   slider: { display: 'grid', gap: 6, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.3 },
   sliderTop: { display: 'flex', justifyContent: 'space-between', gap: 8 },
+  wrapPresetGroup: { display: 'grid', gap: 6, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.3 },
+  wrapPresetBtns: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 5 },
+  wrapPresetBtn: { minHeight: 28, background: '#070b0c', border: `1px solid ${C.borderHi}`, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, cursor: 'pointer' },
+  wrapPresetBtnActive: { border: `1px solid ${C.amber}`, color: C.amber, background: 'rgba(251,191,36,0.12)' },
   metrics: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 },
   metric: { border: `1px solid ${C.border}`, background: C.panel, padding: 12, borderRadius: 3, minHeight: 94 },
   metricLabel: { color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 2 },

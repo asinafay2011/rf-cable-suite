@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea } from 'recharts'
 import { Plus, Trash2, Copy, Layers as LayersIcon } from 'lucide-react'
+import { normalizePtfeWrap, ptfeWrapPercent } from '../data/materialLibrary.js'
 
 // ─────────────────────────────────────────────────────────────
 // Tape Suckout Simulator (multi-layer)
@@ -51,7 +52,7 @@ const colorFor = (i) => LAYER_COLORS[i % LAYER_COLORS.length]
 const PRESETS = {
   single: {
     label: 'Single layer (sandbox)',
-    stack: [{ kind: 'ptfe', width: 12, overlap: 25, count: 1 }],
+    stack: [{ kind: 'ptfe', width: 12, overlap: 50, count: 1 }],
   },
   ut141: {
     label: 'UT-141 style · 10× PTFE identical',
@@ -70,7 +71,7 @@ const PRESETS = {
   phase_stable: {
     label: 'Phase-stable · 8× alternating widths + foil',
     stack: [
-      { kind: 'ptfe', width: 8.0, overlap: 50, count: 4 },
+      { kind: 'ptfe', width: 8.0, overlap: 66.7, count: 4 },
       { kind: 'ptfe', width: 6.0, overlap: 50, count: 4 },
       { kind: 'foil', width: 12.0, overlap: 25, count: 1 },
     ],
@@ -78,7 +79,7 @@ const PRESETS = {
   semirigid_full: {
     label: 'Mil-spec semi-rigid · 12× PTFE + foil + braid',
     stack: [
-      { kind: 'ptfe', width: 7.0, overlap: 50, count: 6 },
+      { kind: 'ptfe', width: 7.0, overlap: 66.7, count: 6 },
       { kind: 'ptfe', width: 9.0, overlap: 50, count: 6 },
       { kind: 'foil', width: 10.0, overlap: 25, count: 1 },
       { kind: 'braid', carriers: 24, picksPerIn: 14, count: 1 },
@@ -168,7 +169,7 @@ function newLayer(kind = 'ptfe') {
   // side-by-side with a small gap (or just touching).  Overlap is therefore
   // restricted to the range −50% (big gap) … 0% (touching).
   if (kind === 'spiral') return { kind: 'spiral', width: 1.0, overlap: -10, count: 1, bobbins: 8, material: 'spc' }
-  return { kind, width: kind === 'foil' ? 10 : 12, overlap: 25, count: 1 }
+  return { kind, width: kind === 'foil' ? 10 : 12, overlap: kind === 'ptfe' ? 50 : 25, count: 1 }
 }
 function pitchOf(layer, cableOD) {
   if (layer.kind === 'braid') {
@@ -184,7 +185,8 @@ function pitchOf(layer, cableOD) {
   // to -50 … 0 % since spiral ribbons can't physically overlap each other.
   const overlapMin = layer.kind === 'spiral' ? -0.5 : -0.5
   const overlapMax = layer.kind === 'spiral' ? 0 : 0.95
-  const o = Math.max(overlapMin, Math.min(overlapMax, layer.overlap / 100))
+  const requestedOverlap = layer.kind === 'ptfe' ? ptfeWrapPercent(layer.overlap) : layer.overlap
+  const o = Math.max(overlapMin, Math.min(overlapMax, requestedOverlap / 100))
   const circ = Math.PI * Math.max(0.5, cableOD)
   const sinG = Math.min(0.95, layer.width / circ)
   const cosG = Math.sqrt(1 - sinG * sinG)
@@ -260,7 +262,8 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
         //  • gap (overlap < 0) = air gap between tape edges → DEEPER (clean
         //    contrast). overlap > 0 = double-thick seam = also deep but
         //    less than gap. We model as: 1 + |overlap|·0.5  with gap ×1.5
-        const o = (layer.overlap ?? 25) / 100
+        const overlapPct = layer.kind === 'ptfe' ? ptfeWrapPercent(layer.overlap) : (layer.overlap ?? 25)
+        const o = overlapPct / 100
         const gapFactor = o < 0 ? 1 + Math.abs(o) * 1.5 : 1 + o * 0.3
         const Nbobbins = layer.kind === 'spiral' ? Math.max(1, Math.min(8, layer.bobbins || 1)) : 1
         const bobbinFactor = 1 / Nbobbins
@@ -593,6 +596,7 @@ export default function SuckoutSim({ accent = '#c97b3f' }) {
         <div className="font-mono" style={{ color: C.amber }}>f<sub>n</sub> = n · c · VF / (2 · P)  ≈  n · 150 000 · VF / P<sub>mm</sub>  [MHz]</div>
         <div>
           • Each layer adds its OWN pitch-driven notch — independent contributions.
+          <br />• PTFE tape uses shop-standard wraps only: 50% (1/2), 66.7% (2/3), or 75% (3/4). Use 2/3 wrap on small cable to reduce shrink-back; use 1/2 only when the lower OD build is the target. One 2/3 wrap is 3 tape thicknesses, smaller than two 1/2 wraps at 4.
           <br />• N identical wraps stack the SAME notch ~N× deeper. Different widths across layers produce DIFFERENT notches, each shallower — the standard "spread the suckout" trick. Add MORE LAYERS for the spread, not multi-bobbin per layer.
           <br />• <span style={{ color: C.copperBright }}>Spiral wrap (SPC / Cu / TC flatwire):</span> 0.5-2 mm wide ribbon helically wound as a SHIELD layer, NOT a dielectric. Each bobbin lays ONE strand; factory machines run up to 8 bobbins on a vertical bobbin-holder that rotates around the cable as it's pulled. The holder's rotation speed sets the lay (pitch). 8 bobbins push the notch frequency ~8× higher than a single bobbin. Used in MIL-DTL-17 RG-class shields, VITA-58 high-flex coax, and as an under-braid layer in phase-stable assemblies.
           <br />• Spiral wraps physically <span style={{ color: C.copperBright }}>cannot overlap each other</span> — adjacent ribbons are laid side-by-side with a small gap (or just touching). The Gap slider is therefore clamped to 0 … −50 % (no positive overlap allowed).
@@ -952,8 +956,10 @@ function LayerRow({ layer, idx, cableOD, vf, color, units = 'mm', onUpdate, onRe
   const alpha = helixAngleOf(layer, cableOD)
   const isBraid = layer.kind === 'braid'
   const isSpiral = layer.kind === 'spiral'
+  const isPtfe = layer.kind === 'ptfe'
   const isTape = layer.kind === 'ptfe' || layer.kind === 'foil'
   const showInch = units === 'inch'
+  const wrapKey = normalizePtfeWrap(layer.overlap).key
 
   return (
     <div className="border rounded bg-[#0d1416] flex items-stretch overflow-hidden" style={{ borderColor: color + '40' }}>
@@ -998,7 +1004,11 @@ function LayerRow({ layer, idx, cableOD, vf, color, units = 'mm', onUpdate, onRe
           {isTape && (
             <>
               <CompactSlider label="Width" value={layer.width} onChange={(v) => onUpdate({ width: v })} min={0.5} max={30} step={0.5} units={units} length />
-              <CompactSlider label={(layer.overlap ?? 0) < 0 ? 'Gap' : 'Overlap'} value={layer.overlap} onChange={(v) => onUpdate({ overlap: v })} min={-50} max={90} step={1} unit="%" />
+              {isPtfe ? (
+                <PtfeWrapControl value={wrapKey} onChange={(key) => onUpdate({ overlap: ptfeWrapPercent(key) })} />
+              ) : (
+                <CompactSlider label={(layer.overlap ?? 0) < 0 ? 'Gap' : 'Overlap'} value={layer.overlap} onChange={(v) => onUpdate({ overlap: v })} min={-50} max={90} step={1} unit="%" />
+              )}
             </>
           )}
           {isSpiral && (
@@ -1051,6 +1061,34 @@ function LayerRow({ layer, idx, cableOD, vf, color, units = 'mm', onUpdate, onRe
 
 // Length-aware: when `length` is true, the value is interpreted as mm
 // internally but displayed/edited in the active `units` (mm or inch).
+function PtfeWrapControl({ value, onChange }) {
+  return (
+    <div className="min-w-0">
+      <label className="font-mono text-[9px] uppercase tracking-wider mb-0.5 block" style={{ color: C.textMuted }}>Overlap</label>
+      <div className="grid grid-cols-3 gap-1">
+        {['1/2', '2/3', '3/4'].map((key) => {
+          const active = value === key
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onChange(key)}
+              className="font-mono text-[10px] px-1.5 py-1 rounded border"
+              style={{
+                borderColor: active ? C.amber : C.borderHi,
+                color: active ? C.amber : C.textMuted,
+                background: active ? C.amber + '18' : C.bg,
+              }}
+            >
+              {key}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function CompactSlider({ label, value, onChange, min, max, step, unit, units = 'mm', length = false }) {
   const isInch = length && units === 'inch'
   const factor = isInch ? 1 / 25.4 : 1

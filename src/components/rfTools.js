@@ -13,6 +13,12 @@ import {
   findPtfeTapeByPart,
   findSpcFlatwireByPart,
   ptfeTapeToToolLayer,
+  normalizePtfeWrap,
+  ptfeWrapFraction,
+  ptfeWrapLayers,
+  recommendPtfeWrapForCable,
+  SMALL_CABLE_MAX_PTFE_WIDTH_IN,
+  SMALL_CABLE_TAPE_OD_IN,
 } from '../data/materialLibrary.js'
 import { makeBlankMiWorkbook, makePtfeMiWorkbook } from '../data/miTemplate.js'
 
@@ -1544,31 +1550,44 @@ function _densityToEps(density) {
   return Math.pow(eps_third, 3)
 }
 
-const _OVERLAP_MAP = { butt: 0, '1/2': 0.5, '2/3': 0.667, '3/4': 0.75 }
 function _overlapFraction(o) {
-  if (typeof o === 'number') return Math.min(0.95, Math.max(0, o))
-  return _OVERLAP_MAP[o] ?? 0.5
+  return ptfeWrapFraction(o)
 }
 function _overlapLayers(o) {
-  const f = _overlapFraction(o)
-  if (f <= 0.0001) return 1
-  return Math.max(1, Math.round(1 / (1 - f)))
+  return ptfeWrapLayers(o)
 }
 
 function designDielectricStack(input) {
+  const rawInput = input || {}
+  const overlapWasSpecified = rawInput.overlap != null && rawInput.overlap !== ''
   let { conductor_od_mm, conductor_od_inch, target_vp, target_z0_ohm,
         tape_part_number,
-        tape_thickness_mm = 0.10, tape_width_mm = 6.35,
-        overlap = '1/2', tension_factor = 0.92, prefer = 'mix',
+        tape_thickness_mm = 0.10, tape_width_mm = 0.635,
+        overlap, tension_factor = 0.92, prefer = 'mix',
         tension_n = 4.0, line_speed_ft_min = 7,
         mi_number = 'MI-ST962-AUTO', finished_part_number = '',
-        prepared_by = '', mi_date } = input || {}
+        prepared_by = '', mi_date } = rawInput
 
   if (conductor_od_mm == null && conductor_od_inch == null) {
     throw new Error('Need conductor_od_mm or conductor_od_inch.')
   }
   const d = conductor_od_mm != null ? conductor_od_mm : conductor_od_inch * 25.4
   if (!(d > 0.05 && d < 30)) throw new Error('Conductor OD looks wrong (expected 0.05–30 mm).')
+  const wrapGuidance = recommendPtfeWrapForCable({
+    cableOdMm: d,
+    tapeWidthMm: tape_width_mm,
+    overlap: overlapWasSpecified ? overlap : '2/3',
+  })
+  const requestedOverlap = overlap
+  overlap = overlapWasSpecified ? normalizePtfeWrap(overlap).key : wrapGuidance.overlap
+  let smallCableWidthClamp = null
+  if (wrapGuidance.smallCable && tape_width_mm / 25.4 >= SMALL_CABLE_MAX_PTFE_WIDTH_IN - 0.00001) {
+    smallCableWidthClamp = {
+      original_width_in: tape_width_mm / 25.4,
+      clamped_width_in: SMALL_CABLE_MAX_PTFE_WIDTH_IN,
+    }
+    tape_width_mm = Math.max(0.001, (SMALL_CABLE_MAX_PTFE_WIDTH_IN - 0.0001) * 25.4)
+  }
 
   // Manufacturing rule: small conductors (≤ 0.091" = 2.311 mm) can't take
   // tape thicker than 10 mil — it wrinkles and won't conform to the tight
@@ -1594,6 +1613,7 @@ function designDielectricStack(input) {
     widthMm: tape_width_mm,
     densityCode: baseDensityCode,
     maxThicknessMil,
+    cableOdMm: d,
   })
   if (baseTape) {
     tape_thickness_mm = baseTape.thicknessMm
@@ -1669,6 +1689,7 @@ function designDielectricStack(input) {
       widthMm: tape_width_mm,
       densityCode: density >= 1.1 ? 'H' : 'L',
       maxThicknessMil,
+      cableOdMm: d,
     })
     return ptfeTapeToToolLayer(tape, {
       preset,
@@ -1697,6 +1718,8 @@ function designDielectricStack(input) {
       density_code: L.density_code,
       density_label: L.density_label,
       density: L.density,
+      overlap: L.overlap,
+      overlap_pct: normalizePtfeWrap(L.overlap).percent,
       passes: L.passes,
       tape_thickness_mm: round(L.tape_thickness_mm, 4),
       tape_thickness_mil: L.tape_thickness_mil,
@@ -1812,6 +1835,15 @@ function designDielectricStack(input) {
         : null,
       smallCableClamp
         ? `⚠ Small-conductor rule: d=${(d/25.4).toFixed(3)}" ≤ 0.091". Auto-clamped tape from ${smallCableClamp.original_mil.toFixed(1)} mil → ${smallCableClamp.clamped_mil.toFixed(1)} mil (thicker tape wrinkles on tight radii).`
+        : null,
+      smallCableWidthClamp
+        ? `Small-cable taping rule: OD ${(d / 25.4).toFixed(4)}" ≤ ${SMALL_CABLE_TAPE_OD_IN.toFixed(3)}"; avoided ${smallCableWidthClamp.original_width_in.toFixed(4)}" PTFE tape and selected stocked tape below ${smallCableWidthClamp.clamped_width_in.toFixed(4)}".`
+        : null,
+      !overlapWasSpecified && wrapGuidance.smallCable
+        ? 'Small-cable taping rule: defaulted PTFE to 2/3 wrap to reduce shrink-back. Use 1/2 wrap only when the target OD requires the lower build; one 2/3 wrap builds 3 tape thicknesses, smaller than two 1/2 wraps at 4 tape thicknesses.'
+        : null,
+      overlapWasSpecified && requestedOverlap !== overlap
+        ? `PTFE wrap snapped to stocked shop setting: ${normalizePtfeWrap(requestedOverlap).percent}% (${overlap}). Valid PTFE settings are 50%, 66.7%, and 75%.`
         : null,
       mode === 'mix' && f_HD > 0 && f_HD < 1
         ? `HD inside (${(f_HD*100).toFixed(0)}% of log-radius), LD outside lowers VP-weighted losses while lifting VP.`
