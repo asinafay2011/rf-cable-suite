@@ -1701,6 +1701,13 @@ export default function RFStackLab() {
     setShieldStack(makePresetShieldStack(PRESETS[key]))
   }
 
+  const resetBuild = () => {
+    setActivePreset('')
+    setParams(PRESETS.phaseStable)
+    setPtfeStack([])
+    setShieldStack([])
+  }
+
   const updatePtfeLayer = (id, patch) => {
     setPtfeStack((current) => current.map((layer) => {
       if (layer.id !== id) return layer
@@ -2044,17 +2051,10 @@ export default function RFStackLab() {
         </div>
 
         <div style={S.controlsCard}>
-          <div style={S.cardHead}>
-            <div>
-              <div style={S.cardEyebrow}>Build recipe</div>
-              <h2 style={S.cardTitle}>Layer controls</h2>
-            </div>
-            <button type="button" style={S.resetBtn} onClick={() => loadPreset('phaseStable')}>
+          <div style={S.presets}>
+            <button type="button" style={S.resetBtn} onClick={resetBuild}>
               <RotateCcw size={13} /> Reset
             </button>
-          </div>
-
-          <div style={S.presets}>
             {Object.entries(PRESETS).map(([key, preset]) => (
               <button
                 key={key}
