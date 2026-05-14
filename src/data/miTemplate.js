@@ -1,7 +1,9 @@
 import JSZip from 'jszip'
+import shopMiTemplateUrl from '../assets/templates/MI-ST962-032-130.xlsx?url'
 
 const INCH_TO_MM = 25.4
-const SHOP_MI_TEMPLATE_URL = '/templates/MI-ST962-032-130.xlsx'
+const SHOP_MI_TEMPLATE_URL = shopMiTemplateUrl
+const SHOP_MI_TEMPLATE_NAME = 'MI-ST962-032-130.xlsx'
 export const SHOP_MI_XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 const DEFAULT_MI_STEPS = [
@@ -473,6 +475,12 @@ function xlsxToleranceTriplet(nominalIn, tol = 0.001) {
   return [Number((v - tol).toFixed(4)), Number(v.toFixed(4)), Number((v + tol).toFixed(4))]
 }
 
+function xlsxNominalTriplet(nominalIn) {
+  const v = Number(nominalIn)
+  if (!Number.isFinite(v) || v <= 0) return blankTriplet()
+  return ['-', Number(v.toFixed(4)), '-']
+}
+
 function excelDateSerial(value) {
   if (value == null || value === '') return ''
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -498,8 +506,8 @@ function uint8ToBase64(bytes) {
 }
 
 async function loadShopMiZip() {
-  const response = await fetch(SHOP_MI_TEMPLATE_URL)
-  if (!response.ok) throw new Error(`Could not load shop MI template (${response.status})`)
+  const response = await fetch(SHOP_MI_TEMPLATE_URL, { cache: 'no-store' })
+  if (!response.ok) throw new Error(`Could not load ${SHOP_MI_TEMPLATE_NAME} (${response.status})`)
   return JSZip.loadAsync(await response.arrayBuffer())
 }
 
@@ -525,7 +533,7 @@ function fillTapingSlot(xml, slot, entry) {
   next = writeExistingCell(next, `D${baseRow + 2}`, entry.overlapText || '-')
   next = writeTriplet(next, baseRow + 3, ['-', Number(entry.tensionN || 0) || '', '-'])
   next = writeExistingCell(next, `D${baseRow + 4}`, entry.rollerPosition || '-')
-  next = writeTriplet(next, baseRow + 6, xlsxToleranceTriplet(entry.odAfterIn))
+  next = writeTriplet(next, baseRow + 6, xlsxNominalTriplet(entry.odAfterIn))
   return next
 }
 
@@ -542,7 +550,7 @@ async function patchTapingSheet(zip, path, sheetEntries, options) {
     xml = sheetEntries[slot] ? fillTapingSlot(xml, slot, sheetEntries[slot]) : clearTapingSlot(xml, slot)
   }
   xml = writeTriplet(xml, 45, sheetEntries.length ? ['-', Number(options.lineSpeedFtMin || 7), '-'] : blankTriplet())
-  xml = writeTriplet(xml, 47, sheetEntries.length ? xlsxToleranceTriplet(finalOdIn) : blankTriplet())
+  xml = writeTriplet(xml, 47, sheetEntries.length ? xlsxNominalTriplet(finalOdIn) : blankTriplet())
   zip.file(path, xml)
 }
 
@@ -588,24 +596,14 @@ async function makeShopMiXlsx(options = {}, entries = [], conductorOdIn = Number
     base64: uint8ToBase64(bytes),
     mime: SHOP_MI_XLSX_MIME,
     extension: 'xlsx',
-    template: 'MI-ST962-032-130.xlsx',
+    template: SHOP_MI_TEMPLATE_NAME,
     filledTapingEntries: Math.min(entries.length, 6),
     omittedTapingEntries: Math.max(0, entries.length - 6),
   }
 }
 
 export async function makeBlankMiWorkbook(options = {}) {
-  try {
-    return await makeShopMiXlsx(options, [], Number.NaN)
-  } catch (err) {
-    return {
-      text: makeLegacyBlankMiWorkbook(options),
-      mime: 'application/vnd.ms-excel',
-      extension: 'xls',
-      template: 'legacy_generated_xml',
-      warning: err?.message || 'Shop MI template unavailable; used legacy XML template.',
-    }
-  }
+  return makeShopMiXlsx(options, [], Number.NaN)
 }
 
 export async function makePtfeMiWorkbook(options = {}) {
@@ -618,17 +616,5 @@ export async function makePtfeMiWorkbook(options = {}) {
   } = options
 
   const { conductorOdIn, entries } = buildPtfeMiEntries({ conductorOdMm, layers, overlap, tensionN, lineSpeedFtMin })
-  try {
-    return await makeShopMiXlsx({ ...options, lineSpeedFtMin }, entries, conductorOdIn)
-  } catch (err) {
-    return {
-      text: makeLegacyPtfeMiWorkbook(options),
-      mime: 'application/vnd.ms-excel',
-      extension: 'xls',
-      template: 'legacy_generated_xml',
-      filledTapingEntries: entries.length,
-      omittedTapingEntries: 0,
-      warning: err?.message || 'Shop MI template unavailable; used legacy XML template.',
-    }
-  }
+  return makeShopMiXlsx({ ...options, lineSpeedFtMin }, entries, conductorOdIn)
 }
