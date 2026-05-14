@@ -115,6 +115,36 @@ const PRESETS = {
     jacketOD: 7.2,
     freqGHz: 12,
   },
+  miSt962032130: {
+    label: 'MI-ST962-032-130',
+    conductorOD: 0.729,
+    ptfeLayers: 4,
+    ptfeMil: 5,
+    ptfeWidth: 0.508,
+    ptfeOverlap: 58.35,
+    ptfeDensity: 0.7,
+    suckout: 3,
+    ptfeStack: [
+      { passes: 1, partNumber: '962-96000-05L0150', mil: 5, width: 0.381, overlap: 50, density: 0.7, direction: 'Z', pitchSetpointMm: 2.7051, ODAfterMm: 1.0414, effectiveEps: 1.6203 },
+      { passes: 1, partNumber: '962-96000-05L0200', mil: 5, width: 0.508, overlap: 50, density: 0.7, direction: 'S', pitchSetpointMm: 3.5560, ODAfterMm: 1.3462, effectiveEps: 1.6203 },
+      { passes: 1, partNumber: '962-96000-05L0200', mil: 5, width: 0.508, overlap: 66.7, density: 0.7, direction: 'Z', pitchSetpointMm: 1.8796, ODAfterMm: 1.7018, effectiveEps: 1.6203 },
+      { passes: 1, partNumber: '962-96000-05L0250', mil: 5, width: 0.635, overlap: 66.7, density: 0.7, direction: 'S', pitchSetpointMm: 2.2860, ODAfterMm: 2.0947, effectiveEps: 1.6203 },
+    ],
+    shieldStack: [
+      { type: 'spiral', partNumber: '962-96001-SPC-2.5-0300', label: 'SPC spiral · sheet 4', direction: 'S', length: 155, width: 0.762, pitch: 2.5, bobbins: 8, gap: 5.7 },
+      { type: 'foil', partNumber: '962-96003-ALK-1.4-0250', label: 'Foil in · sheet 4', length: 152, overlap: 50, pitch: 3.556 },
+      { type: 'braid', label: 'Niehoff braid · sheet 10', length: 142, carriers: 16, ends: 8, picks: 20.5, gauge: 40, coverage: 97.29 },
+    ],
+    spiralWidth: 0.762,
+    spiralGap: 5.7,
+    spiralBobbins: 8,
+    helicalWidth: 0.19,
+    helicalOverlap: 45,
+    foilOverlap: 50,
+    braidCoverage: 97.29,
+    jacketOD: 2.642,
+    freqGHz: 40,
+  },
 }
 
 const PTFE_SOLID_DENSITY = 2.15
@@ -218,6 +248,9 @@ function makeAnimationKey(prefix) {
 }
 
 function makePtfeLayer(layer = {}, preset = PRESETS.phaseStable, index = 0) {
+  const pitchSetpointMm = Number(layer.pitchSetpointMm ?? layer.pitch_setpoint_mm ?? layer.pitch_mm ?? (layer.pitch_setpoint_in != null ? Number(layer.pitch_setpoint_in) * MM_PER_IN : NaN))
+  const odAfterMm = Number(layer.ODAfterMm ?? layer.OD_after_mm ?? layer.od_after_mm)
+  const effectiveEps = Number(layer.effectiveEps ?? layer.effective_eps ?? layer.eps_eff)
   const tape = findNearestPtfeTape({
     partNumber: layer.partNumber || layer.part_number,
     thicknessMil: layer.mil ?? layer.tape_thickness_mil ?? (layer.tape_thickness_mm ? layer.tape_thickness_mm / MIL_TO_MM : preset.ptfeMil),
@@ -231,6 +264,10 @@ function makePtfeLayer(layer = {}, preset = PRESETS.phaseStable, index = 0) {
     passes: clamp(Math.round(layer.passes || 1), 1, 12),
     overlap: overlapToPct(layer.overlap ?? preset.ptfeOverlap ?? 66.7),
     direction: layer.direction === 'S' || index % 2 ? 'S' : 'Z',
+    pitchSetpointMm: Number.isFinite(pitchSetpointMm) && pitchSetpointMm > 0 ? pitchSetpointMm : undefined,
+    ODAfterMm: Number.isFinite(odAfterMm) && odAfterMm > 0 ? odAfterMm : undefined,
+    effectiveEps: Number.isFinite(effectiveEps) && effectiveEps > 0 ? effectiveEps : undefined,
+    miStation: layer.miStation || layer.mi_station,
     animateKey: makeAnimationKey('ptfe'),
   })
 }
@@ -317,6 +354,42 @@ function makeShieldLayer(type, source = PRESETS.phaseStable) {
 }
 
 function makePresetShieldStack(preset) {
+  if (Array.isArray(preset.shieldStack) && preset.shieldStack.length) {
+    return preset.shieldStack.map((layer) => {
+      if (layer.type === 'spiral' || layer.type === 'flatwire') {
+        const material = findNearestSpcFlatwire({
+          partNumber: layer.partNumber || layer.part_number,
+          use: layer.type === 'spiral' ? 'spiral' : 'helical',
+          widthMm: layer.width,
+        })
+        return spcFlatwireToLayer(material, {
+          id: makeShieldId(),
+          ...layer,
+          partNumber: material?.partNumber || layer.partNumber,
+          width: layer.width ?? material?.widthMm,
+          animateKey: makeAnimationKey('shield'),
+        })
+      }
+      if (layer.type === 'foil') {
+        const material = findNearestFoilTape({
+          partNumber: layer.partNumber || layer.part_number,
+          widthMm: layer.width,
+        })
+        return foilTapeToLayer(material, {
+          id: makeShieldId(),
+          ...layer,
+          partNumber: material?.partNumber || layer.partNumber,
+          width: layer.width ?? material?.widthMm,
+          animateKey: makeAnimationKey('shield'),
+        })
+      }
+      return {
+        id: makeShieldId(),
+        ...layer,
+        animateKey: makeAnimationKey('shield'),
+      }
+    })
+  }
   return [
     makeShieldLayer('spiral', preset),
     makeShieldLayer('flatwire', preset),
@@ -1177,10 +1250,10 @@ function LayerRail({ computed }) {
   const states = [
     ['01', 'Conductor', `${fmt(computed.conductorOD, 2)} mm Cu`, C.copperHi],
     ['02', 'PTFE stack', `${computed.ptfeLayerCount} layers · ${computed.ptfeLayers} passes`, '#fff2c4'],
-    ['03', 'SPC spiral', `${computed.spiralBobbins} bobbins · ${fmt(computed.spiralGap, 0)}% gap`, C.foil],
-    ['04', 'SPC helical', `${fmt(computed.helicalOverlap, 0)}% overlap`, C.sky],
-    ['05', 'Foil shield', `${fmt(computed.foilCoverage, 0)}% seam`, C.foil],
-    ['06', 'Braid', `${fmt(computed.braidCoverage, 0)}% coverage`, C.braid],
+    ['03', 'SPC spiral', computed.spiralInstalled ? `${computed.spiralBobbins} bobbins · ${fmt(computed.spiralGap, 0)}% gap` : 'not installed', C.foil],
+    ['04', 'SPC helical', computed.helicalInstalled ? `${fmt(computed.helicalOverlap, 0)}% overlap` : 'not installed', C.sky],
+    ['05', 'Foil shield', computed.foilInstalled ? `${fmt(computed.foilOverlap, 0)}% overlap` : 'not installed', C.foil],
+    ['06', 'Braid', computed.braidInstalled ? `${fmt(computed.braidCoverage, 0)}% coverage` : 'not installed', C.braid],
     ['07', 'Jacket', computed.jacketInstalled ? `${fmt(computed.jacketOD, 1)} mm OD` : 'add final sleeve', C.sky],
   ]
   return (
@@ -1740,12 +1813,28 @@ export default function RFStackLab() {
     const jacketOD = Number(jacketLayer?.od ?? params.jacketOD)
     const summary = stackSummary(ptfeStack, params.suckout)
     const tension = 1 - params.suckout / 180
+    let measuredBuildOD = params.conductorOD
     const layerBuilds = ptfeStack.map((layer) => {
       const passes = Math.max(1, Number(layer.passes) || 1)
       const mil = Number(layer.mil) || 2
       const overlap = overlapToPct(layer.overlap)
-      const radial = passes * mil * MIL_TO_MM * ptfeOverlapLayerCount(overlap) * tension
-      return { ...layer, passes, mil, overlap, radial, eps: densityToEps(Number(layer.density) || summary.avgDensity) }
+      const calculatedRadial = passes * mil * MIL_TO_MM * ptfeOverlapLayerCount(overlap) * tension
+      const odAfterMm = Number(layer.ODAfterMm ?? layer.OD_after_mm ?? layer.od_after_mm)
+      const radial = Number.isFinite(odAfterMm) && odAfterMm > measuredBuildOD
+        ? (odAfterMm - measuredBuildOD) / 2
+        : calculatedRadial
+      const epsOverride = Number(layer.effectiveEps ?? layer.effective_eps ?? layer.eps_eff)
+      measuredBuildOD += radial * 2
+      return {
+        ...layer,
+        passes,
+        mil,
+        overlap,
+        radial,
+        eps: Number.isFinite(epsOverride) && epsOverride > 0
+          ? epsOverride
+          : densityToEps(Number(layer.density) || summary.avgDensity),
+      }
     })
     const rawDielectricWall = layerBuilds.reduce((sum, layer) => sum + layer.radial, 0)
     const dielectricWall = rawDielectricWall || 0.12
@@ -1762,7 +1851,10 @@ export default function RFStackLab() {
     const spiralPitchMm = Number(spiralLayer?.pitch ?? spiralPitchFromGap(spiralGapPct, spiralWidth))
     const ptfeNotches = layerBuilds.map((layer, index) => {
       const layerOD = params.conductorOD + 2 * layerBuilds.slice(0, index + 1).reduce((sum, item) => sum + item.radial, 0)
-      const pitch = pitchFrom(layer.width, layer.overlap, layerOD, 1)
+      const pitchOverride = Number(layer.pitchSetpointMm ?? layer.pitch_setpoint_mm ?? layer.pitch_mm ?? (layer.pitch_setpoint_in != null ? Number(layer.pitch_setpoint_in) * MM_PER_IN : NaN))
+      const pitch = Number.isFinite(pitchOverride) && pitchOverride > 0
+        ? pitchOverride
+        : pitchFrom(layer.width, layer.overlap, layerOD, 1)
       return {
         id: layer.id,
         label: `L${index + 1} ${layer.direction}`,
@@ -1811,6 +1903,10 @@ export default function RFStackLab() {
       ptfeDensity: summary.avgDensity,
       ptfeLayerCount: ptfeStack.length,
       shieldLayerCount: shieldStack.length,
+      spiralInstalled: Boolean(spiralLayer),
+      helicalInstalled: Boolean(helicalLayer),
+      foilInstalled: Boolean(foilLayer),
+      braidInstalled: Boolean(braidLayer),
       ptfeNotches,
       dielectricOD,
       eps,
