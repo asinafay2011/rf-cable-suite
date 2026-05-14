@@ -1673,11 +1673,19 @@ export default function RFStackLab() {
       if (detail.section !== 'stack' && detail.section !== 'dielectric') return
       const preset = detail.params || {}
       const layers = Array.isArray(preset.layers) ? preset.layers : []
+      const shieldLayers = Array.isArray(preset.shield_layers)
+        ? preset.shield_layers
+        : Array.isArray(preset.shieldStack) ? preset.shieldStack : []
       const totalPasses = layers.reduce((sum, layer) => sum + Math.max(1, Number(layer.passes) || 1), 0)
       const firstLayer = layers[0] || {}
       const avgDensity = layers.length
         ? layers.reduce((sum, layer) => sum + (Number(layer.density) || 0.78) * Math.max(1, Number(layer.passes) || 1), 0) / Math.max(1, totalPasses)
         : 0.78
+      const mappedShieldLayers = shieldLayers.map((layer) => ({
+        ...layer,
+        id: layer.id || makeShieldId(),
+        animateKey: layer.animateKey || makeAnimationKey('shield'),
+      }))
       if (layers.length) {
         setPtfeStack(layers.map((layer, index) => makePtfeLayer({
           ...layer,
@@ -1685,14 +1693,25 @@ export default function RFStackLab() {
           direction: index % 2 ? 'S' : 'Z',
         }, PRESETS.phaseStable, index)))
       }
+      if (mappedShieldLayers.length) {
+        setShieldStack(mappedShieldLayers)
+      }
       setParams((current) => ({
         ...current,
         conductorOD: Number(preset.conductor_od_mm) || current.conductorOD,
-        ptfeLayers: clamp(Math.round(totalPasses || current.ptfeLayers), 1, 16),
-        ptfeMil: firstLayer.tape_thickness_mm ? clamp(firstLayer.tape_thickness_mm / MIL_TO_MM, 0.5, 5) : current.ptfeMil,
-        ptfeWidth: firstLayer.tape_width_mm ? clamp(firstLayer.tape_width_mm, 0.1, 4) : current.ptfeWidth,
-        ptfeOverlap: overlapToPct(firstLayer.overlap),
-        ptfeDensity: clamp(avgDensity || current.ptfeDensity, 0.45, 1.65),
+        ptfeLayers: layers.length ? clamp(Math.round(totalPasses || current.ptfeLayers), 1, 16) : current.ptfeLayers,
+        ptfeMil: layers.length && firstLayer.tape_thickness_mm ? clamp(firstLayer.tape_thickness_mm / MIL_TO_MM, 0.5, 5) : current.ptfeMil,
+        ptfeWidth: layers.length && firstLayer.tape_width_mm ? clamp(firstLayer.tape_width_mm, 0.1, 4) : current.ptfeWidth,
+        ptfeOverlap: layers.length ? overlapToPct(firstLayer.overlap) : current.ptfeOverlap,
+        ptfeDensity: layers.length ? clamp(avgDensity || current.ptfeDensity, 0.45, 1.65) : current.ptfeDensity,
+        spiralWidth: mappedShieldLayers.find((layer) => layer.type === 'spiral')?.width ?? current.spiralWidth,
+        spiralGap: mappedShieldLayers.find((layer) => layer.type === 'spiral')?.gap ?? current.spiralGap,
+        spiralBobbins: mappedShieldLayers.find((layer) => layer.type === 'spiral')?.bobbins ?? current.spiralBobbins,
+        helicalWidth: mappedShieldLayers.find((layer) => layer.type === 'flatwire')?.width ?? current.helicalWidth,
+        helicalOverlap: mappedShieldLayers.find((layer) => layer.type === 'flatwire')?.overlap ?? current.helicalOverlap,
+        foilOverlap: mappedShieldLayers.find((layer) => layer.type === 'foil')?.overlap ?? current.foilOverlap,
+        braidCoverage: mappedShieldLayers.find((layer) => layer.type === 'braid')?.coverage ?? current.braidCoverage,
+        jacketOD: Number(preset.jacket_od_mm) || mappedShieldLayers.find((layer) => layer.type === 'jacket')?.od || current.jacketOD,
       }))
       setActivePreset('')
     }

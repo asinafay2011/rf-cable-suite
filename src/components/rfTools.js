@@ -14,10 +14,15 @@ import {
   findPtfeTapeByPart,
   findSpcFlatwireByPart,
   ptfeTapeToToolLayer,
+  foilTapeToToolLayer,
   normalizePtfeWrap,
   ptfeWrapFraction,
   ptfeWrapLayers,
   recommendPtfeWrapForCable,
+  spiralFlatwireWidthFromDielectricOd,
+  spcFlatwireToToolLayer,
+  DEFAULT_SPIRAL_BOBBINS,
+  DEFAULT_SPIRAL_GAP_PCT,
   SMALL_CABLE_MAX_PTFE_WIDTH_IN,
   SMALL_CABLE_TAPE_OD_IN,
   WTM_MIN_TAPING_PITCH_IN,
@@ -922,6 +927,41 @@ export const RF_TOOLS = [
     },
   },
   {
+    name: 'design_shield_stack',
+    description:
+      'Design the RF shield stack after the dielectric OD is known. Use when the engineer says to add shields such as "first shield SPC spiral with 10% gap, second shield foil or flatwire helical, then braid". Calculates SPC spiral width from dielectric OD × pi / 8 bobbins minus the requested gap, snaps spiral/foil/helical materials to the Material Library, estimates OD after each shield, and proposes braid carriers/ends/picks/gauge/coverage. Returns a one-click apply preset that fills the RF Stack Lab shield layers.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        dielectric_od_mm: { type: 'number', description: 'OD after dielectric/PTFE in millimetres. Provide this or dielectric_od_inch.' },
+        dielectric_od_inch: { type: 'number', description: 'OD after dielectric/PTFE in inches. Converted to mm.' },
+        shield_layers: {
+          type: 'array',
+          description: 'Optional ordered shield list. Each item type may be spiral, foil, helical/flatwire, braid, or jacket. If omitted, defaults to spiral + foil + braid.',
+          items: { type: 'object' },
+        },
+        first_shield: { type: 'string', description: 'Default first layer when shield_layers is omitted. Usually spiral.' },
+        second_shield: { type: 'string', description: 'Default second layer when shield_layers is omitted: foil, helical, flatwire, or none. Default foil.' },
+        include_braid: { type: 'boolean', description: 'Whether to add braid after first/second shield. Default true.' },
+        spiral_gap_pct: { type: 'number', description: 'Open gap between each of the 8 spiral flatwires. Shop default 10%.' },
+        spiral_bobbins: { type: 'number', description: 'Number of spiral bobbins. Shop default 8.' },
+        spiral_part_number: { type: 'string', description: 'Optional 962-96001 SPC spiral part number override.' },
+        helical_part_number: { type: 'string', description: 'Optional 962-96004 SPC helical flatwire part number override.' },
+        foil_part_number: { type: 'string', description: 'Optional 962-96003 ALK foil tape part number override.' },
+        foil_overlap_pct: { type: 'number', description: 'Foil overlap percent. Default 25%.' },
+        helical_overlap_pct: { type: 'number', description: 'Flatwire helical overlap percent. Default 45%.' },
+        braid_coverage_pct: { type: 'number', description: 'Target optical braid coverage percent. Default 92%.' },
+        braid_wire_awg: { type: 'number', description: 'Optional braid wire AWG. If omitted, selected from OD.' },
+        braid_carriers: { type: 'number', description: 'Optional total braid carriers. If omitted, selected automatically.' },
+        braid_ends_per_carrier: { type: 'number', description: 'Optional ends per carrier. If omitted, selected automatically.' },
+        braid_angle_deg: { type: 'number', description: 'Nominal braid angle from cable axis. Default 45 degrees.' },
+        freq_mhz: { type: 'number', description: 'Frequency used for rough shielding effectiveness estimate. Default 1000 MHz.' },
+        jacket_od_mm: { type: 'number', description: 'Optional jacket OD. If provided, a jacket layer is included.' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'compute_tape_notches',
     description:
       'Predict Bragg suckout (notch) frequencies caused by a tape-wrapped dielectric. Uses f_n = n · c · VP / (2 · P) where P is the WTM pitch (axial period of the tape wrap), clamped to the 0.0390 in/rev taping-head minimum. When multiple layers are stacked at the same pitch, the notch deepens; different pitches produce separate notches. Pass the existing layer stack to forecast which frequencies to watch on the VNA.',
@@ -1539,6 +1579,9 @@ export async function dispatchRfTool(name, input) {
         const result = await designDielectricStack(input)
         return result
       }
+      case 'design_shield_stack': {
+        return designShieldStack(input)
+      }
       case 'compute_tape_notches': {
         const result = computeTapeNotches(input)
         return result
@@ -1911,6 +1954,391 @@ async function designDielectricStack(input) {
         : null,
     ].filter(Boolean),
   }
+}
+
+function designShieldStack(input) {
+  const raw = input || {}
+  const dielectricOdMm = _finiteNumber(raw.dielectric_od_mm ?? raw.dielectricOdMm, (
+    raw.dielectric_od_inch != null ? _finiteNumber(raw.dielectric_od_inch) * 25.4
+      : raw.dielectricOdIn != null ? _finiteNumber(raw.dielectricOdIn) * 25.4
+        : NaN
+  ))
+  if (!(dielectricOdMm > 0.05 && dielectricOdMm < 100)) {
+    throw new Error('Need dielectric_od_mm or dielectric_od_inch for the shield stack.')
+  }
+
+  const requests = _normaliseShieldRequests(raw)
+  const steps = []
+  const applyLayers = []
+  let currentOdMm = dielectricOdMm
+  const seen = { spiral: null, foil: null, braid: null }
+
+  for (const req of requests) {
+    if (req.type === 'spiral') {
+      const layer = _designSpiralShield(req, raw, currentOdMm)
+      currentOdMm = layer.od_after_mm
+      seen.spiral = layer
+      layer.step.layer = steps.length + 1
+      steps.push(layer.step)
+      applyLayers.push(layer.apply)
+    } else if (req.type === 'foil') {
+      const layer = _designFoilShield(req, raw, currentOdMm)
+      currentOdMm = layer.od_after_mm
+      seen.foil = layer
+      layer.step.layer = steps.length + 1
+      steps.push(layer.step)
+      applyLayers.push(layer.apply)
+    } else if (req.type === 'flatwire') {
+      const layer = _designHelicalFlatwireShield(req, raw, currentOdMm)
+      currentOdMm = layer.od_after_mm
+      layer.step.layer = steps.length + 1
+      steps.push(layer.step)
+      applyLayers.push(layer.apply)
+    } else if (req.type === 'braid') {
+      const layer = _designBraidShield(req, raw, currentOdMm)
+      currentOdMm = layer.od_after_mm
+      seen.braid = layer
+      layer.step.layer = steps.length + 1
+      steps.push(layer.step)
+      applyLayers.push(layer.apply)
+    } else if (req.type === 'jacket') {
+      const jacketOdMm = _finiteNumber(req.od_mm ?? raw.jacket_od_mm ?? raw.jacketOdMm)
+      if (jacketOdMm > currentOdMm) {
+        const apply = {
+          type: 'jacket',
+          label: 'Jacket',
+          od: round(jacketOdMm, 3),
+          opacity: 0.82,
+        }
+        steps.push({
+          layer: steps.length + 1,
+          type: 'jacket',
+          od_before_mm: round(currentOdMm, 4),
+          od_after_mm: round(jacketOdMm, 4),
+          jacket_wall_mm: round((jacketOdMm - currentOdMm) / 2, 4),
+        })
+        currentOdMm = jacketOdMm
+        applyLayers.push(apply)
+      }
+    }
+  }
+
+  const se = predictShieldingEffectiveness({
+    freq_mhz: _finiteNumber(raw.freq_mhz, 1000),
+    foil_overlap_pct: seen.foil?.step?.overlap_pct || 0,
+    braid_coverage_pct: seen.braid?.step?.coverage_pct || 0,
+    spiral_gap_pct: seen.spiral?.step?.actual_gap_pct ?? seen.spiral?.step?.gap_pct ?? 100,
+    layer_count: steps.filter((step) => step.type !== 'jacket').length,
+  })
+
+  return {
+    dielectric_od_mm: round(dielectricOdMm, 4),
+    dielectric_od_in: round(dielectricOdMm / 25.4, 5),
+    final_shield_od_mm: round(currentOdMm, 4),
+    final_shield_od_in: round(currentOdMm / 25.4, 5),
+    shield_layers: steps,
+    braid_setup: seen.braid?.step?.braid_setup || null,
+    shielding_estimate: se,
+    label: `${steps.map((step) => step.type).join(' + ') || 'shield'} OD ${round(currentOdMm / 25.4, 4)} in`,
+    _section: 'stack',
+    _apply_preset: {
+      dielectric_od_mm: round(dielectricOdMm, 4),
+      shield_layers: applyLayers,
+      jacket_od_mm: applyLayers.find((layer) => layer.type === 'jacket')?.od || null,
+    },
+    notes: [
+      seen.spiral
+        ? `SPC spiral rule applied: dielectric OD × pi / ${seen.spiral.step.bobbins} bobbins × ${(100 - seen.spiral.step.gap_pct).toFixed(1)}% coverage. Requested ${seen.spiral.step.gap_pct}% gap; selected ${seen.spiral.step.part_number} gives ${seen.spiral.step.actual_gap_pct}% actual gap.`
+        : null,
+      seen.braid
+        ? `Braid setup is estimated from SCTE-style coverage math K=(2F-F^2)×100 using ${seen.braid.step.braid_setup.carriers} carriers, ${seen.braid.step.braid_setup.ends_per_carrier} ends/carrier, AWG ${seen.braid.step.braid_setup.wire_awg}, and ${seen.braid.step.braid_setup.picks_per_in} picks/in.`
+        : null,
+      'Click Apply to fill these shield layers into RF Stack Lab. Use measured OD feedback from the line to fine-tune braid compression and final jacket OD.',
+    ].filter(Boolean),
+  }
+}
+
+function _normaliseShieldRequests(raw) {
+  const explicit = Array.isArray(raw.shield_layers) && raw.shield_layers.length
+    ? raw.shield_layers
+    : Array.isArray(raw.layers) && raw.layers.length
+      ? raw.layers
+      : null
+
+  if (explicit) {
+    return explicit
+      .map((item) => (typeof item === 'string'
+        ? { type: _normaliseShieldType(item) }
+        : { ...(item || {}), type: _normaliseShieldType(item?.type || item?.shield || item?.kind || item?.name) }))
+      .filter((item) => item.type && item.type !== 'none')
+  }
+
+  const first = _normaliseShieldType(raw.first_shield || raw.firstShield || 'spiral')
+  const second = _normaliseShieldType(raw.second_shield || raw.secondShield || (_settingIsFalse(raw.include_foil) ? 'none' : 'foil'))
+  const includeBraid = raw.include_braid == null ? true : !_settingIsFalse(raw.include_braid)
+  const includeJacket = raw.jacket_od_mm != null || _settingIsTrue(raw.include_jacket)
+  return [
+    first ? { type: first } : null,
+    second && second !== first ? { type: second } : null,
+    includeBraid ? { type: 'braid' } : null,
+    includeJacket ? { type: 'jacket', od_mm: raw.jacket_od_mm } : null,
+  ].filter(Boolean)
+}
+
+function _finiteNumber(value, fallback = NaN) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const cleaned = value.trim().replace(/,/g, '')
+    const n = Number(cleaned)
+    if (Number.isFinite(n)) return n
+    const parsed = parseFloat(cleaned)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return fallback
+}
+
+function _settingIsFalse(value) {
+  if (value === false) return true
+  const text = String(value ?? '').trim().toLowerCase()
+  return text === 'false' || text === '0' || text === 'no' || text === 'none'
+}
+
+function _settingIsTrue(value) {
+  if (value === true) return true
+  const text = String(value ?? '').trim().toLowerCase()
+  return text === 'true' || text === '1' || text === 'yes'
+}
+
+function _normaliseShieldType(value) {
+  const t = String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+  if (!t || t === 'none' || t === 'no' || t === 'false') return 'none'
+  if (t.includes('spiral')) return 'spiral'
+  if (t.includes('foil')) return 'foil'
+  if (t.includes('helical') || t.includes('flatwire')) return 'flatwire'
+  if (t.includes('braid')) return 'braid'
+  if (t.includes('jacket') || t.includes('extrusion')) return 'jacket'
+  return t
+}
+
+function _designSpiralShield(req, raw, odBeforeMm) {
+  const bobbins = Math.max(1, Math.min(24, Math.round(_finiteNumber(req.bobbins ?? raw.spiral_bobbins ?? raw.spiralBobbins, DEFAULT_SPIRAL_BOBBINS))))
+  const gapPct = _clamp(_finiteNumber(req.gap_pct ?? req.gap ?? raw.spiral_gap_pct ?? raw.spiralGapPct, DEFAULT_SPIRAL_GAP_PCT), 0, 50)
+  const widthRule = spiralFlatwireWidthFromDielectricOd({ dielectricOdMm: odBeforeMm, bobbins, gapPct })
+  const material = findNearestSpcFlatwire({
+    partNumber: req.part_number || req.partNumber || raw.spiral_part_number,
+    use: 'spiral',
+    thicknessMil: _finiteNumber(req.thickness_mil ?? raw.spiral_thickness_mil, 2.5),
+    widthMm: widthRule.widthMm,
+  })
+  const selectedWidthMm = Number(material?.widthMm ?? widthRule.widthMm)
+  const selectedThicknessMm = _finiteNumber(material?.thicknessMm ?? req.thickness_mm, 2.5 * 0.0254)
+  const coveragePct = _clamp((bobbins * selectedWidthMm) / Math.max(0.001, Math.PI * odBeforeMm) * 100, 0, 100)
+  const actualGapPct = _clamp(100 - coveragePct, 0, 100)
+  const radialBuildMm = selectedThicknessMm
+  const odAfterMm = odBeforeMm + 2 * radialBuildMm
+  const pitchMm = _spiralPitchFromGap(gapPct, selectedWidthMm)
+  const step = {
+    layer: 0,
+    type: 'spiral',
+    od_before_mm: round(odBeforeMm, 4),
+    od_after_mm: round(odAfterMm, 4),
+    part_number: material?.partNumber || null,
+    bobbins,
+    gap_pct: round(gapPct, 2),
+    actual_gap_pct: round(actualGapPct, 2),
+    coverage_pct: round(coveragePct, 2),
+    calculated_width_mm: round(widthRule.widthMm, 4),
+    calculated_width_in: round(widthRule.widthIn, 5),
+    selected_width_mm: round(selectedWidthMm, 4),
+    selected_width_in: round(selectedWidthMm / 25.4, 5),
+    thickness_mil: material?.thicknessMil ?? round(selectedThicknessMm / 0.0254, 2),
+    pitch_mm: round(pitchMm, 3),
+    direction: String(req.direction || raw.spiral_direction || 'Z').toUpperCase().startsWith('S') ? 'S' : 'Z',
+  }
+  const apply = spcFlatwireToToolLayer(material, {
+    type: 'spiral',
+    label: 'SPC flatwire spiral',
+    direction: step.direction,
+    length: _finiteNumber(req.length_mm ?? raw.spiral_length_mm, 155),
+    width: selectedWidthMm,
+    pitch: pitchMm,
+    bobbins,
+    gap: gapPct,
+  })
+  return { step, apply, od_after_mm: odAfterMm }
+}
+
+function _designFoilShield(req, raw, odBeforeMm) {
+  const overlapPct = _clamp(_finiteNumber(req.overlap_pct ?? req.overlap ?? raw.foil_overlap_pct, 25), 0, 80)
+  const widthIn = _finiteNumber(req.width_in ?? raw.foil_width_in)
+  const widthMm = _finiteNumber(req.width_mm ?? raw.foil_width_mm, Number.isFinite(widthIn) && widthIn > 0 ? widthIn * 25.4 : _defaultFoilWidthIn(odBeforeMm) * 25.4)
+  const material = findNearestFoilTape({
+    partNumber: req.part_number || req.partNumber || raw.foil_part_number,
+    thicknessMil: _finiteNumber(req.thickness_mil ?? raw.foil_thickness_mil, 1.4),
+    widthMm,
+  })
+  const selectedWidthMm = Number(material?.widthMm ?? widthMm)
+  const selectedThicknessMm = _finiteNumber(material?.thicknessMm ?? req.thickness_mm, 1.4 * 0.0254)
+  const radialBuildMm = selectedThicknessMm * (1 + overlapPct / 100 * 0.25)
+  const odAfterMm = odBeforeMm + 2 * radialBuildMm
+  const step = {
+    layer: 0,
+    type: 'foil',
+    od_before_mm: round(odBeforeMm, 4),
+    od_after_mm: round(odAfterMm, 4),
+    part_number: material?.partNumber || null,
+    overlap_pct: round(overlapPct, 2),
+    width_mm: round(selectedWidthMm, 4),
+    width_in: round(selectedWidthMm / 25.4, 5),
+    thickness_mil: material?.thicknessMil ?? round(selectedThicknessMm / 0.0254, 2),
+    thickness_mm: round(selectedThicknessMm, 4),
+  }
+  const apply = foilTapeToToolLayer(material, {
+    type: 'foil',
+    label: 'Foil shield',
+    length: _finiteNumber(req.length_mm ?? raw.foil_length_mm, 152),
+    overlap: overlapPct,
+  })
+  return { step, apply, od_after_mm: odAfterMm }
+}
+
+function _designHelicalFlatwireShield(req, raw, odBeforeMm) {
+  const overlapPct = _clamp(_finiteNumber(req.overlap_pct ?? req.overlap ?? raw.helical_overlap_pct, 45), 0, 80)
+  const widthIn = _finiteNumber(req.width_in ?? raw.helical_width_in)
+  const widthMm = _finiteNumber(req.width_mm ?? raw.helical_width_mm, Number.isFinite(widthIn) && widthIn > 0 ? widthIn * 25.4 : _defaultHelicalWidthIn(odBeforeMm) * 25.4)
+  const material = findNearestSpcFlatwire({
+    partNumber: req.part_number || req.partNumber || raw.helical_part_number || raw.flatwire_part_number,
+    use: 'helical',
+    thicknessMil: _finiteNumber(req.thickness_mil ?? raw.helical_thickness_mil, 2.5),
+    widthMm,
+  })
+  const selectedWidthMm = Number(material?.widthMm ?? widthMm)
+  const selectedThicknessMm = _finiteNumber(material?.thicknessMm ?? req.thickness_mm, 2.5 * 0.0254)
+  const radialBuildMm = selectedThicknessMm * (1 + overlapPct / 100 * 0.35)
+  const odAfterMm = odBeforeMm + 2 * radialBuildMm
+  const pitchMm = _helicalPitchFromOverlap(overlapPct, selectedWidthMm)
+  const step = {
+    layer: 0,
+    type: 'flatwire',
+    od_before_mm: round(odBeforeMm, 4),
+    od_after_mm: round(odAfterMm, 4),
+    part_number: material?.partNumber || null,
+    overlap_pct: round(overlapPct, 2),
+    width_mm: round(selectedWidthMm, 4),
+    width_in: round(selectedWidthMm / 25.4, 5),
+    thickness_mil: material?.thicknessMil ?? round(selectedThicknessMm / 0.0254, 2),
+    pitch_mm: round(pitchMm, 3),
+    direction: String(req.direction || raw.helical_direction || 'S').toUpperCase().startsWith('Z') ? 'Z' : 'S',
+  }
+  const apply = spcFlatwireToToolLayer(material, {
+    type: 'flatwire',
+    label: 'SPC flatwire helical',
+    direction: step.direction,
+    length: _finiteNumber(req.length_mm ?? raw.helical_length_mm, 150),
+    width: selectedWidthMm,
+    pitch: pitchMm,
+    overlap: overlapPct,
+  })
+  return { step, apply, od_after_mm: odAfterMm }
+}
+
+function _designBraidShield(req, raw, odBeforeMm) {
+  const targetCoverage = _clamp(_finiteNumber(req.coverage_pct ?? req.coverage ?? raw.braid_coverage_pct, 92), 70, 99)
+  const angleDeg = _clamp(_finiteNumber(req.angle_deg ?? raw.braid_angle_deg, 45), 25, 70)
+  const setup = _selectBraidSetup({
+    odMm: odBeforeMm,
+    targetCoverage,
+    angleDeg,
+    carriers: _finiteNumber(req.carriers ?? raw.braid_carriers),
+    ends: _finiteNumber(req.ends_per_carrier ?? req.ends ?? raw.braid_ends_per_carrier),
+    awg: _finiteNumber(req.wire_awg ?? req.awg ?? raw.braid_wire_awg),
+  })
+  const radialBuildMm = setup.wire_diameter_mm * 1.6
+  const odAfterMm = odBeforeMm + 2 * radialBuildMm
+  const step = {
+    layer: 0,
+    type: 'braid',
+    od_before_mm: round(odBeforeMm, 4),
+    od_after_mm: round(odAfterMm, 4),
+    coverage_pct: round(setup.coverage_pct, 2),
+    braid_setup: setup,
+  }
+  const apply = {
+    type: 'braid',
+    label: 'SPC braid',
+    length: _finiteNumber(req.length_mm ?? raw.braid_length_mm, 142),
+    carriers: setup.carriers,
+    ends: setup.ends_per_carrier,
+    picks: setup.picks_per_in,
+    gauge: setup.wire_awg,
+    coverage: setup.coverage_pct,
+  }
+  return { step, apply, od_after_mm: odAfterMm }
+}
+
+function _selectBraidSetup({ odMm, targetCoverage, angleDeg, carriers, ends, awg }) {
+  const carrierPool = Number.isFinite(carriers) && carriers > 0 ? [Math.round(carriers)] : [16, 24, 32, 36, 40, 48]
+  const endPool = Number.isFinite(ends) && ends > 0 ? [Math.round(ends)] : [3, 4, 5, 6, 8]
+  const awgPool = Number.isFinite(awg) && awg > 0
+    ? [Math.round(awg)]
+    : odMm <= 1.8 ? [40, 38, 36]
+      : odMm <= 3.5 ? [38, 36, 34]
+        : [36, 34, 32]
+  const angleRad = angleDeg * Math.PI / 180
+  const odIn = odMm / 25.4
+  let best = null
+  for (const c of carrierPool) {
+    for (const e of endPool) {
+      for (const g of awgPool) {
+        const dMm = _awgDiameterMm(g)
+        const fill = _clamp((c * e * dMm) / (Math.PI * odMm * Math.sin(angleRad)), 0, 0.995)
+        const coverage = (2 * fill - fill * fill) * 100
+        const picks = (c * Math.tan(angleRad)) / Math.max(0.001, Math.PI * odIn)
+        const shortfallPenalty = coverage < targetCoverage ? (targetCoverage - coverage) * 7 : 0
+        const overshootPenalty = Math.max(0, coverage - targetCoverage) * 0.65
+        const complexityPenalty = c * 0.015 + e * 0.25 + Math.max(0, 36 - g) * 0.2
+        const score = Math.abs(coverage - targetCoverage) + shortfallPenalty + overshootPenalty + complexityPenalty
+        const candidate = {
+          carriers: c,
+          ends_per_carrier: e,
+          wire_awg: g,
+          wire_diameter_mm: round(dMm, 4),
+          braid_angle_deg: round(angleDeg, 1),
+          picks_per_in: round(picks, 1),
+          fill_factor: round(fill, 4),
+          coverage_pct: round(_clamp(coverage, 0, 99), 2),
+          target_coverage_pct: round(targetCoverage, 2),
+        }
+        if (!best || score < best.score) best = { ...candidate, score }
+      }
+    }
+  }
+  const { score, ...out } = best
+  return out
+}
+
+function _awgDiameterMm(awg) {
+  return 0.127 * Math.pow(92, (36 - Number(awg)) / 39)
+}
+
+function _defaultFoilWidthIn(odMm) {
+  if (odMm <= 1.8) return 0.0311
+  if (odMm <= 3.5) return 0.0750
+  return 0.1250
+}
+
+function _defaultHelicalWidthIn(odMm) {
+  if (odMm <= 1.8) return 0.0300
+  if (odMm <= 3.5) return 0.0600
+  return 0.0750
+}
+
+function _spiralPitchFromGap(gapPct, widthMm) {
+  return _clamp(Math.max(widthMm, 0.1) * 14 * (1 + _clamp(gapPct, 0, 28) / 100), 1, 140)
+}
+
+function _helicalPitchFromOverlap(overlapPct, widthMm) {
+  return _clamp(Math.max(widthMm, 0.1) * 10 * (1 - _clamp(overlapPct, 0, 80) / 100), 0.8, 140)
 }
 
 function computeTapeNotches(input) {

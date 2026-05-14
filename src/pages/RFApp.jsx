@@ -67,6 +67,9 @@ Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP a
 - PTFE tape overlap is always one of the standard wraps: 50% (1/2 wrap), 66.7% (2/3 wrap), or 75% (3/4 wrap). Prefer 2/3 wrap for PTFE because it reduces shrink-back; use 1/2 wrap only when the target OD requires the lower single-pass build. One 2/3 wrap builds 3 tape thicknesses, smaller than two 1/2 wraps at 4 tape thicknesses with the same tape. For cable OD ≤ 0.051", also avoid 0.0375" tape width.
 - WTM taping-head pitch set-point minimum is 0.0390 in/rev. If calculated pitch is lower, clamp the MI pitch set-point to 0.0390 and tell the engineer it is limited by the machine.
 - SPC spiral flatwire width rule: width = dielectric OD × 3.14 ÷ 8 bobbins minus 10% gap. Use 962-96001 spiral stock and snap to the nearest catalog width.
+- Shield-stack requests are part of cable-build work. If the user says first shield is SPC spiral, second shield is foil or helical flatwire, then braid, call \`design_shield_stack\` after \`design_dielectric_stack\` using the predicted dielectric OD. If the dielectric OD is already given, call \`design_shield_stack\` directly.
+- Spiral means separate SPC flatwires running around the cable with no overlap. A 10% spiral gap means each gap between flatwire 1-2, 2-3, ... 8-1 is 10% of the equal bobbin spacing. Do not describe it like PTFE overlap.
+- For shield materials, use real catalog families: 962-96001 for SPC spiral bobbin stock, 962-96004 for helical flatwire stock, 962-96003 for ALK foil. For braid, report total carriers, ends per carrier, picks/in, AWG, and predicted optical coverage.
 - If the user asks for a blank manufacturing instruction / MI template, call \`generate_blank_mi_template\`; it returns the shop MI-ST962-032-130 .xlsx template as a downloadable Excel workbook.
 - When \`design_dielectric_stack\` is used for a factory build, the tool returns a downloadable filled shop MI .xlsx based on MI-ST962-032-130. Tell the user to download it from the tool card; it fills the Taping (3-Bay) sheets with selected Material Library tape, lay direction, pitch set-point, tension, and OD after each wrap.
 - Manufacturing rule (enforced by the tool): if conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm). The tool reports the clamp in its notes — surface that fact to the user so they understand why the recipe uses thinner tape with more passes.
@@ -214,6 +217,7 @@ const RF_TOOL_TO_SECTION = {
   lookup_material_library:  { id: 'materials', label: 'Material Library' },
   generate_blank_mi_template:{ id: 'materials', label: 'Material Library' },
   design_dielectric_stack:  { id: 'stack', label: 'RF Stack Lab' },
+  design_shield_stack:      { id: 'stack', label: 'RF Stack Lab' },
   compute_tape_notches:     { id: 'stack', label: 'RF Stack Lab' },
   connector_launch_analyzer:{ id: 'tools', label: 'Tools' },
   shielding_effectiveness_predictor:{ id: 'tools', label: 'Tools' },
