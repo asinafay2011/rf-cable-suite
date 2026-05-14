@@ -145,6 +145,36 @@ const PRESETS = {
     jacketOD: 2.642,
     freqGHz: 40,
   },
+  miSt962032200: {
+    label: 'MI-ST962-032-200',
+    conductorOD: 1.3208,
+    ptfeLayers: 4,
+    ptfeMil: 5,
+    ptfeWidth: 0.813,
+    ptfeOverlap: 68.75,
+    ptfeDensity: 0.9,
+    suckout: 2,
+    ptfeStack: [
+      { passes: 1, partNumber: '962-96000-05L0250', mil: 5, width: 0.635, overlap: 66.7, density: 0.7, direction: 'Z', pitchSetpointMm: 2.4384, ODAfterMm: 1.7780, effectiveEps: 1.6170 },
+      { passes: 1, partNumber: '962-96000-05H0250', mil: 5, width: 0.635, overlap: 66.7, density: 1.6, direction: 'S', pitchSetpointMm: 2.2860, ODAfterMm: 2.4384, effectiveEps: 1.6170 },
+      { passes: 1, partNumber: '962-96000-05L0375', mil: 5, width: 0.9525, overlap: 75, density: 0.7, direction: 'Z', pitchSetpointMm: 2.4003, ODAfterMm: 3.1750, effectiveEps: 1.6170 },
+      { passes: 1, partNumber: '962-96000-04H0375', mil: 4, width: 0.9525, overlap: 66.7, density: 1.6, direction: 'Z', pitchSetpointMm: 3.3909, ODAfterMm: 3.6830, effectiveEps: 1.6170 },
+    ],
+    shieldStack: [
+      { type: 'spiral', partNumber: '962-96001-SPC-2.5-0500', label: 'SPC spiral · sheet 4', direction: 'S', length: 155, width: 1.27, pitch: 2.7, bobbins: 8, gap: 14.5, dieSizeIn: 0.149, ODAfterMm: 3.8608 },
+      { type: 'foil', partNumber: '962-96003-1.4-0250', label: 'Foil in · sheet 4', length: 152, overlap: 50, pitch: 3.9624, tension: 5.5, ODAfterMm: 4.0386 },
+      { type: 'braid', label: 'Niehoff braid · sheet 10', length: 142, carriers: 16, ends: 10, picks: 11.7, gauge: 38, coverage: 95 },
+    ],
+    spiralWidth: 1.27,
+    spiralGap: 14.5,
+    spiralBobbins: 8,
+    helicalWidth: 0.19,
+    helicalOverlap: 45,
+    foilOverlap: 50,
+    braidCoverage: 95,
+    jacketOD: 4.3942,
+    freqGHz: 30,
+  },
 }
 
 const PTFE_SOLID_DENSITY = 2.15
@@ -1597,7 +1627,10 @@ function ShieldLayerCard({ layer, index, unitMode, dielectricOD, onUpdate, onRem
                 const material = findNearestFoilTape({ partNumber: event.target.value })
                 onUpdate({
                   ...foilTapeToLayer(material),
+                  label: layer.label,
                   overlap: layer.overlap,
+                  pitch: layer.pitch,
+                  tension: layer.tension,
                 })
               }}
               style={S.select}
@@ -1611,7 +1644,9 @@ function ShieldLayerCard({ layer, index, unitMode, dielectricOD, onUpdate, onRem
           </label>
           <DimensionSlider label="Foil length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unitMode={unitMode} accent={accent} />
           <DimensionSlider label="Foil width" value={layer.width || 0.79} setValue={(value) => onUpdate({ width: value })} min={0.1} max={6} step={0.01} unitMode={unitMode} accent={accent} />
+          <DimensionSlider label="Foil pitch" value={Number(layer.pitch) || 3.9624} setValue={(value) => onUpdate({ pitch: value })} min={0.5} max={20} step={0.01} unitMode={unitMode} accent={C.teal} />
           <Slider label="Overlap" value={layer.overlap} setValue={(value) => onUpdate({ overlap: value })} min={0} max={70} step={1} unit="%" accent={accent} />
+          <Slider label="Tension" value={Number(layer.tension) || 5.5} setValue={(value) => onUpdate({ tension: value })} min={0} max={12} step={0.5} unit=" N" accent={C.sky} />
         </div>
       )}
 
@@ -1619,8 +1654,8 @@ function ShieldLayerCard({ layer, index, unitMode, dielectricOD, onUpdate, onRem
         <div style={S.ptfeLayerGrid}>
           <DimensionSlider label="Braid length" value={layer.length} setValue={(value) => onUpdate({ length: value })} min={80} max={230} step={1} unitMode={unitMode} accent={accent} />
           <Slider label="Carriers" value={layer.carriers} setValue={(value) => onUpdate({ carriers: Math.round(value) })} min={8} max={32} step={2} accent={accent} />
-          <Slider label="Ends" value={layer.ends} setValue={(value) => onUpdate({ ends: Math.round(value) })} min={2} max={8} step={1} accent={accent} />
-          <Slider label="Picks" value={layer.picks} setValue={(value) => onUpdate({ picks: value })} min={12} max={72} step={1} unit="/in" accent={C.sky} />
+          <Slider label="Ends" value={layer.ends} setValue={(value) => onUpdate({ ends: Math.round(value) })} min={2} max={12} step={1} accent={accent} />
+          <Slider label="Picks" value={layer.picks} setValue={(value) => onUpdate({ picks: value })} min={8} max={72} step={0.1} unit="/in" accent={C.sky} />
           <Slider label="Gauge" value={layer.gauge} setValue={(value) => onUpdate({ gauge: value })} min={30} max={42} step={1} unit=" AWG" accent={C.foil} />
           <Slider label="Coverage" value={layer.coverage} setValue={(value) => onUpdate({ coverage: value })} min={65} max={99} step={1} unit="%" accent={accent} />
         </div>
