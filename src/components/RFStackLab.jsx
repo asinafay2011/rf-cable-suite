@@ -147,6 +147,7 @@ const PRESETS = {
   },
   miSt962032200: {
     label: 'MI-ST962-032-200',
+    previewStage: 'spiral',
     conductorOD: 1.3208,
     ptfeLayers: 4,
     ptfeMil: 5,
@@ -787,6 +788,7 @@ function useRfStackModel(config) {
           const signature = JSON.stringify({
             ptfeStack: nextConfig.ptfeStack,
             shieldStack: nextConfig.shieldStack,
+            previewStage: nextConfig.previewStage,
             frame: activeAnimation ? Math.floor(performance.now() / 33) : 'done',
           })
           if (!force && runtimeRef.current.lastSignature === signature) return
@@ -827,7 +829,10 @@ function useRfStackModel(config) {
           }))
 
           const stack = Array.isArray(nextConfig.ptfeStack) ? nextConfig.ptfeStack : []
-          const shieldStack = Array.isArray(nextConfig.shieldStack) ? nextConfig.shieldStack : []
+          const rawShieldStack = Array.isArray(nextConfig.shieldStack) ? nextConfig.shieldStack : []
+          const previewStage = nextConfig.previewStage
+          const previewIndex = previewStage ? rawShieldStack.findIndex((layer) => layer.type === previewStage) : -1
+          const shieldStack = previewIndex >= 0 ? rawShieldStack.slice(0, previewIndex + 1) : rawShieldStack
           stack.forEach((layer, layerIndex) => {
             const passes = clamp(Math.round(layer.passes || 1), 1, 12)
             const width = clamp(Number(layer.width) || 6, 2, 14)
@@ -1011,7 +1016,8 @@ function useRfStackModel(config) {
               const slotAngle = (Math.PI * 2) / Math.max(1, bobbins)
               const bandAngle = slotAngle * (1 - gap / 100)
               const gapAngle = Math.max(0, slotAngle - bandAngle)
-              const turns = clamp(((x1 - x0) * 13) / Math.max(1, pitch), 1.2, 18)
+              const visualPitch = Math.max(1, pitch * Math.max(1, bobbins))
+              const turns = clamp(((x1 - x0) * 13) / visualPitch, 1.2, 9)
               for (let bobbin = 0; bobbin < bobbins; bobbin++) {
                 const phase = (Math.PI * 2 * bobbin) / bobbins + shieldIndex * 0.33
                 dynamicGroup.add(makeSpiralBandMesh({
@@ -1686,7 +1692,8 @@ export default function RFStackLab() {
   const modelConfig = useMemo(() => ({
     ptfeStack,
     shieldStack,
-  }), [ptfeStack, shieldStack])
+    previewStage: activePreset ? PRESETS[activePreset]?.previewStage : '',
+  }), [activePreset, ptfeStack, shieldStack])
   const { mountRef, status } = useRfStackModel(modelConfig)
 
   const setParam = (key) => (value) => {
