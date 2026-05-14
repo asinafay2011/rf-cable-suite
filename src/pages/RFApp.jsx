@@ -6,9 +6,11 @@ import FloatingAgent from "../components/FloatingAgent.jsx";
 import { RF_TOOLS, dispatchRfTool } from "../components/rfTools.js";
 import CustomCablesPanel from "../components/CustomCablesPanel.jsx";
 import CompanyDefaultsPanel from "../components/CompanyDefaultsPanel.jsx";
+import ShopMemoryPanel from "../components/ShopMemoryPanel.jsx";
 import RFStackLab from "../components/RFStackLab.jsx";
 import MaterialLibrary from "../components/MaterialLibrary.jsx";
 import { useIsMobile } from "../components/useIsMobile.js";
+import { formatActiveShopRulesForPrompt, useShopMemory } from "../components/shopMemory.js";
 import {
   RF_CABLES as CABLES,
   RF_CATEGORIES as CATEGORIES,
@@ -53,6 +55,8 @@ Multi-tool orchestration (chain calls in one turn whenever the engineer's questi
 - "Save this datasheet" → \`add_cable\`. If the spec implies factory standardisation, also \`set_company_defaults\`.
 - ALWAYS call \`get_company_defaults\` first when the user asks about cost, BOM, or picking materials. Use the values you read.
 - When the user states a stable factory fact ("Cu is $11/kg here", "we always use SPC"), call \`set_company_defaults\` immediately to persist it.
+- Shop-process self-learning is human-approved. When the engineer corrects you or says a reusable shop rule ("always", "never", "minimum", "prefer", "learn this", "remember this") about MI, PTFE taping, WTM settings, spiral shields, material selection, or QC, call \`propose_shop_rule\`. Do not treat proposed rules as active until they are approved in Shop Memory.
+- Call \`get_shop_memory\` when shop-specific process rules could change the answer. Approved Shop Memory rules override generic practice unless they conflict with physics or safety; pending rules are informational only.
 - Prefer parallel tool calls (multiple tool_use blocks in one turn) when calls are independent. Chain sequentially only when one feeds the next.
 
 Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP and Y Ω"):
@@ -1179,6 +1183,17 @@ export default function RFCableSuite() {
     try { return localStorage.getItem("rf-model") || "claude-sonnet-4-6"; } catch { return "claude-sonnet-4-6"; }
   });
   useEffect(() => { try { localStorage.setItem("rf-model", model); } catch {} }, [model]);
+  const shopMemory = useShopMemory();
+  const rfSystemPromptWithMemory = useMemo(() => {
+    const activeRules = formatActiveShopRulesForPrompt();
+    const pendingCount = shopMemory.pending_rules?.length || 0;
+    return `${RF_SYSTEM_PROMPT}
+
+Approved Shop Memory rules (engineer-approved, stored on this device):
+${activeRules || '- No approved shop rules saved yet.'}
+
+Pending Shop Memory rules: ${pendingCount}. Pending rules are not active; tell the engineer to approve them in the Shop Memory panel before relying on them.`;
+  }, [shopMemory]);
 
   const settingsCtx = { units, setUnits, showTools, setShowTools, ttsEnabled, setTtsEnabled, model, setModel };
 
@@ -1569,6 +1584,7 @@ export default function RFCableSuite() {
           {tab === "library" && (
             <>
               {!showingLibraryDetail && <CompanyDefaultsPanel accentColor="#d97706" />}
+              {!showingLibraryDetail && <ShopMemoryPanel accentColor="#d97706" />}
               {!showingLibraryDetail && <CustomCablesPanel side="rf" accentColor="#d97706" />}
               <LibraryView activeCable={activeCable} loadIntoDesign={loadCableIntoDesign} askAboutCable={askAboutCable} setActiveCable={setActiveCable} comparedCables={comparedCables} toggleCompare={toggleCompare} onPrint={(id) => setPrintSetup({ type: "cable", id })} isMobile={isMobile} />
             </>
@@ -1594,7 +1610,7 @@ export default function RFCableSuite() {
         accent="#d97706"
         accentBright="#fbbf24"
         label="◆ RF · AGENT"
-        systemPrompt={RF_SYSTEM_PROMPT}
+        systemPrompt={rfSystemPromptWithMemory}
         starters={RF_STARTERS}
         contextStarters={rfContextStarters}
         roleDescription="Senior RF cable engineer."

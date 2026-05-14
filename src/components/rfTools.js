@@ -1,6 +1,7 @@
 // Tools exposed to the RF agent. Pure-math + small DBs, client-side dispatch.
 import { getCustomRfCables, addCustomRfCable, deleteCustomRfCable } from './customCableStore.js'
 import { getCompanyDefaults, setCompanyDefaults, resetCompanyDefaults } from './companyDefaults.js'
+import { getShopMemory, proposeShopRule } from './shopMemory.js'
 import { RF_CABLES, RF_CATEGORIES, getRfCableSourceMeta } from '../data/rfCableLibrary.js'
 import {
   FOIL_TAPE_MATERIALS,
@@ -870,6 +871,30 @@ export const RF_TOOLS = [
     },
   },
   {
+    name: 'get_shop_memory',
+    description:
+      'Read approved and pending shop-process rules stored on this device. Call this before applying learned in-house process rules, especially for MI, PTFE taping, spiral shields, WTM settings, or material-selection questions.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'propose_shop_rule',
+    description:
+      'Create a pending shop rule from an engineer correction or explicit "learn/remember this" instruction. This does NOT activate the rule; the engineer must approve it in Shop Memory before it affects future answers. Use for process rules, machine limits, MI layout mappings, preferred wrap/tension/pitch practices, and never/always shop constraints.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short label, e.g. "WTM minimum taping pitch".' },
+        rule: { type: 'string', description: 'The exact reusable rule in plain language.' },
+        category: { type: 'string', description: 'process | ptfe_taping | wtm_taping | mi_export | spc_spiral | material_selection | qc' },
+        applies_to: { type: 'array', items: { type: 'string' }, description: 'Tags such as ptfe, mi, taping, spiral, wtm.' },
+        reason: { type: 'string', description: 'Why the rule matters or what correction caused it.' },
+        source_message: { type: 'string', description: 'Short quote or paraphrase of the engineer correction.' },
+        confidence: { type: 'number', description: '0..1 confidence that this should become a reusable shop rule.' },
+      },
+      required: ['title', 'rule'],
+    },
+  },
+  {
     name: 'design_dielectric_stack',
     description:
       'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Default PTFE wrap is 2/3 to reduce shrink-back; use 1/2 only when the target OD needs the lower single-pass build. WTM taping-head pitch set-point is never below 0.0390 in/rev. Returns a complete layer recipe + predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the RF Stack Lab tab + a filled shop MI .xlsx based on MI-ST962-032-130, with tape part numbers, OD after tape, pitch set-point, and tension filled into the Taping (3-Bay) sheets. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
@@ -1474,6 +1499,12 @@ export async function dispatchRfTool(name, input) {
       case 'set_company_defaults': {
         const updated = setCompanyDefaults(input || {})
         return { ok: true, defaults: updated, note: 'Saved to browser localStorage. Future sessions will see these values.' }
+      }
+      case 'get_shop_memory': {
+        return getShopMemory()
+      }
+      case 'propose_shop_rule': {
+        return proposeShopRule(input || {})
       }
       case 'whatif_panel': {
         const { title, sliders, outputs, annotation } = input || {}
