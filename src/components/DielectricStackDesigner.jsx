@@ -9,6 +9,7 @@ import {
   WTM_MIN_TAPING_PITCH_IN,
   WTM_MIN_TAPING_PITCH_MM,
   normalizePtfeWrap,
+  ptfeShopPitchSetpoint,
   recommendPtfeWrapForCable,
 } from '../data/materialLibrary.js'
 
@@ -24,8 +25,7 @@ import {
 //   • Per-layer εᵣ from PTFE density via Looyenga (3-component air mix).
 //   • Final VP = 1/√εᵣ_eff and Z₀ = (60/√εᵣ_eff)·ln(D/d).
 //
-// Plus a WTM pitch calculator: pitch (mm/rev) = max(W × (1 - overlap), machine minimum).
-// Optional helix-angle compensation for long-pitch wraps.
+// Plus a WTM pitch calculator calibrated from shop MI pitch set-points.
 //
 // References
 // ──────────
@@ -498,7 +498,11 @@ export default function DielectricStackDesigner() {
       <PitchCalculator defaultWidth={layers[0]?.tape_width_mm || 0.635} cableOD={computed.finalOD_mm || conductorOD_mm} />
 
       {/* Bragg notch detector */}
-      <NotchDetector layers={layers} VP={computed.VP || 0.7} hasStack={computed.stack.length > 0} />
+      <NotchDetector
+        layers={computed.stack.map((s) => ({ ...s.layer, OD_before_mm: s.OD_before_mm }))}
+        VP={computed.VP || 0.7}
+        hasStack={computed.stack.length > 0}
+      />
 
       {/* Physics callouts */}
       <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: 14 }}>
@@ -510,7 +514,7 @@ export default function DielectricStackDesigner() {
             <p><strong style={{ color: COLORS.text }}>εᵣ from density (Looyenga):</strong> εᵣ_eff^⅓ = vf·εᵣ_PTFE^⅓ + (1−vf), where vf = ρ/ρ_solid. ρ_solid = 2.15 g/cm³, εᵣ_solid = 2.10. So 1.6 g/cm³ → εᵣ ≈ {densityToEps(1.6).toFixed(3)}; 0.7 g/cm³ → εᵣ ≈ {densityToEps(0.7).toFixed(3)}.</p>
             <p><strong style={{ color: COLORS.text }}>Layered εᵣ_eff (Wadell):</strong> εᵣ_eff = ln(D/d) / Σᵢ ln(rᵢ₊₁/rᵢ)/εᵣ,ᵢ. Phase velocity VP = 1/√εᵣ_eff. Z₀ = (60/√εᵣ_eff)·ln(D/d).</p>
             <p><strong style={{ color: COLORS.text }}>OD per pass:</strong> ΔOD = 2 · n_overlap · t_tape · τ. n_overlap = 2 (½) / 3 (⅔) / 4 (¾). τ ∈ [0.7, 1.0] is the tension factor — high τ = light tension (full thickness retained); low τ = WTM puts the tape under tension and squeezes it thinner.</p>
-            <p><strong style={{ color: COLORS.text }}>Pitch (WTM lead screw):</strong> P = max(W · (1 − overlap), 0.0390 in/rev). PTFE tape uses the shop settings {PTFE_WRAP_PRESETS.map((wrap) => `${wrap.percent}% (${wrap.key})`).join(', ')}; when the geometry asks for less than 0.0390 in/rev, the WTM head minimum wins. The compensated pitch accounts for helix angle on large-OD cables (≪5% correction for typical RF coax).</p>
+            <p><strong style={{ color: COLORS.text }}>Pitch (WTM lead screw):</strong> Pitch is OD-based and calibrated from the shop MI-ST962-032-130 / 032-200 set-points, then clamped to the 0.0390 in/rev WTM minimum. PTFE tape uses the shop settings {PTFE_WRAP_PRESETS.map((wrap) => `${wrap.percent}% (${wrap.key})`).join(', ')}.</p>
             <p style={{ color: COLORS.textMuted }}>Note: Looyenga is one of several mixing rules. For 0.5–1.0 g/cm³ foamed PTFE, manufacturer εᵣ data typically lies within ±0.05 of the Looyenga prediction. Calibrate against your in-house measurement if needed.</p>
             <p><strong style={{ color: COLORS.text }}>Small-conductor rule:</strong> for inner conductor OD ≤ 0.091&quot; ({SMALL_CABLE_MAX_OD_MM.toFixed(3)} mm), tape thickness must be ≤ {SMALL_CABLE_MAX_TAPE_MIL} mil ({SMALL_CABLE_MAX_TAPE_MM.toFixed(3)} mm). Thicker tape can&apos;t conform to the tight radius — it wrinkles, opens air gaps under the wrap, and produces inconsistent OD build. Use more passes of thinner tape instead.</p>
             <p><strong style={{ color: COLORS.text }}>Small-cable taping:</strong> for cable OD ≤ {SMALL_CABLE_TAPE_OD_IN.toFixed(3)}&quot; ({SMALL_CABLE_TAPE_OD_MM.toFixed(3)} mm), avoid {SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)}&quot; ({SMALL_CABLE_MAX_PTFE_WIDTH_MM.toFixed(3)} mm) PTFE tape and wider. Default to 2/3 wrap to reduce shrink-back; use 1/2 wrap only when the lower OD build is the target. A single 2/3 wrap builds 3 tape thicknesses, still smaller than two 1/2 wraps at 4 tape thicknesses.</p>
@@ -916,28 +920,20 @@ function PitchCalculator({ defaultWidth, cableOD }) {
   const { unit } = useUnit()
   const [width, setWidth] = useState(defaultWidth || 0.635)
   const [overlap, setOverlap] = useState('2/3')
-  const [compensate, setCompensate] = useState(false)
+  const [compensate, setCompensate] = useState(true)
 
   const overlapFraction = OVERLAP_PRESETS[normalizePtfeWrap(overlap).key]?.fraction ?? 0.5
 
-  // Simple: P = W × (1 − overlap)
+  // Legacy width-only pitch.
   const pitchSimple = width * (1 - overlapFraction)
 
-  // Compensated: solve P = (1−f)·W·√(P²+π²D²)/(πD)  →  iterate.
-  // ⇔  P² · π² D² = (1−f)² · W² · (P² + π² D²)
-  // ⇔  P² · (π² D² − (1−f)² W²) = (1−f)² W² · π² D²
-  // ⇔  P² = (1−f)² W² π² D² / (π² D² − (1−f)² W²)
-  const pitchCompensated = (() => {
-    if (!compensate || !cableOD || cableOD <= 0) return pitchSimple
-    const D = cableOD
-    const f = overlapFraction
-    const num = Math.pow((1 - f) * width * Math.PI * D, 2)
-    const den = Math.pow(Math.PI * D, 2) - Math.pow((1 - f) * width, 2)
-    if (den <= 0) return pitchSimple
-    return Math.sqrt(num / den)
-  })()
+  const pitchCalibrated = ptfeShopPitchSetpoint({
+    cableOdMm: cableOD,
+    tapeWidthMm: width,
+    overlap,
+  }).calculatedPitchMm || pitchSimple
 
-  const requestedPitch = compensate ? pitchCompensated : pitchSimple
+  const requestedPitch = compensate ? pitchCalibrated : pitchSimple
   const pitch = Math.max(WTM_MIN_TAPING_PITCH_MM, requestedPitch)
   const pitchLimited = requestedPitch > 0 && requestedPitch < WTM_MIN_TAPING_PITCH_MM
   const turnsPerCm = pitch > 0 ? 10 / pitch : 0
@@ -980,7 +976,7 @@ function PitchCalculator({ defaultWidth, cableOD }) {
           </div>
         </div>
         <div>
-          <Label>Helix compensation</Label>
+          <Label>Shop MI calibration</Label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
             <button
               onClick={() => setCompensate(!compensate)}
@@ -993,7 +989,7 @@ function PitchCalculator({ defaultWidth, cableOD }) {
             </span>
           </div>
           <div style={{ fontSize: 9, color: COLORS.textMuted, marginTop: 4, lineHeight: 1.4 }}>
-            On: solve implicit P from W·cos(α). Off: P = W·(1−overlap).
+            On: use 032-130/032-200 OD-based pitch. Off: old width-only estimate.
           </div>
         </div>
       </div>
@@ -1008,12 +1004,12 @@ function PitchCalculator({ defaultWidth, cableOD }) {
         <Stat label="Turns / cm" value={turnsPerCm.toFixed(2)} />
         <Stat label="Turns / inch" value={turnsPerInch.toFixed(2)} />
         <Stat label="Helix angle (from axis)" value={`${(90 - helixAngleDeg).toFixed(1)}°`} />
-        {compensate && Math.abs(pitchCompensated - pitchSimple) > 0.001 && (
+        {compensate && Math.abs(pitchCalibrated - pitchSimple) > 0.001 && (
           <Stat
-            label="Δ vs simple"
+            label="Delta vs width-only"
             value={unit === 'inch'
-              ? `${pitchCompensated > pitchSimple ? '+' : ''}${((pitchCompensated - pitchSimple) / 25.4).toFixed(4)} in`
-              : `${pitchCompensated > pitchSimple ? '+' : ''}${(pitchCompensated - pitchSimple).toFixed(3)} mm`}
+              ? `${pitchCalibrated > pitchSimple ? '+' : ''}${((pitchCalibrated - pitchSimple) / 25.4).toFixed(4)} in`
+              : `${pitchCalibrated > pitchSimple ? '+' : ''}${(pitchCalibrated - pitchSimple).toFixed(3)} mm`}
             color={COLORS.teal}
           />
         )}
@@ -1046,7 +1042,7 @@ function PitchCalculator({ defaultWidth, cableOD }) {
 
 // ─────────────────────────────────────────────────────────
 // Bragg notch detector — predicts suckouts from periodic tape wraps
-// f_n = n · c · VP / (2 · P_axial),  P_axial = max(W · (1 − overlap), WTM min)
+// f_n = n · c · VP / (2 · P_axial), with P_axial from shop MI calibration.
 // ─────────────────────────────────────────────────────────
 function NotchDetector({ layers, VP, hasStack }) {
   const { unit } = useUnit()
@@ -1059,9 +1055,14 @@ function NotchDetector({ layers, VP, hasStack }) {
     const perLayer = layers.map((L, i) => {
       const W = L.tape_width_mm || 0.635
       const ovr = OVERLAP_PRESETS[L.overlap] || OVERLAP_PRESETS['1/2']
-      const f_overlap = ovr.fraction
-      const requestedPitchMm = W * (1 - f_overlap)
-      const pitch_mm = Math.max(WTM_MIN_TAPING_PITCH_MM, requestedPitchMm)
+      const pitchInfo = ptfeShopPitchSetpoint({
+        cableOdMm: L.OD_before_mm,
+        tapeWidthMm: W,
+        overlap: L.overlap,
+        density: L.density,
+      })
+      const requestedPitchMm = pitchInfo.calculatedPitchMm || W * (1 - ovr.fraction)
+      const pitch_mm = pitchInfo.pitchMm || Math.max(WTM_MIN_TAPING_PITCH_MM, requestedPitchMm)
       const harmonics = []
       for (let n = 1; n <= nHarmonics; n++) {
         if (pitch_mm <= 0) break

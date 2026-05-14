@@ -1,6 +1,6 @@
 import JSZip from 'jszip'
 import shopMiTemplateUrl from '../assets/templates/MI-ST962-032-130.xlsx?url'
-import { WTM_MIN_TAPING_PITCH_IN } from './materialLibrary.js'
+import { WTM_MIN_TAPING_PITCH_IN, ptfeShopPitchSetpoint } from './materialLibrary.js'
 
 const INCH_TO_MM = 25.4
 const SHOP_MI_TEMPLATE_URL = shopMiTemplateUrl
@@ -311,10 +311,16 @@ export function buildPtfeMiEntries({ conductorOdMm, layers, overlap, tensionN = 
     const overlapLayers = Math.max(1, Math.round(1 / Math.max(0.05, 1 - overlapFraction(overlapMode))))
     const radialBuildMm = tapeThicknessMm * overlapLayers * tensionFactor
     const widthIn = Number(layer.tape_width_in || (layer.tape_width_mm ? layer.tape_width_mm / INCH_TO_MM : 0))
-    const calculatedPitchIn = widthIn > 0 ? widthIn * (1 - overlapFraction(overlapMode)) / Math.max(0.2, tensionFactor) : 0
-    const pitchIn = calculatedPitchIn > 0 ? Math.max(WTM_MIN_TAPING_PITCH_IN, calculatedPitchIn) : 0
-
     for (let pass = 0; pass < passes; pass++) {
+      const odBeforeMm = 2 * radiusMm
+      const pitchInfo = ptfeShopPitchSetpoint({
+        cableOdMm: odBeforeMm,
+        tapeWidthIn: widthIn,
+        overlap: overlapMode,
+        densityCode: layer.density_code || layer.densityCode,
+        density: layer.density,
+        partNumber: layer.part_number || layer.partNumber,
+      })
       radiusMm += radialBuildMm
       entries.push({
         pass: entries.length + 1,
@@ -324,9 +330,9 @@ export function buildPtfeMiEntries({ conductorOdMm, layers, overlap, tensionN = 
         widthIn,
         direction: layDirection(layerIndex),
         directionLetter: directionLetter(layerIndex),
-        pitchIn,
-        calculatedPitchIn,
-        pitchClamped: calculatedPitchIn > 0 && calculatedPitchIn < WTM_MIN_TAPING_PITCH_IN,
+        pitchIn: pitchInfo.pitchIn,
+        calculatedPitchIn: pitchInfo.calculatedPitchIn,
+        pitchClamped: pitchInfo.pitchLimited,
         minPitchIn: WTM_MIN_TAPING_PITCH_IN,
         overlapText: overlapText(overlapMode),
         tensionN,

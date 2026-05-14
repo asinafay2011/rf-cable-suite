@@ -13,6 +13,7 @@ import {
   ptfeWrapLayers,
   ptfeWrapPercent,
   ptfeTapeToLayer,
+  ptfeShopPitchSetpoint,
   recommendPtfeWrapForCable,
   spiralFlatwireWidthFromDielectricOd,
   spcFlatwireToLayer,
@@ -1899,11 +1900,18 @@ export default function RFStackLab() {
       : spiralCoverageGapFromWidth(spiralWidth, dielectricOD, spiralBobbins)
     const spiralPitchMm = Number(spiralLayer?.pitch ?? spiralPitchFromGap(spiralGapPct, spiralWidth))
     const ptfeNotches = layerBuilds.map((layer, index) => {
-      const layerOD = params.conductorOD + 2 * layerBuilds.slice(0, index + 1).reduce((sum, item) => sum + item.radial, 0)
+      const layerOD = params.conductorOD + 2 * layerBuilds.slice(0, index).reduce((sum, item) => sum + item.radial, 0)
       const pitchOverride = Number(layer.pitchSetpointMm ?? layer.pitch_setpoint_mm ?? layer.pitch_mm ?? (layer.pitch_setpoint_in != null ? Number(layer.pitch_setpoint_in) * MM_PER_IN : NaN))
       const pitch = Number.isFinite(pitchOverride) && pitchOverride > 0
         ? pitchOverride
-        : pitchFrom(layer.width, layer.overlap, layerOD, 1)
+        : (ptfeShopPitchSetpoint({
+          cableOdMm: layerOD,
+          tapeWidthMm: layer.width,
+          overlap: layer.overlap,
+          densityCode: layer.densityCode,
+          density: layer.density,
+          partNumber: layer.partNumber,
+        }).pitchMm || pitchFrom(layer.width, layer.overlap, layerOD, 1))
       return {
         id: layer.id,
         label: `L${index + 1} ${layer.direction}`,
@@ -1913,7 +1921,11 @@ export default function RFStackLab() {
         direction: layer.direction,
       }
     })
-    const pitchTape = ptfeNotches[0]?.pitch || pitchFrom(summary.avgWidth, summary.avgOverlap, dielectricOD, 1)
+    const pitchTape = ptfeNotches[0]?.pitch || (ptfeShopPitchSetpoint({
+      cableOdMm: params.conductorOD,
+      tapeWidthMm: summary.avgWidth,
+      overlap: summary.avgOverlap,
+    }).pitchMm || pitchFrom(summary.avgWidth, summary.avgOverlap, dielectricOD, 1))
     const tapeNotch = ptfeNotches.length ? Math.min(...ptfeNotches.map((item) => item.freq)) : notchGHz(pitchTape, vp)
     const spiralGap = -Math.abs(spiralGapPct)
     const pitchSpiral = spiralLayer ? Math.max(0.01, spiralPitchMm / Math.max(1, spiralBobbins)) : pitchFrom(spiralWidth, spiralGap, dielectricOD + 0.25, spiralBobbins)

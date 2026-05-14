@@ -14,6 +14,7 @@ import {
   findPtfeTapeByPart,
   findSpcFlatwireByPart,
   ptfeTapeToToolLayer,
+  ptfeShopPitchSetpoint,
   foilTapeToToolLayer,
   normalizePtfeWrap,
   ptfeWrapFraction,
@@ -902,7 +903,7 @@ export const RF_TOOLS = [
   {
     name: 'design_dielectric_stack',
     description:
-      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Default PTFE wrap is 2/3 to reduce shrink-back; use 1/2 only when the target OD needs the lower single-pass build. WTM taping-head pitch set-point is never below 0.0390 in/rev. Returns a complete layer recipe + predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the RF Stack Lab tab + a filled shop MI .xlsx based on MI-ST962-032-130, with tape part numbers, OD after tape, pitch set-point, and tension filled into the Taping (3-Bay) sheets. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
+      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Default PTFE wrap is 2/3 to reduce shrink-back; use 1/2 only when the target OD needs the lower single-pass build. WTM taping pitch is OD-based and calibrated from MI-ST962-032-130 / 032-200, then clamped to the 0.0390 in/rev minimum. Returns a complete layer recipe + predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the RF Stack Lab tab + a filled shop MI .xlsx based on MI-ST962-032-130, with tape part numbers, OD after tape, pitch set-point, and tension filled into the Taping (3-Bay) sheets. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
     input_schema: {
       type: 'object',
       properties: {
@@ -964,12 +965,12 @@ export const RF_TOOLS = [
   {
     name: 'compute_tape_notches',
     description:
-      'Predict Bragg suckout (notch) frequencies caused by a tape-wrapped dielectric. Uses f_n = n · c · VP / (2 · P) where P is the WTM pitch (axial period of the tape wrap), clamped to the 0.0390 in/rev taping-head minimum. When multiple layers are stacked at the same pitch, the notch deepens; different pitches produce separate notches. Pass the existing layer stack to forecast which frequencies to watch on the VNA.',
+      'Predict Bragg suckout (notch) frequencies caused by a tape-wrapped dielectric. Uses f_n = n · c · VP / (2 · P) where P is the OD-based WTM pitch set-point calibrated from shop MI data and clamped to the 0.0390 in/rev taping-head minimum. When multiple layers are stacked at the same pitch, the notch deepens; different pitches produce separate notches. Pass the existing layer stack to forecast which frequencies to watch on the VNA.',
     input_schema: {
       type: 'object',
       properties: {
         vp:         { type: 'number', description: 'Effective velocity factor of the cable (0..1). Use the VP predicted from the dielectric stack.' },
-        layers:     { type: 'array',  description: 'Array of {tape_width_mm, overlap} (overlap = "butt"/"1/2"/"2/3"/"3/4" or numeric fraction 0..0.95).' },
+        layers:     { type: 'array',  description: 'Array of {tape_width_mm, overlap, OD_before_mm?, density_code?} (overlap = "butt"/"1/2"/"2/3"/"3/4" or numeric fraction 0..0.95).' },
         max_freq_ghz: { type: 'number', description: 'Highest frequency to scan (default 40 GHz).' },
         n_harmonics:  { type: 'number', description: 'Number of Bragg harmonics per pitch to report (default 3).' },
       },
@@ -1751,9 +1752,15 @@ async function designDielectricStack(input) {
   const ovr = overlap
   const n_overlap = _overlapLayers(ovr)
   const t_per_pass = tape_thickness_mm * n_overlap * tension_factor
-  const requestedPitchMm = tape_width_mm * (1 - _overlapFraction(ovr)) / Math.max(0.2, tension_factor)
-  const pitchSetpointMm = requestedPitchMm > 0 ? Math.max(WTM_MIN_TAPING_PITCH_MM, requestedPitchMm) : 0
-  const pitchLimitedByWtm = requestedPitchMm > 0 && requestedPitchMm < WTM_MIN_TAPING_PITCH_MM
+  const initialPitch = ptfeShopPitchSetpoint({
+    cableOdMm: d,
+    tapeWidthMm: tape_width_mm,
+    overlap: ovr,
+    densityCode: baseDensityCode,
+  })
+  const requestedPitchMm = initialPitch.calculatedPitchMm
+  const pitchSetpointMm = initialPitch.pitchMm
+  const pitchLimitedByWtm = initialPitch.pitchLimited
   if (t_per_pass <= 0) throw new Error('Per-pass thickness is zero.')
 
   // Split target dielectric thickness between HD and LD layers
@@ -1791,6 +1798,15 @@ async function designDielectricStack(input) {
   let r = d / 2
   const stackOut = []
   for (const L of layers) {
+    const odBeforeMm = 2 * r
+    const pitchInfo = ptfeShopPitchSetpoint({
+      cableOdMm: odBeforeMm,
+      tapeWidthMm: L.tape_width_mm,
+      overlap: L.overlap,
+      densityCode: L.density_code,
+      density: L.density,
+      partNumber: L.part_number,
+    })
     const t_total = L.tape_thickness_mm * _overlapLayers(L.overlap) * L.tension_factor * L.passes
     const eps_r = _densityToEps(L.density)
     stackOut.push({
@@ -1807,10 +1823,12 @@ async function designDielectricStack(input) {
       tape_thickness_mil: L.tape_thickness_mil,
       tape_width_mm: round(L.tape_width_mm, 3),
       tape_width_in: L.tape_width_in,
-      pitch_setpoint_in: round(pitchSetpointMm / 25.4, 4),
-      pitch_setpoint_mm: round(pitchSetpointMm, 4),
-      requested_pitch_in: round(requestedPitchMm / 25.4, 4),
-      pitch_limited_by_wtm: pitchLimitedByWtm,
+      OD_before_mm: round(odBeforeMm, 4),
+      pitch_setpoint_in: round(pitchInfo.pitchIn, 4),
+      pitch_setpoint_mm: round(pitchInfo.pitchMm, 4),
+      requested_pitch_in: round(pitchInfo.calculatedPitchIn, 4),
+      requested_pitch_mm: round(pitchInfo.calculatedPitchMm, 4),
+      pitch_limited_by_wtm: pitchInfo.pitchLimited,
       thickness_mm: round(t_total, 4), eps_r: round(eps_r, 4),
       OD_after_mm: round(2 * (r + t_total), 4),
     })
@@ -2347,15 +2365,26 @@ function computeTapeNotches(input) {
   if (!Array.isArray(layers) || layers.length === 0) throw new Error('layers must be a non-empty array.')
 
   const c = 299792458
-  // For each layer: pitch P = max(W × (1 − overlap), WTM min). Then f_n = n × c × VP / (2 × P)
+  // For each layer: pitch P follows the shop MI-calibrated WTM set point.
   const perLayer = layers.map((L, i) => {
     const W = L.tape_width_mm || L.W || 6.35
     const o = L.overlap ?? '2/3'
-    const f = _overlapFraction(o)
-    const requestedPitchMm = Number(L.pitch_setpoint_mm || L.pitch_mm || 0) > 0
-      ? Number(L.pitch_setpoint_mm || L.pitch_mm)
-      : W * (1 - f)
-    const pitch_mm = Math.max(WTM_MIN_TAPING_PITCH_MM, requestedPitchMm)
+    const explicitPitchMm = Number(L.pitch_setpoint_mm || L.pitch_mm || 0)
+    const pitchInfo = ptfeShopPitchSetpoint({
+      cableOdMm: L.OD_before_mm || L.od_before_mm || L.incoming_od_mm || L.cable_od_mm,
+      tapeWidthMm: W,
+      overlap: o,
+      densityCode: L.density_code || L.densityCode,
+      density: L.density,
+      partNumber: L.part_number || L.partNumber,
+    })
+    const fallbackRequestedPitchMm = W * (1 - _overlapFraction(o))
+    const requestedPitchMm = explicitPitchMm > 0
+      ? explicitPitchMm
+      : (pitchInfo.calculatedPitchMm > 0 ? pitchInfo.calculatedPitchMm : fallbackRequestedPitchMm)
+    const pitch_mm = explicitPitchMm > 0
+      ? Math.max(WTM_MIN_TAPING_PITCH_MM, explicitPitchMm)
+      : (pitchInfo.pitchMm > 0 ? pitchInfo.pitchMm : Math.max(WTM_MIN_TAPING_PITCH_MM, fallbackRequestedPitchMm))
     const P_m = pitch_mm * 1e-3
     const harmonics = []
     for (let n = 1; n <= n_harmonics; n++) {

@@ -23,7 +23,7 @@ const BUILT_IN_RULES = [
     status: 'active',
     category: 'wtm_taping',
     title: 'WTM minimum taping pitch',
-    rule: 'WTM taping-head pitch set-point minimum is 0.0390 in/rev. If calculated pitch is lower, clamp the MI pitch set-point to 0.0390 in/rev and tell the engineer it is machine-limited.',
+    rule: 'WTM taping-head pitch set-point is based on incoming OD, wrap mode, and shop MI calibration from MI-ST962-032-130 / 032-200. Clamp to 0.0390 in/rev only when the OD-based calculated pitch is lower than the machine minimum.',
     applies_to: ['wtm', 'ptfe', 'taping', 'mi', 'notch'],
     source: 'built-in shop rule from engineer correction',
     priority: 95,

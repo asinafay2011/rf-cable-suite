@@ -55,6 +55,96 @@ export function ptfeWrapPercent(value = '2/3') {
   return normalizePtfeWrap(value).percent
 }
 
+export const PTFE_SHOP_PITCH_CALIBRATIONS = [
+  { mi: 'MI-ST962-032-130', sheet: 'Taping #1', densityCode: 'L', wrap: '1/2', odIn: 0.0287, widthIn: 0.0150, pitchIn: 0.1065 },
+  { mi: 'MI-ST962-032-130', sheet: 'Taping #1', densityCode: 'L', wrap: '1/2', odIn: 0.0410, widthIn: 0.0200, pitchIn: 0.1400 },
+  { mi: 'MI-ST962-032-130', sheet: 'Taping #2', densityCode: 'L', wrap: '2/3', odIn: 0.0530, widthIn: 0.0200, pitchIn: 0.0740 },
+  { mi: 'MI-ST962-032-130', sheet: 'Taping #2', densityCode: 'L', wrap: '2/3', odIn: 0.0670, widthIn: 0.0250, pitchIn: 0.0900 },
+  { mi: 'MI-ST962-032-200', sheet: 'Taping #1', densityCode: 'L', wrap: '2/3', odIn: 0.0509, widthIn: 0.0250, pitchIn: 0.0960 },
+  { mi: 'MI-ST962-032-200', sheet: 'Taping #1', densityCode: 'H', wrap: '2/3', odIn: 0.0510, widthIn: 0.0250, pitchIn: 0.0900 },
+  { mi: 'MI-ST962-032-200', sheet: 'Taping #2', densityCode: 'L', wrap: '3/4', odIn: 0.0960, widthIn: 0.0375, pitchIn: 0.0950 },
+  { mi: 'MI-ST962-032-200', sheet: 'Taping #2', densityCode: 'H', wrap: '2/3', odIn: 0.0960, widthIn: 0.0375, pitchIn: 0.1335 },
+]
+
+function ptfePitchBaseIn(odIn, wrapFraction) {
+  const od = Number(odIn)
+  const f = Number(wrapFraction)
+  if (!Number.isFinite(od) || od <= 0 || !Number.isFinite(f) || f <= 0 || f >= 1) return 0
+  return Math.PI * od * ((1 - f) / f)
+}
+
+function pitchDensityCode(input = {}) {
+  const explicit = String(input.densityCode || input.density_code || '').toUpperCase()
+  if (explicit === 'H' || explicit === 'L') return explicit
+  const density = Number(input.densityGcc ?? input.density)
+  if (density > 0) return density >= 1.1 ? 'H' : 'L'
+  const part = String(input.partNumber || input.part_number || '').toUpperCase()
+  const match = part.match(/-\d+(H|L)\d{4}(?:\b|-|$)/)
+  return match ? match[1] : ''
+}
+
+function pitchCalibrationFactor({ odIn, widthIn, wrapKey, densityCode }) {
+  const matches = PTFE_SHOP_PITCH_CALIBRATIONS.filter((item) => item.wrap === wrapKey)
+  if (!matches.length) return 1
+
+  const exact = matches.find((item) => (
+    Math.abs(item.odIn - odIn) <= 0.0008
+    && Math.abs(item.widthIn - widthIn) <= 0.0003
+    && (!densityCode || item.densityCode === densityCode)
+  ))
+  if (exact) {
+    const base = ptfePitchBaseIn(exact.odIn, normalizePtfeWrap(exact.wrap).fraction)
+    return base > 0 ? exact.pitchIn / base : 1
+  }
+
+  let weighted = 0
+  let totalWeight = 0
+  matches.forEach((item) => {
+    const base = ptfePitchBaseIn(item.odIn, normalizePtfeWrap(item.wrap).fraction)
+    if (!(base > 0)) return
+    const odScale = Math.max(0.006, item.odIn * 0.24)
+    const widthScale = Math.max(0.003, item.widthIn * 0.28)
+    const odDistance = Math.abs(odIn - item.odIn) / odScale
+    const widthDistance = Math.abs(widthIn - item.widthIn) / widthScale
+    const densityDistance = densityCode && item.densityCode !== densityCode ? 1.25 : 0
+    const distance = Math.hypot(odDistance, widthDistance, densityDistance)
+    const weight = 1 / Math.pow(0.18 + distance, 3)
+    weighted += (item.pitchIn / base) * weight
+    totalWeight += weight
+  })
+
+  return totalWeight > 0 ? weighted / totalWeight : 1
+}
+
+export function ptfeShopPitchSetpoint(input = {}) {
+  const odIn = Number(input.cableOdIn ?? input.odIn ?? input.incomingOdIn ?? (input.cableOdMm != null ? input.cableOdMm / INCH_TO_MM : NaN))
+  const widthIn = Number(input.tapeWidthIn ?? input.widthIn ?? (input.tapeWidthMm != null ? input.tapeWidthMm / INCH_TO_MM : NaN))
+  const wrap = normalizePtfeWrap(input.overlap ?? input.wrap ?? '2/3')
+  const densityCode = pitchDensityCode(input)
+  const basePitchIn = ptfePitchBaseIn(odIn, wrap.fraction)
+  const factor = Number.isFinite(odIn) && odIn > 0 && Number.isFinite(widthIn) && widthIn > 0
+    ? pitchCalibrationFactor({ odIn, widthIn, wrapKey: wrap.key, densityCode })
+    : 1
+  const calculatedPitchIn = basePitchIn * factor
+  const pitchIn = calculatedPitchIn > 0 ? Math.max(WTM_MIN_TAPING_PITCH_IN, calculatedPitchIn) : 0
+
+  return {
+    pitchIn,
+    pitchMm: pitchIn * INCH_TO_MM,
+    calculatedPitchIn,
+    calculatedPitchMm: calculatedPitchIn * INCH_TO_MM,
+    pitchLimited: calculatedPitchIn > 0 && calculatedPitchIn < WTM_MIN_TAPING_PITCH_IN,
+    minPitchIn: WTM_MIN_TAPING_PITCH_IN,
+    minPitchMm: WTM_MIN_TAPING_PITCH_MM,
+    basePitchIn,
+    calibrationFactor: factor,
+    wrap: wrap.key,
+    wrapPercent: wrap.percent,
+    densityCode,
+    formula: 'pitch = max(WTM minimum, pi * incoming OD * (1 - wrap) / wrap * MI calibration factor)',
+  }
+}
+
 export function isSmallCableTapeOd(odInOrMm, unit = 'in') {
   const odIn = unit === 'mm' ? Number(odInOrMm) / INCH_TO_MM : Number(odInOrMm)
   return Number.isFinite(odIn) && odIn > 0 && odIn <= SMALL_CABLE_TAPE_OD_IN + 0.00001
