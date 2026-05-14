@@ -13,6 +13,8 @@ export const SMALL_CABLE_TAPE_OD_IN = 0.051
 export const SMALL_CABLE_TAPE_OD_MM = SMALL_CABLE_TAPE_OD_IN * INCH_TO_MM
 export const SMALL_CABLE_MAX_PTFE_WIDTH_IN = 0.0375
 export const SMALL_CABLE_MAX_PTFE_WIDTH_MM = SMALL_CABLE_MAX_PTFE_WIDTH_IN * INCH_TO_MM
+export const WTM_MIN_TAPING_PITCH_IN = 0.0390
+export const WTM_MIN_TAPING_PITCH_MM = WTM_MIN_TAPING_PITCH_IN * INCH_TO_MM
 
 export const PTFE_WRAP_PRESETS = [
   { key: '1/2', label: '1/2 wrap', percent: 50, fraction: 0.5, layers: 2 },

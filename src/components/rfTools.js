@@ -19,6 +19,8 @@ import {
   recommendPtfeWrapForCable,
   SMALL_CABLE_MAX_PTFE_WIDTH_IN,
   SMALL_CABLE_TAPE_OD_IN,
+  WTM_MIN_TAPING_PITCH_IN,
+  WTM_MIN_TAPING_PITCH_MM,
 } from '../data/materialLibrary.js'
 import { makeBlankMiWorkbook, makePtfeMiWorkbook } from '../data/miTemplate.js'
 
@@ -870,7 +872,7 @@ export const RF_TOOLS = [
   {
     name: 'design_dielectric_stack',
     description:
-      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Default PTFE wrap is 2/3 to reduce shrink-back; use 1/2 only when the target OD needs the lower single-pass build. Returns a complete layer recipe + predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the RF Stack Lab tab + a filled shop MI .xlsx based on MI-ST962-032-130, with tape part numbers, OD after tape, pitch set-point, and tension filled into the Taping (3-Bay) sheets. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
+      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Default PTFE wrap is 2/3 to reduce shrink-back; use 1/2 only when the target OD needs the lower single-pass build. WTM taping-head pitch set-point is never below 0.0390 in/rev. Returns a complete layer recipe + predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the RF Stack Lab tab + a filled shop MI .xlsx based on MI-ST962-032-130, with tape part numbers, OD after tape, pitch set-point, and tension filled into the Taping (3-Bay) sheets. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
     input_schema: {
       type: 'object',
       properties: {
@@ -897,7 +899,7 @@ export const RF_TOOLS = [
   {
     name: 'compute_tape_notches',
     description:
-      'Predict Bragg suckout (notch) frequencies caused by a tape-wrapped dielectric. Uses f_n = n · c · VP / (2 · P) where P is the WTM pitch (axial period of the tape wrap). When multiple layers are stacked at the same pitch, the notch deepens; different pitches produce separate notches. Pass the existing layer stack to forecast which frequencies to watch on the VNA.',
+      'Predict Bragg suckout (notch) frequencies caused by a tape-wrapped dielectric. Uses f_n = n · c · VP / (2 · P) where P is the WTM pitch (axial period of the tape wrap), clamped to the 0.0390 in/rev taping-head minimum. When multiple layers are stacked at the same pitch, the notch deepens; different pitches produce separate notches. Pass the existing layer stack to forecast which frequencies to watch on the VNA.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1675,6 +1677,9 @@ async function designDielectricStack(input) {
   const ovr = overlap
   const n_overlap = _overlapLayers(ovr)
   const t_per_pass = tape_thickness_mm * n_overlap * tension_factor
+  const requestedPitchMm = tape_width_mm * (1 - _overlapFraction(ovr)) / Math.max(0.2, tension_factor)
+  const pitchSetpointMm = requestedPitchMm > 0 ? Math.max(WTM_MIN_TAPING_PITCH_MM, requestedPitchMm) : 0
+  const pitchLimitedByWtm = requestedPitchMm > 0 && requestedPitchMm < WTM_MIN_TAPING_PITCH_MM
   if (t_per_pass <= 0) throw new Error('Per-pass thickness is zero.')
 
   // Split target dielectric thickness between HD and LD layers
@@ -1728,6 +1733,10 @@ async function designDielectricStack(input) {
       tape_thickness_mil: L.tape_thickness_mil,
       tape_width_mm: round(L.tape_width_mm, 3),
       tape_width_in: L.tape_width_in,
+      pitch_setpoint_in: round(pitchSetpointMm / 25.4, 4),
+      pitch_setpoint_mm: round(pitchSetpointMm, 4),
+      requested_pitch_in: round(requestedPitchMm / 25.4, 4),
+      pitch_limited_by_wtm: pitchLimitedByWtm,
       thickness_mm: round(t_total, 4), eps_r: round(eps_r, 4),
       OD_after_mm: round(2 * (r + t_total), 4),
     })
@@ -1750,7 +1759,7 @@ async function designDielectricStack(input) {
 
   // Predict tape Bragg notches
   const notch1 = (() => {
-    const P_axial = tape_width_mm * (1 - _overlapFraction(ovr))  // mm/rev
+    const P_axial = pitchSetpointMm
     if (P_axial <= 0) return null
     const f_GHz = (299792458 * VP_actual) / (2 * P_axial * 1e-3 * 1e9)
     return round(f_GHz, 2)
@@ -1852,6 +1861,9 @@ async function designDielectricStack(input) {
       !overlapWasSpecified
         ? 'PTFE taping rule: defaulted to 2/3 wrap to reduce shrink-back. Use 1/2 wrap only when the target OD requires the lower single-pass build; one 2/3 wrap builds 3 tape thicknesses, smaller than two 1/2 wraps at 4 tape thicknesses.'
         : null,
+      pitchLimitedByWtm
+        ? `WTM taping-head rule: calculated pitch ${(requestedPitchMm / 25.4).toFixed(4)} in/rev is below the machine minimum, so MI pitch set-point is clamped to ${WTM_MIN_TAPING_PITCH_IN.toFixed(4)} in/rev.`
+        : null,
       overlapWasSpecified && requestedOverlap !== overlap
         ? `PTFE wrap snapped to stocked shop setting: ${normalizePtfeWrap(requestedOverlap).percent}% (${overlap}). Valid PTFE settings are 50%, 66.7%, and 75%.`
         : null,
@@ -1864,7 +1876,7 @@ async function designDielectricStack(input) {
         ? `Achieved Z₀ ${Z0_actual.toFixed(1)} Ω is off target by ${(Z0_actual - (target_z0_ohm || 0)).toFixed(1)} Ω due to integer-pass rounding. Tune tension or tape thickness in the UI to dial it in.`
         : null,
       notch1 && notch1 < 40
-        ? `First Bragg notch from ${ovr} wrap with ${tape_width_mm.toFixed(2)} mm (${(tape_width_mm / MIL).toFixed(0)} mil) tape predicted at ~${notch1} GHz. Use compute_tape_notches for full harmonic table.`
+        ? `First Bragg notch from ${ovr} wrap with ${tape_width_mm.toFixed(2)} mm (${(tape_width_mm / MIL).toFixed(0)} mil) tape and ${pitchSetpointMm.toFixed(3)} mm pitch predicted at ~${notch1} GHz. Use compute_tape_notches for full harmonic table.`
         : null,
     ].filter(Boolean),
   }
@@ -1876,12 +1888,15 @@ function computeTapeNotches(input) {
   if (!Array.isArray(layers) || layers.length === 0) throw new Error('layers must be a non-empty array.')
 
   const c = 299792458
-  // For each layer: pitch P = W × (1 − overlap). Then f_n = n × c × VP / (2 × P)
+  // For each layer: pitch P = max(W × (1 − overlap), WTM min). Then f_n = n × c × VP / (2 × P)
   const perLayer = layers.map((L, i) => {
     const W = L.tape_width_mm || L.W || 6.35
     const o = L.overlap ?? '2/3'
     const f = _overlapFraction(o)
-    const pitch_mm = W * (1 - f)
+    const requestedPitchMm = Number(L.pitch_setpoint_mm || L.pitch_mm || 0) > 0
+      ? Number(L.pitch_setpoint_mm || L.pitch_mm)
+      : W * (1 - f)
+    const pitch_mm = Math.max(WTM_MIN_TAPING_PITCH_MM, requestedPitchMm)
     const P_m = pitch_mm * 1e-3
     const harmonics = []
     for (let n = 1; n <= n_harmonics; n++) {
@@ -1889,7 +1904,15 @@ function computeTapeNotches(input) {
       const f_ghz = f_hz / 1e9
       if (f_ghz <= max_freq_ghz) harmonics.push({ n, f_ghz: round(f_ghz, 2), pitch_mm: round(pitch_mm, 3) })
     }
-    return { layer_index: i, tape_width_mm: round(W, 3), overlap: o, pitch_mm: round(pitch_mm, 3), harmonics }
+    return {
+      layer_index: i,
+      tape_width_mm: round(W, 3),
+      overlap: o,
+      requested_pitch_mm: round(requestedPitchMm, 3),
+      pitch_mm: round(pitch_mm, 3),
+      pitch_limited_by_wtm: requestedPitchMm > 0 && requestedPitchMm < WTM_MIN_TAPING_PITCH_MM,
+      harmonics,
+    }
   })
 
   // Aggregate: bin harmonic frequencies; layers with the same pitch deepen
@@ -1916,7 +1939,7 @@ function computeTapeNotches(input) {
     .sort((a, b) => a.f_ghz - b.f_ghz)
 
   return {
-    formula: 'f_n = n · c · VP / (2 · P_axial),  P_axial = W · (1 − overlap)',
+    formula: `f_n = n · c · VP / (2 · P_axial),  P_axial = max(W · (1 − overlap), ${WTM_MIN_TAPING_PITCH_IN.toFixed(4)} in)`,
     inputs: { vp: round(vp, 3), n_harmonics, max_freq_ghz },
     per_layer: perLayer,
     aggregated_notches: aggregated,
