@@ -25,7 +25,7 @@ export function widthCodeToInch(widthCode) {
   return Number.isFinite(n) ? n / WIDTH_CODE_TO_INCH : 0
 }
 
-export function normalizePtfeWrap(value = '1/2') {
+export function normalizePtfeWrap(value = '2/3') {
   const raw = String(value ?? '').trim().toLowerCase()
   if (raw === '1/2' || raw === 'half' || raw === '50%' || raw === '50') return PTFE_WRAP_PRESETS[0]
   if (raw === '2/3' || raw === '66.7%' || raw === '66.7' || raw === '67%' || raw === '67') return PTFE_WRAP_PRESETS[1]
@@ -34,22 +34,22 @@ export function normalizePtfeWrap(value = '1/2') {
   const numeric = Number(value)
   const fraction = Number.isFinite(numeric)
     ? (numeric > 1 ? numeric / 100 : numeric)
-    : 0.5
+    : 2 / 3
 
   return PTFE_WRAP_PRESETS
     .map((preset) => ({ preset, delta: Math.abs(preset.fraction - fraction) }))
     .sort((a, b) => a.delta - b.delta)[0].preset
 }
 
-export function ptfeWrapFraction(value = '1/2') {
+export function ptfeWrapFraction(value = '2/3') {
   return normalizePtfeWrap(value).fraction
 }
 
-export function ptfeWrapLayers(value = '1/2') {
+export function ptfeWrapLayers(value = '2/3') {
   return normalizePtfeWrap(value).layers
 }
 
-export function ptfeWrapPercent(value = '1/2') {
+export function ptfeWrapPercent(value = '2/3') {
   return normalizePtfeWrap(value).percent
 }
 
@@ -68,10 +68,10 @@ export function shouldAvoidPtfeTapeWidthForSmallCable(tapeWidthIn, cableOdIn) {
 export function recommendPtfeWrapForCable(input = {}) {
   const cableOdIn = Number(input.cableOdIn ?? input.odIn ?? (input.cableOdMm != null ? input.cableOdMm / INCH_TO_MM : NaN))
   const tapeWidthIn = Number(input.tapeWidthIn ?? (input.tapeWidthMm != null ? input.tapeWidthMm / INCH_TO_MM : NaN))
-  const requested = normalizePtfeWrap(input.overlap ?? input.wrap ?? '1/2')
+  const requested = normalizePtfeWrap(input.overlap ?? input.wrap ?? '2/3')
   const smallCable = isSmallCableTapeOd(cableOdIn, 'in')
   const avoidWidth = shouldAvoidPtfeTapeWidthForSmallCable(tapeWidthIn, cableOdIn)
-  const recommended = smallCable ? normalizePtfeWrap('2/3') : requested
+  const recommended = requested
 
   return {
     smallCable,
@@ -83,8 +83,8 @@ export function recommendPtfeWrapForCable(input = {}) {
     maxTapeWidthIn: smallCable ? SMALL_CABLE_MAX_PTFE_WIDTH_IN : null,
     maxTapeWidthMm: smallCable ? SMALL_CABLE_MAX_PTFE_WIDTH_MM : null,
     note: smallCable
-      ? `Small cable OD <= ${SMALL_CABLE_TAPE_OD_IN.toFixed(3)} in: use 2/3 wrap to resist shrink-back; avoid ${SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)} in tape width and wider unless target OD forces 1/2 wrap.`
-      : '',
+      ? `PTFE shop preference: use 2/3 wrap to resist shrink-back; for cable OD <= ${SMALL_CABLE_TAPE_OD_IN.toFixed(3)} in also avoid ${SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)} in tape width and wider. Use 1/2 wrap only when the target OD requires the lower single-pass build.`
+      : 'PTFE shop preference: use 2/3 wrap to resist shrink-back. Use 1/2 wrap only when the target OD requires the lower single-pass build.',
   }
 }
 

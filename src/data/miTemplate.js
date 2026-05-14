@@ -1,4 +1,8 @@
+import JSZip from 'jszip'
+
 const INCH_TO_MM = 25.4
+const SHOP_MI_TEMPLATE_URL = '/templates/MI-ST962-032-130.xlsx'
+export const SHOP_MI_XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 const DEFAULT_MI_STEPS = [
   'Issue materials per BOM',
@@ -100,7 +104,7 @@ function toleranceTriplet(nominalIn, tol = 0.001) {
 }
 
 function overlapText(overlap) {
-  const raw = String(overlap || '1/2').trim()
+  const raw = String(overlap || '2/3').trim()
   if (raw.includes('/')) return `${raw} WRAP`
   const n = Number(raw)
   if (isFinite(n)) {
@@ -123,7 +127,7 @@ function overlapFraction(overlap) {
   if (key === '1/2') return 0.5
   if (key === '2/3') return 2 / 3
   if (key === '3/4') return 0.75
-  return 0.5
+  return 2 / 3
 }
 
 function layDirection(index) {
@@ -255,7 +259,7 @@ function ptfeMachineSheet(name, entries, options = {}) {
   return sheet(name, rows.join(''))
 }
 
-export function makeBlankMiWorkbook(options = {}) {
+function makeLegacyBlankMiWorkbook(options = {}) {
   return workbook([
     coverSheet(options),
     ptfeMachineSheet('PTFE Tape #1', [{}, {}, {}], options),
@@ -300,7 +304,7 @@ export function buildPtfeMiEntries({ conductorOdMm, layers, overlap, tensionN = 
     const passes = Math.max(1, Number(layer.passes || 1))
     const tapeThicknessMm = Number(layer.tape_thickness_mm || layer.tapeThicknessMm || 0)
     const tensionFactor = Number(layer.tension_factor || 0.92)
-    const overlapMode = layer.overlap || overlap || '1/2'
+    const overlapMode = layer.overlap || overlap || '2/3'
     const overlapLayers = Math.max(1, Math.round(1 / Math.max(0.05, 1 - overlapFraction(overlapMode))))
     const radialBuildMm = tapeThicknessMm * overlapLayers * tensionFactor
     const widthIn = Number(layer.tape_width_in || (layer.tape_width_mm ? layer.tape_width_mm / INCH_TO_MM : 0))
@@ -330,7 +334,7 @@ export function buildPtfeMiEntries({ conductorOdMm, layers, overlap, tensionN = 
   return { conductorOdIn, entries }
 }
 
-export function makePtfeMiWorkbook(options = {}) {
+function makeLegacyPtfeMiWorkbook(options = {}) {
   const {
     miNumber = 'MI-ST962-AUTO',
     partNumber = '',
@@ -339,7 +343,7 @@ export function makePtfeMiWorkbook(options = {}) {
     targetSummary = '',
     conductorOdMm,
     layers = [],
-    overlap = '1/2',
+    overlap = '2/3',
     tensionN = 4.0,
     lineSpeedFtMin = 7,
     predicted = {},
@@ -389,4 +393,242 @@ export function makePtfeMiWorkbook(options = {}) {
     genericOperationSheet('Mark Respool', 'UV laser mark and respool', [], { miNumber }),
     genericOperationSheet('Package', 'Package cable', [], { miNumber }),
   ])
+}
+
+function xmlEscape(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function readAttrs(tag) {
+  const attrs = {}
+  String(tag || '').replace(/([\w:]+)="([^"]*)"/g, (_, key, value) => {
+    attrs[key] = value
+    return ''
+  })
+  return attrs
+}
+
+function normalizeXlsxTarget(target) {
+  const raw = String(target || '').replace(/^\/+/, '')
+  if (raw.startsWith('xl/')) return raw
+  return `xl/${raw}`
+}
+
+async function sheetPathMap(zip) {
+  const workbookXml = await zip.file('xl/workbook.xml').async('string')
+  const relsXml = await zip.file('xl/_rels/workbook.xml.rels').async('string')
+  const rels = {}
+  ;(relsXml.match(/<Relationship\b[^>]*\/>/g) || []).forEach((tag) => {
+    const attrs = readAttrs(tag)
+    if (attrs.Id && attrs.Target) rels[attrs.Id] = normalizeXlsxTarget(attrs.Target)
+  })
+  const sheets = {}
+  ;(workbookXml.match(/<sheet\b[^>]*\/>/g) || []).forEach((tag) => {
+    const attrs = readAttrs(tag)
+    const rid = attrs['r:id']
+    if (attrs.name && rid && rels[rid]) sheets[attrs.name] = rels[rid]
+  })
+  return sheets
+}
+
+function cellStyleAttrs(cellXml) {
+  const style = String(cellXml || '').match(/\ss="[^"]*"/)?.[0] || ''
+  const meta = String(cellXml || '').match(/\scm="[^"]*"/)?.[0] || ''
+  const vm = String(cellXml || '').match(/\svm="[^"]*"/)?.[0] || ''
+  return `${style}${meta}${vm}`
+}
+
+function cellXml(ref, previousXml, value, type = 'auto') {
+  const style = cellStyleAttrs(previousXml)
+  if (value == null || value === '') return `<c r="${ref}"${style}/>`
+  const numeric = type === 'number' || (type === 'auto' && typeof value === 'number' && Number.isFinite(value))
+  if (numeric) return `<c r="${ref}"${style}><v>${Number(value)}</v></c>`
+  return `<c r="${ref}"${style} t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`
+}
+
+function writeExistingCell(xml, ref, value, type = 'auto') {
+  const pattern = new RegExp(`<c\\b(?=[^>]*\\br="${ref}")[\\s\\S]*?<\\/c>|<c\\b(?=[^>]*\\br="${ref}")[^>]*/>`)
+  return xml.replace(pattern, (previous) => cellXml(ref, previous, value, type))
+}
+
+function writeTriplet(xml, rowNumber, triplet) {
+  const [min, nom, max] = triplet
+  let next = writeExistingCell(xml, `D${rowNumber}`, min === '' ? '-' : min, typeof min === 'number' ? 'number' : 'auto')
+  next = writeExistingCell(next, `E${rowNumber}`, nom === '' ? '' : nom, typeof nom === 'number' ? 'number' : 'auto')
+  next = writeExistingCell(next, `F${rowNumber}`, max === '' ? '-' : max, typeof max === 'number' ? 'number' : 'auto')
+  return next
+}
+
+function blankTriplet() {
+  return ['-', '', '-']
+}
+
+function xlsxToleranceTriplet(nominalIn, tol = 0.001) {
+  const v = Number(nominalIn)
+  if (!Number.isFinite(v) || v <= 0) return blankTriplet()
+  return [Number((v - tol).toFixed(4)), Number(v.toFixed(4)), Number((v + tol).toFixed(4))]
+}
+
+function excelDateSerial(value) {
+  if (value == null || value === '') return ''
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  const iso = String(value).trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (iso) {
+    const utc = Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]))
+    return Math.round((utc - Date.UTC(1899, 11, 30)) / 86400000)
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return String(value)
+  const utc = Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate())
+  return Math.round((utc - Date.UTC(1899, 11, 30)) / 86400000)
+}
+
+function uint8ToBase64(bytes) {
+  if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64')
+  let binary = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(binary)
+}
+
+async function loadShopMiZip() {
+  const response = await fetch(SHOP_MI_TEMPLATE_URL)
+  if (!response.ok) throw new Error(`Could not load shop MI template (${response.status})`)
+  return JSZip.loadAsync(await response.arrayBuffer())
+}
+
+function clearTapingSlot(xml, slot) {
+  const materialRow = 6 + slot
+  const baseRow = 21 + slot * 8
+  let next = writeExistingCell(xml, `D${materialRow}`, '-')
+  next = writeExistingCell(next, `D${baseRow}`, '-')
+  next = writeTriplet(next, baseRow + 1, blankTriplet())
+  next = writeExistingCell(next, `D${baseRow + 2}`, '-')
+  next = writeTriplet(next, baseRow + 3, blankTriplet())
+  next = writeExistingCell(next, `D${baseRow + 4}`, '-')
+  next = writeTriplet(next, baseRow + 6, blankTriplet())
+  return next
+}
+
+function fillTapingSlot(xml, slot, entry) {
+  const materialRow = 6 + slot
+  const baseRow = 21 + slot * 8
+  let next = writeExistingCell(xml, `D${materialRow}`, entry.partNumber || '-')
+  next = writeExistingCell(next, `D${baseRow}`, entry.direction || '-')
+  next = writeTriplet(next, baseRow + 1, ['-', Number(entry.pitchIn || 0) || '', '-'])
+  next = writeExistingCell(next, `D${baseRow + 2}`, entry.overlapText || '-')
+  next = writeTriplet(next, baseRow + 3, ['-', Number(entry.tensionN || 0) || '', '-'])
+  next = writeExistingCell(next, `D${baseRow + 4}`, entry.rollerPosition || '-')
+  next = writeTriplet(next, baseRow + 6, xlsxToleranceTriplet(entry.odAfterIn))
+  return next
+}
+
+async function patchTapingSheet(zip, path, sheetEntries, options) {
+  if (!path || !zip.file(path)) return
+  const incomingOdIn = Number(options.incomingOdIn)
+  const finalOdIn = sheetEntries.length
+    ? sheetEntries[sheetEntries.length - 1].odAfterIn
+    : Number.NaN
+  let xml = await zip.file(path).async('string')
+
+  xml = writeTriplet(xml, 10, xlsxToleranceTriplet(incomingOdIn))
+  for (let slot = 0; slot < 3; slot++) {
+    xml = sheetEntries[slot] ? fillTapingSlot(xml, slot, sheetEntries[slot]) : clearTapingSlot(xml, slot)
+  }
+  xml = writeTriplet(xml, 45, sheetEntries.length ? ['-', Number(options.lineSpeedFtMin || 7), '-'] : blankTriplet())
+  xml = writeTriplet(xml, 47, sheetEntries.length ? xlsxToleranceTriplet(finalOdIn) : blankTriplet())
+  zip.file(path, xml)
+}
+
+async function patchHeaderCells(zip, paths, options) {
+  const by = options.by || ''
+  const dateSerial = excelDateSerial(options.date || new Date())
+  for (const path of Object.values(paths)) {
+    if (!path || !zip.file(path)) continue
+    let xml = await zip.file(path).async('string')
+    xml = writeExistingCell(xml, 'I2', by)
+    xml = writeExistingCell(xml, 'J2', dateSerial, typeof dateSerial === 'number' ? 'number' : 'auto')
+    zip.file(path, xml)
+  }
+
+  const coverPath = paths['Cover Sheet']
+  if (coverPath && zip.file(coverPath)) {
+    let xml = await zip.file(coverPath).async('string')
+    xml = writeExistingCell(xml, 'D2', by)
+    xml = writeExistingCell(xml, 'E2', dateSerial, typeof dateSerial === 'number' ? 'number' : 'auto')
+    zip.file(coverPath, xml)
+  }
+}
+
+async function makeShopMiXlsx(options = {}, entries = [], conductorOdIn = Number.NaN) {
+  const zip = await loadShopMiZip()
+  const paths = await sheetPathMap(zip)
+  const lineSpeedFtMin = options.lineSpeedFtMin || 7
+  await patchHeaderCells(zip, paths, options)
+
+  const firstEntries = entries.slice(0, 3)
+  const secondEntries = entries.slice(3, 6)
+  await patchTapingSheet(zip, paths['Taping (3-Bay)'], firstEntries, {
+    incomingOdIn: conductorOdIn,
+    lineSpeedFtMin,
+  })
+  await patchTapingSheet(zip, paths['Taping (3-Bay) (2)'], secondEntries, {
+    incomingOdIn: entries[2]?.odAfterIn ?? (firstEntries.length ? firstEntries[firstEntries.length - 1].odAfterIn : conductorOdIn),
+    lineSpeedFtMin,
+  })
+
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })
+  return {
+    base64: uint8ToBase64(bytes),
+    mime: SHOP_MI_XLSX_MIME,
+    extension: 'xlsx',
+    template: 'MI-ST962-032-130.xlsx',
+    filledTapingEntries: Math.min(entries.length, 6),
+    omittedTapingEntries: Math.max(0, entries.length - 6),
+  }
+}
+
+export async function makeBlankMiWorkbook(options = {}) {
+  try {
+    return await makeShopMiXlsx(options, [], Number.NaN)
+  } catch (err) {
+    return {
+      text: makeLegacyBlankMiWorkbook(options),
+      mime: 'application/vnd.ms-excel',
+      extension: 'xls',
+      template: 'legacy_generated_xml',
+      warning: err?.message || 'Shop MI template unavailable; used legacy XML template.',
+    }
+  }
+}
+
+export async function makePtfeMiWorkbook(options = {}) {
+  const {
+    conductorOdMm,
+    layers = [],
+    overlap = '2/3',
+    tensionN = 4.0,
+    lineSpeedFtMin = 7,
+  } = options
+
+  const { conductorOdIn, entries } = buildPtfeMiEntries({ conductorOdMm, layers, overlap, tensionN, lineSpeedFtMin })
+  try {
+    return await makeShopMiXlsx({ ...options, lineSpeedFtMin }, entries, conductorOdIn)
+  } catch (err) {
+    return {
+      text: makeLegacyPtfeMiWorkbook(options),
+      mime: 'application/vnd.ms-excel',
+      extension: 'xls',
+      template: 'legacy_generated_xml',
+      filledTapingEntries: entries.length,
+      omittedTapingEntries: 0,
+      warning: err?.message || 'Shop MI template unavailable; used legacy XML template.',
+    }
+  }
 }

@@ -449,7 +449,7 @@ export const RF_TOOLS = [
   {
     name: 'generate_blank_mi_template',
     description:
-      'Generate a blank company-style MI workbook in Excel format. Use when the engineer asks for a blank MI/template before filling process values. The workbook has cover, PTFE tape, conditioning, shield, braid, jacket, SI, packaging, and inspection sheets.',
+      'Generate the shop MI workbook from the MI-ST962-032-130 .xlsx template. Use when the engineer asks for a blank MI/template before filling process values. The workbook keeps the real cover, Taping (3-Bay), conditioning, spiral shield, SI, braid, extrusion, marking, and packaging sheets.',
     input_schema: {
       type: 'object',
       properties: {
@@ -870,7 +870,7 @@ export const RF_TOOLS = [
   {
     name: 'design_dielectric_stack',
     description:
-      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Returns a complete layer recipe + the predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the RF Stack Lab tab. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
+      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Default PTFE wrap is 2/3 to reduce shrink-back; use 1/2 only when the target OD needs the lower single-pass build. Returns a complete layer recipe + predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the RF Stack Lab tab + a filled shop MI .xlsx based on MI-ST962-032-130, with tape part numbers, OD after tape, pitch set-point, and tension filled into the Taping (3-Bay) sheets. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
     input_schema: {
       type: 'object',
       properties: {
@@ -880,8 +880,8 @@ export const RF_TOOLS = [
         target_z0_ohm:     { type: 'number', description: 'Target characteristic impedance in ohms (typically 50, 75, 100). Optional if only sizing for VP.' },
         tape_part_number:  { type: 'string', description: 'Optional PTFE tape part number from Material Library, e.g. 962-96000-05L0750.' },
         tape_thickness_mm: { type: 'number', description: 'Nominal tape thickness in mm. Default 0.10 mm (typical PTFE skived tape).' },
-        tape_width_mm:     { type: 'number', description: 'Tape width in mm. Default 6.35 mm (1/4 inch).' },
-        overlap:           { type: 'string', description: 'Overlap mode: "butt" / "1/2" / "2/3" / "3/4". Default "1/2".' },
+        tape_width_mm:     { type: 'number', description: 'Tape width in mm. Default 0.635 mm (0.0250 inch).' },
+        overlap:           { type: 'string', description: 'PTFE wrap mode: "1/2" / "2/3" / "3/4". Default is 2/3 shop preference to reduce shrink-back; use 1/2 only to hit a lower target OD. Valid settings are 50%, 66.7%, and 75%.' },
         tension_factor:    { type: 'number', description: 'WTM tension factor τ (0.7..1.0). Lower = tighter wrap, more compression. Default 0.92.' },
         tension_n:         { type: 'number', description: 'WTM tape tension in newtons for the MI sheet. Default 4.0 N.' },
         line_speed_ft_min:  { type: 'number', description: 'Line speed for the MI sheet. Default 7 ft/min.' },
@@ -1041,7 +1041,7 @@ export const RF_TOOLS = [
 ]
 
 // ── dispatcher ─────────────────────────────────────────
-export function dispatchRfTool(name, input) {
+export async function dispatchRfTool(name, input) {
   try {
     switch (name) {
       case 'lookup_rf_cable': {
@@ -1084,13 +1084,20 @@ export function dispatchRfTool(name, input) {
         const filenameBase = String(input?.mi_number || 'MI-blank-template')
           .replace(/[^a-z0-9._-]+/gi, '-')
           .replace(/^-+|-+$/g, '') || 'MI-blank-template'
+        const miWorkbook = await makeBlankMiWorkbook({
+          miNumber: input?.mi_number || 'MI-ST962-____-___',
+          partNumber: input?.part_number || '',
+          by: input?.by || '',
+          date: input?.date || new Date().toLocaleDateString('en-US'),
+        })
         return {
           ok: true,
           label: 'Blank MI Excel template',
-          template: 'company_mi_blank',
+          template: miWorkbook.template || 'company_mi_blank',
           sheets: [
-            'Cover',
-            'PTFE Tape',
+            'Cover Sheet',
+            'Taping (3-Bay)',
+            'Taping (3-Bay) (2)',
             'Tape Conditioning',
             'Spiral Shield',
             'Braiding',
@@ -1098,15 +1105,11 @@ export function dispatchRfTool(name, input) {
             'SI',
             'Package',
           ],
+          warning: miWorkbook.warning,
           _download: {
-            filename: `${filenameBase}.xls`,
-            mime: 'application/vnd.ms-excel',
-            text: makeBlankMiWorkbook({
-              miNumber: input?.mi_number || 'MI-ST962-____-___',
-              partNumber: input?.part_number || '',
-              by: input?.by || '',
-              date: input?.date || new Date().toLocaleDateString('en-US'),
-            }),
+            filename: `${filenameBase}.${miWorkbook.extension || 'xlsx'}`,
+            mime: miWorkbook.mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ...(miWorkbook.base64 ? { base64: miWorkbook.base64 } : { text: miWorkbook.text || '' }),
           },
         }
       }
@@ -1500,7 +1503,7 @@ export function dispatchRfTool(name, input) {
         }
       }
       case 'design_dielectric_stack': {
-        const result = designDielectricStack(input)
+        const result = await designDielectricStack(input)
         return result
       }
       case 'compute_tape_notches': {
@@ -1557,7 +1560,7 @@ function _overlapLayers(o) {
   return ptfeWrapLayers(o)
 }
 
-function designDielectricStack(input) {
+async function designDielectricStack(input) {
   const rawInput = input || {}
   const overlapWasSpecified = rawInput.overlap != null && rawInput.overlap !== ''
   let { conductor_od_mm, conductor_od_inch, target_vp, target_z0_ohm,
@@ -1769,7 +1772,7 @@ function designDielectricStack(input) {
     bragg_notch_1_ghz: notch1,
   }
   const targetSummary = `${target_z0_ohm ? `${round(target_z0_ohm, 2)} ohm` : ''}${target_vp ? ` ${round(target_vp * 100, 1)}% VP` : ''} conductor ${round(d / 25.4, 4)} in`.trim()
-  const miWorkbook = makePtfeMiWorkbook({
+  const miWorkbook = await makePtfeMiWorkbook({
     miNumber: mi_number || 'MI-ST962-AUTO',
     partNumber: finished_part_number || '',
     by: prepared_by || '',
@@ -1782,7 +1785,7 @@ function designDielectricStack(input) {
     lineSpeedFtMin: line_speed_ft_min,
     predicted,
   })
-  const miFilename = `${String(mi_number || 'MI-ST962-AUTO').replace(/[^a-z0-9._-]+/gi, '-')}-${round(d / 25.4, 4)}in-${Math.round((target_vp || VP_actual) * 100)}vp.xls`
+  const miFilename = `${String(mi_number || 'MI-ST962-AUTO').replace(/[^a-z0-9._-]+/gi, '-')}-${round(d / 25.4, 4)}in-${Math.round((target_vp || VP_actual) * 100)}vp.${miWorkbook.extension || 'xlsx'}`
 
   return {
     targets: {
@@ -1822,14 +1825,21 @@ function designDielectricStack(input) {
     },
     _download: {
       filename: miFilename,
-      mime: 'application/vnd.ms-excel',
-      text: miWorkbook,
+      mime: miWorkbook.mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ...(miWorkbook.base64 ? { base64: miWorkbook.base64 } : { text: miWorkbook.text || '' }),
       label: 'Download filled MI Excel',
     },
     notes: [
       selectedParts.length
         ? `Material Library: selected ${selectedParts.join(', ')} from the 962-96000 PTFE tape catalog.`
         : null,
+      miWorkbook.template === 'MI-ST962-032-130.xlsx'
+        ? `MI workbook uses shop template ${miWorkbook.template}; filled ${miWorkbook.filledTapingEntries || 0} taping station row${miWorkbook.filledTapingEntries === 1 ? '' : 's'} with tape, OD after tape, pitch set-point, and tension.`
+        : null,
+      miWorkbook.omittedTapingEntries
+        ? `MI template has two 3-bay taping sheets, so ${miWorkbook.omittedTapingEntries} extra taping pass${miWorkbook.omittedTapingEntries === 1 ? '' : 'es'} were kept in the JSON recipe but not placed in the shop MI workbook.`
+        : null,
+      miWorkbook.warning || null,
       snappedTape
         ? `Tape request snapped to stocked material: ${baseTape.partNumber} (${baseTape.thicknessMil} mil, ${baseTape.densityCode}, ${baseTape.widthIn.toFixed(3)} in).`
         : null,
@@ -1839,8 +1849,8 @@ function designDielectricStack(input) {
       smallCableWidthClamp
         ? `Small-cable taping rule: OD ${(d / 25.4).toFixed(4)}" ≤ ${SMALL_CABLE_TAPE_OD_IN.toFixed(3)}"; avoided ${smallCableWidthClamp.original_width_in.toFixed(4)}" PTFE tape and selected stocked tape below ${smallCableWidthClamp.clamped_width_in.toFixed(4)}".`
         : null,
-      !overlapWasSpecified && wrapGuidance.smallCable
-        ? 'Small-cable taping rule: defaulted PTFE to 2/3 wrap to reduce shrink-back. Use 1/2 wrap only when the target OD requires the lower build; one 2/3 wrap builds 3 tape thicknesses, smaller than two 1/2 wraps at 4 tape thicknesses.'
+      !overlapWasSpecified
+        ? 'PTFE taping rule: defaulted to 2/3 wrap to reduce shrink-back. Use 1/2 wrap only when the target OD requires the lower single-pass build; one 2/3 wrap builds 3 tape thicknesses, smaller than two 1/2 wraps at 4 tape thicknesses.'
         : null,
       overlapWasSpecified && requestedOverlap !== overlap
         ? `PTFE wrap snapped to stocked shop setting: ${normalizePtfeWrap(requestedOverlap).percent}% (${overlap}). Valid PTFE settings are 50%, 66.7%, and 75%.`
@@ -1869,7 +1879,7 @@ function computeTapeNotches(input) {
   // For each layer: pitch P = W × (1 − overlap). Then f_n = n × c × VP / (2 × P)
   const perLayer = layers.map((L, i) => {
     const W = L.tape_width_mm || L.W || 6.35
-    const o = L.overlap ?? '1/2'
+    const o = L.overlap ?? '2/3'
     const f = _overlapFraction(o)
     const pitch_mm = W * (1 - f)
     const P_m = pitch_mm * 1e-3
