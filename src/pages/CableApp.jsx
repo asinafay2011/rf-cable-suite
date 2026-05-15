@@ -800,12 +800,12 @@ function HomeView({ setSection }) {
   const moduleCount = 10;
 
   const tools = [
-    { id: 'sim',     icon: 'sim',     title: 'Process Sim', sub: '9-stage manufacturing flow → predicted specs', accent: '#c97b3f' },
-    { id: 'si',      icon: 'si',      title: 'SI Diagnostics Lab', sub: 'TDR + VNA + eye correlation around one Blender twin', accent: '#5eead4' },
-    { id: 'calc',    icon: 'calc',    title: 'Z₀ Calc',     sub: '138/√εᵣ · log(D/d) for coax + diff', accent: '#fbbf24' },
-    { id: 'lay',     icon: 'lay',     title: 'Lay Designer',sub: 'Pair lays + bundle compatibility', accent: '#a78bfa' },
+    { id: 'sim',     icon: 'sim',     title: 'Process Sim', sub: 'Conductor → pair → shield → jacket recipe control', accent: '#c97b3f' },
+    { id: 'si',      icon: 'si',      title: 'SI Diagnostics Lab', sub: 'TDR + VNA + eye checks around one cable twin', accent: '#5eead4' },
+    { id: 'calc',    icon: 'calc',    title: 'Z₀ Calc',     sub: 'Differential impedance from dielectric + geometry', accent: '#fbbf24' },
+    { id: 'lay',     icon: 'lay',     title: 'Lay Designer',sub: 'Pair pitch, skew control, and bundle compatibility', accent: '#a78bfa' },
     { id: 'braid',   icon: 'shield',  title: 'Braid Coverage', sub: 'K = (2F − F²)·100 % per SCTE 51', accent: '#e89357' },
-    { id: 'atten',   icon: 'atten',   title: 'Attenuation', sub: 'Skin + dielectric loss per geometry', accent: '#84cc16' },
+    { id: 'atten',   icon: 'atten',   title: 'Attenuation', sub: 'Skin + dielectric loss across the link budget', accent: '#84cc16' },
     { id: 'next',    icon: 'next',    title: 'NEXT',         sub: 'Pair-to-pair crosstalk vs lay diversity', accent: '#cbd5e1' },
     { id: 'cost',    icon: 'cost',    title: 'Cost Calc',    sub: 'Cu mass · jacket · labor · CPK', accent: '#facc15' },
     { id: 'library', icon: 'library', title: 'Library',      sub: `${cableCount} vendor presets + your custom cables`, accent: '#5eead4' },
@@ -820,10 +820,17 @@ function HomeView({ setSection }) {
   ];
 
   const missionCommands = [
-    { id: 'library', label: 'AI server links', sub: 'DAC/twinax paths between GPUs and switches.', accent: '#5eead4' },
-    { id: 'sim', label: 'Machine vision harness', sub: 'Camera-to-controller data in industrial cells.', accent: '#c97b3f' },
-    { id: 'si', label: 'Signal-integrity lab', sub: 'TDR, VNA, eye, skew, crosstalk.', accent: '#fbbf24' },
-    { id: 'progression', label: 'Manufacturing flow', sub: 'Conductor to jacket recipe progression.', accent: '#a78bfa' },
+    { id: 'library', label: 'AI / GPU server cables', sub: '112G PAM4 DAC, QSFP, twinax, storage links.', accent: '#5eead4' },
+    { id: 'sim', label: 'Industrial vision links', sub: 'Camera, robot, and controller harness data paths.', accent: '#c97b3f' },
+    { id: 'si', label: 'USB4 / PCIe / lab leads', sub: 'Check eye margin, skew, S-parameters, and TDR.', accent: '#fbbf24' },
+    { id: 'progression', label: 'Factory build recipe', sub: 'Translate SI targets into process set points.', accent: '#a78bfa' },
+  ];
+
+  const heroSpecs = [
+    { label: 'Used for', value: 'AI racks, machine vision, USB4, PCIe' },
+    { label: 'Electrical target', value: '85Ω, 90Ω, 100Ω diff links' },
+    { label: 'What matters', value: 'IL, RL, NEXT, skew, eye margin' },
+    { label: 'Factory output', value: 'lay pitch, shield, jacket, test limits' },
   ];
 
   return (
@@ -837,12 +844,16 @@ function HomeView({ setSection }) {
         .hs-card:hover { transform: translateY(-2px); border-color: rgba(201, 123, 63, 0.6); }
         .hs-command { transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease; }
         .hs-command:hover { transform: translateY(-2px); border-color: rgba(94, 234, 212, 0.55); background: rgba(18, 23, 26, 0.88); }
-        .hs-hero-title { font-size: clamp(42px, 7vw, 86px); }
+        .hs-hero-title { font-size: clamp(38px, 6vw, 72px); }
         .hs-hero-copy { font-size: clamp(15px, 1.5vw, 19px); }
+        .hs-hero-grid { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.72fr); gap: clamp(22px, 5vw, 56px); align-items: center; }
         .hs-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
-        @media (max-width: 760px) {
-          .hs-hero-title { font-size: 42px; }
+        .hs-link-panel { background: rgba(7, 11, 13, 0.72); border: 1px solid rgba(94, 234, 212, 0.22); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.46); backdrop-filter: blur(14px); }
+        .hs-link-row { border-top: 1px solid rgba(167, 176, 182, 0.14); }
+        @media (max-width: 920px) {
+          .hs-hero-title { font-size: 38px; }
           .hs-hero-copy { font-size: 15px; }
+          .hs-hero-grid { grid-template-columns: 1fr; align-items: end; }
           .hs-hero-actions button { flex: 1 1 100%; }
         }
         @keyframes hsRingDraw { from { stroke-dashoffset: 360; } to { stroke-dashoffset: 0; } }
@@ -915,24 +926,46 @@ function HomeView({ setSection }) {
               gap: 28,
             }}
           >
-            <div style={{ maxWidth: 900, alignSelf: 'center' }}>
-              <div className="font-mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 11, letterSpacing: 3, color: '#5eead4', textTransform: 'uppercase', marginBottom: 14, padding: '7px 10px', border: '1px solid rgba(94, 234, 212, 0.35)', background: 'rgba(10, 13, 15, 0.58)' }}>
-                <span style={{ color: '#c97b3f' }}>◆</span> Mission-critical high-speed data paths
+            <div className="hs-hero-grid" style={{ alignSelf: 'center' }}>
+              <div style={{ maxWidth: 760 }}>
+                <div className="font-mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 11, letterSpacing: 3, color: '#5eead4', textTransform: 'uppercase', marginBottom: 14, padding: '7px 10px', border: '1px solid rgba(94, 234, 212, 0.35)', background: 'rgba(10, 13, 15, 0.58)' }}>
+                  <span style={{ color: '#c97b3f' }}>◆</span> High-speed data cable engineering
+                </div>
+                <h1 className="hs-hero-title" style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontWeight: 300, lineHeight: 0.98, color: '#f0ebe2', margin: 0, textShadow: '0 10px 40px rgba(0, 0, 0, 0.62)' }}>
+                  High-speed cables for clean 112G links.
+                </h1>
+                <p className="hs-hero-copy" style={{ marginTop: 20, color: '#d8e5e4', lineHeight: 1.55, maxWidth: 700, textShadow: '0 8px 30px rgba(0, 0, 0, 0.72)' }}>
+                  Design twinax, USB4, PCIe, and camera-link cables from the factory recipe up to the eye diagram: impedance, skew, insertion loss, return loss, and crosstalk in one workbench.
+                </p>
+                <div className="hs-hero-actions">
+                  <HsPrimaryCTA onClick={() => setSection('sim')} label="Build a Cable" />
+                  <HsSecondaryCTA onClick={() => setSection('si')} label="Check Eye / TDR" />
+                  <HsSecondaryCTA onClick={() => setSection('library')} label="Open Library" />
+                </div>
+                <div style={{ marginTop: 18, fontSize: 11, color: '#b4c0c4', fontFamily: 'JetBrains Mono, monospace', maxWidth: 720, lineHeight: 1.6 }}>
+                  The Ask agent can turn a cable request into a manufacturable recipe with material picks, lay pitch, shielding, and test limits.
+                </div>
               </div>
-              <h1 className="hs-hero-title" style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontWeight: 300, lineHeight: 0.96, color: '#f0ebe2', margin: 0, textShadow: '0 10px 40px rgba(0, 0, 0, 0.62)' }}>
-                High-Speed Cable Workbench
-              </h1>
-              <p className="hs-hero-copy" style={{ marginTop: 20, color: '#d8e5e4', lineHeight: 1.55, maxWidth: 740, textShadow: '0 8px 30px rgba(0, 0, 0, 0.72)' }}>
-                From AI server links to machine-vision cameras and SI labs, design the cable that keeps the eye open.
-              </p>
-              <div className="hs-hero-actions">
-                <HsPrimaryCTA onClick={() => setSection('sim')} label="Open Process Sim" />
-                <HsSecondaryCTA onClick={() => setSection('si')} label="Open SI Lab" />
-                <HsSecondaryCTA onClick={() => setSection('progression')} label="Progression" />
-                <HsSecondaryCTA onClick={() => setSection('library')} label="Cable Library" />
-              </div>
-              <div style={{ marginTop: 18, fontSize: 11, color: '#b4c0c4', fontFamily: 'JetBrains Mono, monospace', maxWidth: 720, lineHeight: 1.6 }}>
-                The Ask agent can drive every tool here, save company defaults, and turn a cable request into a buildable manufacturing recipe.
+
+              <div className="hs-link-panel" style={{ borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{ padding: 16, borderBottom: '1px solid rgba(94, 234, 212, 0.16)' }}>
+                  <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#c97b3f', letterSpacing: 2.5, textTransform: 'uppercase' }}>Signal path profile</div>
+                  <div style={{ display: 'flex', alignItems: 'end', gap: 10, marginTop: 10 }}>
+                    <div style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 44, lineHeight: 0.9, color: '#5eead4' }}>112G</div>
+                    <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: '#a7b0b6', lineHeight: 1.3, paddingBottom: 2 }}>PAM4<br />link example</div>
+                  </div>
+                </div>
+                {heroSpecs.map((spec) => (
+                  <div key={spec.label} className="hs-link-row" style={{ padding: '13px 16px' }}>
+                    <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', textTransform: 'uppercase', letterSpacing: 1.6 }}>{spec.label}</div>
+                    <div style={{ marginTop: 5, color: '#f0ebe2', fontSize: 14, lineHeight: 1.45 }}>{spec.value}</div>
+                  </div>
+                ))}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1, background: 'rgba(167, 176, 182, 0.14)', borderTop: '1px solid rgba(167, 176, 182, 0.14)' }}>
+                  <HsMiniMetric value="85Ω" label="diff" accent="#5eead4" />
+                  <HsMiniMetric value="<6ps" label="skew" accent="#fbbf24" />
+                  <HsMiniMetric value="Pass" label="eye" accent="#84cc16" />
+                </div>
               </div>
             </div>
 
@@ -1113,6 +1146,14 @@ function HsHeroReadout({ value, label, accent }) {
     <div style={{ background: 'rgba(10, 13, 15, 0.72)', padding: '13px 14px' }}>
       <div style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 29, fontWeight: 500, color: accent, lineHeight: 1 }}>{value}</div>
       <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#d7e0df', textTransform: 'uppercase', letterSpacing: 1.7, marginTop: 6 }}>{label}</div>
+    </div>
+  );
+}
+function HsMiniMetric({ value, label, accent }) {
+  return (
+    <div style={{ background: 'rgba(10, 13, 15, 0.82)', padding: '12px 10px' }}>
+      <div style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 21, lineHeight: 1, color: accent }}>{value}</div>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: '#8e9aa0', letterSpacing: 1.4, textTransform: 'uppercase', marginTop: 5 }}>{label}</div>
     </div>
   );
 }
@@ -9581,18 +9622,18 @@ function Hero() {
           className="text-5xl md:text-7xl text-[#f0ebe2] font-light leading-[0.95] tracking-tight mb-6 max-w-3xl"
           style={{ fontFamily: 'Bricolage Grotesque, sans-serif' }}
         >
-          From a strand of copper<br />
-          to a <span className="italic text-[#c97b3f]">controlled-impedance</span> cable
+          High-speed cables for<br />
+          <span className="italic text-[#c97b3f]">clean 112G</span> data links
         </h1>
         <p className="text-lg text-[#a7b0b6] max-w-2xl leading-relaxed mb-8">
-          A technical curriculum for engineers and technicians. Follow the manufacturing process from
-          conductor preparation → twisted pair → 4-pair bundle → shielding → testing.
+          A technical workbench for twinax, USB4, PCIe, and camera-link cables. Translate impedance,
+          skew, insertion loss, and crosstalk targets into a buildable manufacturing recipe.
         </p>
 
         <div className="flex flex-wrap gap-3 mb-10">
-          <Pill tone="copper">10 modules</Pill>
-          <Pill tone="teal">live calculators</Pill>
-          <Pill tone="amber">Glenair Series 963 reference</Pill>
+          <Pill tone="copper">112G PAM4 examples</Pill>
+          <Pill tone="teal">85 / 100Ω diff links</Pill>
+          <Pill tone="amber">SI + factory recipe</Pill>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-3xl pt-8 border-t border-[#252e33]">

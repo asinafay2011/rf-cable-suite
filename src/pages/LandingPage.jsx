@@ -108,17 +108,15 @@ export default function LandingPage() {
         <div className="relative max-w-6xl mx-auto px-6 md:px-12 py-14 md:py-20 min-h-[inherit] flex items-center">
           <div className="fade-up max-w-3xl">
             <div className="font-mono text-[11px] tracking-[0.3em] text-[#c97b3f] uppercase mb-6">
-              ◆ Engineering workbench · v1
+              ◆ RF + high-speed engineering suite · v1
             </div>
             <h1 className="text-5xl md:text-7xl font-light leading-[0.95] tracking-tight mb-6" style={{ fontFamily: 'Bricolage Grotesque, sans-serif' }}>
-              From a strand of copper<br />
-              to a <span className="italic text-[#c97b3f]">controlled-impedance</span><br />
-              cable
+              RF and high-speed cable<br />
+              engineering in <span className="italic text-[#c97b3f]">one workbench</span>
             </h1>
             <p className="text-lg text-[#cbd5dc] max-w-xl leading-relaxed mb-8">
-              Coaxial cable workbench, high-speed cable manufacturing curriculum, and a
-              Touchstone-grade VNA Lab with a tool-using RF agent. Every calculation local.
-              Every formula cited.
+              Design coax RF links, high-speed data cables, shield stacks, and test-ready
+              manufacturing recipes with local calculators and tool-using agents.
             </p>
 
             <div className="flex flex-wrap gap-3 mb-10">
@@ -136,7 +134,7 @@ export default function LandingPage() {
                   className="inline-flex items-center gap-2 px-5 py-3 rounded-md bg-[#c97b3f] hover:bg-[#e89357] text-[#0a0d0f] text-sm font-semibold uppercase tracking-wider transition-colors"
                   style={{ fontFamily: 'JetBrains Mono, monospace' }}
                 >
-                  Try VNA Lab demo <ArrowRight size={14} />
+                  Open High-Speed Lab <ArrowRight size={14} />
                 </Link>
               )}
               <Link
