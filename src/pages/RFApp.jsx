@@ -3225,6 +3225,27 @@ function makeConnectorLaunchS11({ preset, band, launch }) {
   });
 }
 
+function ConnectorLaunchExplainerVideo() {
+  return (
+    <div style={{ position: "relative", minHeight: 220, aspectRatio: "16 / 9", border: "1px solid #26343a", borderRadius: 4, overflow: "hidden", background: "#05090a" }}>
+      <video
+        aria-label="Connector Launch Lab RF pulse animation"
+        autoPlay
+        loop
+        muted
+        playsInline
+        poster="/launch/connector-launch-explainer-poster.jpg"
+        preload="metadata"
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scale(1.02)", transformOrigin: "center center" }}
+      >
+        <source src="/launch/connector-launch-explainer.webm" type="video/webm" />
+        <source src="/launch/connector-launch-explainer.mp4" type="video/mp4" />
+      </video>
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(180deg, rgba(0,0,0,0.02), rgba(0,0,0,0.28))" }} />
+    </div>
+  );
+}
+
 function ConnectorLaunchLab() {
   const [presetId, setPresetId] = useState("sma18");
   const selectedPreset = CONNECTOR_LAUNCH_PRESETS.find((preset) => preset.id === presetId) || CONNECTOR_LAUNCH_PRESETS[0];
@@ -3259,17 +3280,20 @@ function ConnectorLaunchLab() {
 
   return (
     <div style={S.viewInner} data-testid="connector-launch-lab">
-      <div style={{ ...S.viewIntro, display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 16, alignItems: "center" }}>
-        <div style={{ width: 48, height: 48, border: "1px solid #324047", borderRadius: 4, display: "grid", placeItems: "center", color: "#38bdf8" }}>
-          <Gauge size={22} />
-        </div>
-        <div>
-          <div style={{ ...RF_FAILURE_UI.eyebrow, color: "#38bdf8" }}>Connector Launch Lab</div>
-          <div style={{ ...S.viewIntroStrong, marginTop: 6 }}>Connector geometry {"->"} return-loss story</div>
-          <div style={{ color: "#cbd5e1", lineHeight: 1.7, maxWidth: 860 }}>
-            Tune pin plane, strip length, dielectric gap, ferrule step, and crimp ovality to see the near-end TDR echo and S11 resonance move.
+      <div style={{ ...S.viewIntro, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))", gap: 18, alignItems: "center" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 16, alignItems: "center" }}>
+          <div style={{ width: 48, height: 48, border: "1px solid #324047", borderRadius: 4, display: "grid", placeItems: "center", color: "#38bdf8" }}>
+            <Gauge size={22} />
+          </div>
+          <div>
+            <div style={{ ...RF_FAILURE_UI.eyebrow, color: "#38bdf8" }}>Connector Launch Lab</div>
+            <div style={{ ...S.viewIntroStrong, marginTop: 6 }}>Connector geometry {"->"} return-loss story</div>
+            <div style={{ color: "#cbd5e1", lineHeight: 1.7, maxWidth: 860 }}>
+              Tune pin plane, strip length, dielectric gap, ferrule step, and crimp ovality to see the near-end TDR echo and S11 resonance move.
+            </div>
           </div>
         </div>
+        <ConnectorLaunchExplainerVideo />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, marginTop: 22 }}>
