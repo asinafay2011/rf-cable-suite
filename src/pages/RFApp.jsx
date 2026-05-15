@@ -2211,9 +2211,15 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
       <style>{`
         @keyframes rfPulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
         @keyframes rfFadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+        @keyframes rfScan { 0% { transform: translateX(-110%); opacity: 0; } 12%, 62% { opacity: 0.75; } 100% { transform: translateX(110%); opacity: 0; } }
         .rf-fade { animation: rfFadeUp 0.6s ease-out backwards; }
         .rf-card { transition: all 0.18s ease; }
         .rf-card:hover { transform: translateY(-2px); border-color: rgba(201, 123, 63, 0.6); }
+        .rf-command { transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease; }
+        .rf-command:hover { transform: translateY(-2px); border-color: rgba(94, 234, 212, 0.72); background: rgba(8, 15, 17, 0.76); }
+        .rf-hero-title { font-size: 76px; }
+        .rf-hero-copy { font-size: 18px; }
+        @media (max-width: 760px) { .rf-hero-title { font-size: 44px; } .rf-hero-copy { font-size: 15px; } }
         @keyframes rfRingDraw { from { stroke-dashoffset: 360; } to { stroke-dashoffset: 0; } }
       `}</style>
 
@@ -2236,41 +2242,70 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
 
       <div style={{ position: 'relative', zIndex: 1 }}>
         {/* HERO */}
-        <section className="rf-fade" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 32, alignItems: 'center', paddingTop: 18, paddingBottom: 36, borderBottom: '1px solid #252e33' }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, letterSpacing: 3, color: '#c97b3f', textTransform: 'uppercase', marginBottom: 10 }}>
-              ◆ RF Cable Workbench · v1
-            </div>
-            <h1 style={{ fontFamily: 'Fraunces, serif', fontSize: 'clamp(28px, 5vw, 46px)', fontWeight: 400, lineHeight: 1.05, color: '#f0ebe2', margin: 0, letterSpacing: '-0.01em' }}>
-              From <span style={{ color: '#c97b3f', fontStyle: 'italic' }}>50&thinsp;Ω</span> to a closed link budget — one workbench.
-            </h1>
-            <p style={{ marginTop: 18, color: '#a7b0b6', fontSize: 14, lineHeight: 1.6, maxWidth: 640 }}>
-              Search {cableCount} RF cables and connectors, design chains with realistic per-stage loss, run a full link budget against a sensitivity target, and answer "what cable for X" without leaving the page.
-              Every formula is local; every datasheet number is sourced.
-            </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 22 }}>
-              <PrimaryCTA onClick={() => setTab('library')} label="Browse cable library" />
-              <SecondaryCTA onClick={() => setTab('link')} label="Open link budget" />
-              <SecondaryCTA onClick={() => setTab('wizard')} label="Try the wizard" />
-            </div>
-            <div style={{ marginTop: 16, fontSize: 11, color: '#6b7479', fontFamily: 'JetBrains Mono, monospace' }}>
-              ⓘ Need help? Click the <span style={{ color: '#fbbf24' }}>Ask</span> button at the bottom-left to chat with the on-board RF agent — it can run every tool here.
-            </div>
-          </div>
+        <section
+          className="rf-fade"
+          style={{
+            position: 'relative',
+            minHeight: 'clamp(520px, 74vh, 760px)',
+            overflow: 'hidden',
+            border: '1px solid #2f251d',
+            borderRadius: 6,
+            background: '#07090a',
+            boxShadow: '0 28px 90px rgba(0,0,0,0.42)',
+          }}
+        >
+          <video
+            aria-label="RF cable connector energy hero animation"
+            autoPlay
+            loop
+            muted
+            playsInline
+            poster="/hero/rf-main-hero-poster.jpg"
+            preload="metadata"
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: 'saturate(1.08) contrast(1.08)' }}
+          >
+            <source src="/hero/rf-main-hero-higgsfield.webm" type="video/webm" />
+            <source src="/hero/rf-main-hero-higgsfield-noaudio.mp4" type="video/mp4" />
+          </video>
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(5,7,8,0.95) 0%, rgba(5,7,8,0.78) 36%, rgba(5,7,8,0.28) 72%, rgba(5,7,8,0.42) 100%)' }} />
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.34))' }} />
+          <div style={{ position: 'absolute', inset: '0 0 auto', height: 1, background: 'linear-gradient(90deg, transparent, rgba(251,191,36,0.85), rgba(94,234,212,0.55), transparent)', animation: 'rfScan 6s ease-in-out infinite' }} />
 
-          {/* Smith chart inspired hero graphic */}
-          <div style={{ display: 'none', flexShrink: 0 }} className="md-block">
-            <SmithChartBadge />
+          <div style={{ position: 'relative', zIndex: 1, minHeight: 'inherit', display: 'grid', gridTemplateRows: '1fr auto', padding: 'clamp(22px, 4vw, 42px)' }}>
+            <div style={{ maxWidth: 840, alignSelf: 'center', paddingBottom: 34 }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, border: '1px solid rgba(251,191,36,0.35)', background: 'rgba(5,9,10,0.62)', padding: '7px 10px', borderRadius: 3, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 2.8, color: '#fbbf24', textTransform: 'uppercase', marginBottom: 18 }}>
+                <span style={{ width: 7, height: 7, borderRadius: 999, background: '#5eead4', boxShadow: '0 0 18px #5eead4' }} />
+                RF Engineering Suite · local calculations
+              </div>
+              <h1 className="rf-hero-title" style={{ fontFamily: 'Fraunces, serif', fontWeight: 400, lineHeight: 0.92, color: '#f8efe0', margin: 0, letterSpacing: 0 }}>
+                Coaxial Cable Workbench
+              </h1>
+              <p className="rf-hero-copy" style={{ marginTop: 20, color: '#d9e2e5', lineHeight: 1.5, maxWidth: 760 }}>
+                Design RF cables, validate link budgets, and debug launch, shielding, stack-up, TDR, S11, VSWR, and loss in one high-speed lab.
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 24 }}>
+                <PrimaryCTA onClick={() => setTab('design')} label="Design cable" />
+                <SecondaryCTA onClick={() => setTab('stack')} label="Build RF stack" />
+                <SecondaryCTA onClick={() => setTab('launch')} label="Launch lab" />
+                <SecondaryCTA onClick={() => setTab('shielding')} label="Shielding lab" />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1, border: '1px solid rgba(167,176,182,0.18)', background: 'rgba(167,176,182,0.16)', backdropFilter: 'blur(10px)', width: 'min(100%, 620px)', marginLeft: 'auto' }}>
+              <HeroReadout value={cableCount} label="RF cable presets" accent="#5eead4" />
+              <HeroReadout value={connectorCount} label="connector types" accent="#fbbf24" />
+              <HeroReadout value={RF_TOOLS.length} label="calculation tools" accent="#fb923c" />
+              <HeroReadout value="0" label="cloud telemetry" accent="#cbd5e1" />
+            </div>
           </div>
-          <style>{`@media (min-width: 768px) { .md-block { display: block !important; } }`}</style>
         </section>
 
         {/* STATS BAR */}
-        <section className="rf-fade" style={{ animationDelay: '120ms', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 1, background: '#252e33', border: '1px solid #252e33', borderRadius: 4, marginTop: 32, overflow: 'hidden' }}>
-          <StatTile value={cableCount} label="RF cables" sub="RG / LMR / Heliax / phase-stable" color="#5eead4" />
-          <StatTile value={connectorCount} label="Connectors" sub="N · SMA · TNC · 7-16 · F · MMCX" color="#fbbf24" />
-          <StatTile value={RF_TOOLS.length} label="Calc tools" sub="link budget · NF · Smith · Friis" color="#c97b3f" />
-          <StatTile value="0" label="Telemetry" sub="every calc local in your browser" color="#a7b0b6" />
+        <section className="rf-fade" style={{ animationDelay: '120ms', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 18 }}>
+          <CommandCard label="Design workbench" sub="Compose a cable chain and test margin." accent="#5eead4" onClick={() => setTab('design')} />
+          <CommandCard label="Agent build flow" sub="Ask for a cable, then apply the stack." accent="#fbbf24" onClick={() => setTab('wizard')} />
+          <CommandCard label="Connector launch" sub="Pin plane, strip length, ferrule step." accent="#38bdf8" onClick={() => setTab('launch')} />
+          <CommandCard label="Failure theater" sub="Turn damage into TDR and S11 clues." accent="#f87171" onClick={() => setTab('failure')} />
         </section>
 
         {/* TOOL CARDS */}
@@ -2419,6 +2454,39 @@ function PrimaryCTA({ onClick, label }) {
       }}
     >
       {label} →
+    </button>
+  );
+}
+function HeroReadout({ value, label, accent }) {
+  return (
+    <div style={{ background: 'rgba(7, 12, 14, 0.66)', padding: '14px 16px', minHeight: 76 }}>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 23, color: accent, fontWeight: 900, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#d6dee2', textTransform: 'uppercase', letterSpacing: 1.8, marginTop: 8 }}>{label}</div>
+    </div>
+  );
+}
+function CommandCard({ label, sub, accent, onClick }) {
+  return (
+    <button
+      type="button"
+      className="rf-command"
+      onClick={onClick}
+      style={{
+        minHeight: 112,
+        border: '1px solid rgba(167,176,182,0.18)',
+        borderLeft: `3px solid ${accent}`,
+        borderRadius: 4,
+        background: 'linear-gradient(135deg, rgba(15,22,24,0.92), rgba(8,12,13,0.72))',
+        color: '#f0ebe2',
+        textAlign: 'left',
+        padding: 16,
+        cursor: 'pointer',
+        boxShadow: '0 16px 36px rgba(0,0,0,0.22)',
+      }}
+    >
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: accent, textTransform: 'uppercase', letterSpacing: 2.2, marginBottom: 12 }}>◆ Priority path</div>
+      <div style={{ fontFamily: 'Fraunces, serif', fontSize: 21, color: '#f8efe0', lineHeight: 1.05 }}>{label}</div>
+      <div style={{ marginTop: 8, color: '#9fb0b7', fontSize: 12, lineHeight: 1.45 }}>{sub}</div>
     </button>
   );
 }
