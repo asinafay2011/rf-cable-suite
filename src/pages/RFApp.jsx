@@ -2255,17 +2255,17 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
           }}
         >
           <video
-            aria-label="RF cable connector energy hero animation"
+            aria-label="Mission-critical RF cable signal path hero animation"
             autoPlay
             loop
             muted
             playsInline
-            poster="/hero/rf-main-hero-poster.jpg"
+            poster="/hero/rf-main-hero-mission-poster.jpg"
             preload="metadata"
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: 'saturate(1.08) contrast(1.08)' }}
           >
-            <source src="/hero/rf-main-hero-higgsfield.webm" type="video/webm" />
-            <source src="/hero/rf-main-hero-higgsfield-noaudio.mp4" type="video/mp4" />
+            <source src="/hero/rf-main-hero-mission.webm" type="video/webm" />
+            <source src="/hero/rf-main-hero-mission.mp4" type="video/mp4" />
           </video>
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(5,7,8,0.95) 0%, rgba(5,7,8,0.78) 36%, rgba(5,7,8,0.28) 72%, rgba(5,7,8,0.42) 100%)' }} />
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.34))' }} />
@@ -2275,13 +2275,13 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
             <div style={{ maxWidth: 840, alignSelf: 'center', paddingBottom: 34 }}>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, border: '1px solid rgba(251,191,36,0.35)', background: 'rgba(5,9,10,0.62)', padding: '7px 10px', borderRadius: 3, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 2.8, color: '#fbbf24', textTransform: 'uppercase', marginBottom: 18 }}>
                 <span style={{ width: 7, height: 7, borderRadius: 999, background: '#5eead4', boxShadow: '0 0 18px #5eead4' }} />
-                RF Engineering Suite · local calculations
+                Mission-critical RF signal paths
               </div>
               <h1 className="rf-hero-title" style={{ fontFamily: 'Fraunces, serif', fontWeight: 400, lineHeight: 0.92, color: '#f8efe0', margin: 0, letterSpacing: 0 }}>
                 Coaxial Cable Workbench
               </h1>
               <p className="rf-hero-copy" style={{ marginTop: 20, color: '#d9e2e5', lineHeight: 1.5, maxWidth: 760 }}>
-                Design RF cables, validate link budgets, and debug launch, shielding, stack-up, TDR, S11, VSWR, and loss in one high-speed lab.
+                From aerospace radar to satellite ground stations and RF labs, design the cable that keeps the signal clean.
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 24 }}>
                 <PrimaryCTA onClick={() => setTab('design')} label="Design cable" />
