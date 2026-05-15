@@ -60,7 +60,7 @@ Multi-tool orchestration (chain calls in one turn whenever the engineer's questi
 - Prefer parallel tool calls (multiple tool_use blocks in one turn) when calls are independent. Chain sequentially only when one feeds the next.
 
 Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP and Y Ω"):
-- The user describes a target — e.g. "conductor 0.045 inch, hit 80% VP at 50 Ω". Call \`design_dielectric_stack\` with the parsed targets. The tool dry-runs the recipe against the RF stack calculator before exposing an Apply preset. Only tell the user to click Apply if \`_preflight.allow_apply\` is true; if Apply is held, adjust the tool input/recipe or explain what failed.
+- The user describes a target — e.g. "conductor 0.045 inch, hit 80% VP at 50 Ω". First call \`optimize_dielectric_stack\` to scan stocked PTFE tape/wrap/tension/pass combinations against Z0, VP, and dielectric OD. Then call \`design_dielectric_stack\` with the chosen stocked tape/wrap/tension settings when an MI download is needed. If the engineer gives a specific recipe, call \`validate_recipe_against_rf_stack\` before recommending Apply. These tools dry-run the recipe against the RF stack calculator before exposing an Apply preset. Only tell the user to click Apply if \`_preflight.allow_apply\` is true; if Apply is held, adjust the tool input/recipe or explain what failed.
 - Auto-detect units: if the conductor OD is between 0.005 and 0.5 it is almost certainly inches (RF inner conductors are 0.020 / 0.032 / 0.045 / 0.057"); pass it as \`conductor_od_inch\`. If between 0.5 and 30 and the user said "mm", pass as \`conductor_od_mm\`.
 - Default to a HD-inside / LD-outside MIX unless the user specifies otherwise — it gives the lowest dielectric loss while still hitting target VP.
 - PTFE tape must come from the Material Library. Use real 962-96000 tape part numbers returned by \`design_dielectric_stack\` / \`lookup_material_library\`; do not invent tape thickness, density, or width when a library match exists.
@@ -73,6 +73,7 @@ Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP a
 - If the user asks for a blank manufacturing instruction / MI template, call \`generate_blank_mi_template\`; it returns the shop MI-ST962-032-130 .xlsx template as a downloadable Excel workbook.
 - When \`design_dielectric_stack\` is used for a factory build, the tool returns a downloadable filled shop MI .xlsx based on MI-ST962-032-130. Tell the user to download it from the tool card; it fills the Taping (3-Bay) sheets with selected Material Library tape, lay direction, pitch set-point, tension, and OD after each wrap.
 - Manufacturing rule (enforced by the tool): if conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm). The tool reports the clamp in its notes — surface that fact to the user so they understand why the recipe uses thinner tape with more passes.
+- Before presenting an Apply button as the final answer, treat \`optimize_dielectric_stack\` / \`validate_recipe_against_rf_stack\` as the agent's calculator screenshot check: confirm the predicted dielectric OD, VP, and Z0 match the requested target. Do not rely on a visual-looking stack if the calculator says impedance is low or dielectric OD is low.
 - After designing, ALSO call \`compute_tape_notches\` in the same turn (parallel) to flag Bragg suckouts the build will produce. Warn explicitly when 2+ tape layers share the same pitch (coherent → strong notch).
 - In the chat reply, summarise: targets → composition (HD% + LD%) → predicted final OD/VP/Z₀ → notch frequencies → preflight status. Say "click Apply" only when the returned tool card actually shows an Apply button. Always cite the small-conductor clamp note when it fires.
 
@@ -217,6 +218,8 @@ const RF_TOOL_TO_SECTION = {
   lookup_material_library:  { id: 'materials', label: 'Material Library' },
   generate_blank_mi_template:{ id: 'materials', label: 'Material Library' },
   design_dielectric_stack:  { id: 'stack', label: 'RF Stack Lab' },
+  optimize_dielectric_stack:{ id: 'stack', label: 'RF Stack Lab' },
+  validate_recipe_against_rf_stack:{ id: 'stack', label: 'RF Stack Lab' },
   design_shield_stack:      { id: 'stack', label: 'RF Stack Lab' },
   compute_tape_notches:     { id: 'stack', label: 'RF Stack Lab' },
   connector_launch_analyzer:{ id: 'tools', label: 'Tools' },
