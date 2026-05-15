@@ -819,14 +819,32 @@ function HomeView({ setSection }) {
     { id: 'more', label: 'M4–10', desc: 'Shielding, jacket, hipot, BER, qualification' },
   ];
 
+  const missionCommands = [
+    { id: 'library', label: 'AI server links', sub: 'DAC/twinax paths between GPUs and switches.', accent: '#5eead4' },
+    { id: 'sim', label: 'Machine vision harness', sub: 'Camera-to-controller data in industrial cells.', accent: '#c97b3f' },
+    { id: 'si', label: 'Signal-integrity lab', sub: 'TDR, VNA, eye, skew, crosstalk.', accent: '#fbbf24' },
+    { id: 'progression', label: 'Manufacturing flow', sub: 'Conductor to jacket recipe progression.', accent: '#a78bfa' },
+  ];
+
   return (
     <div style={{ position: 'relative', minHeight: '100%' }}>
       <style>{`
         @keyframes hsPulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
         @keyframes hsFadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+        @keyframes hsScan { from { transform: translateX(-120%); } to { transform: translateX(120%); } }
         .hs-fade { animation: hsFadeUp 0.6s ease-out backwards; }
         .hs-card { transition: all 0.18s ease; }
         .hs-card:hover { transform: translateY(-2px); border-color: rgba(201, 123, 63, 0.6); }
+        .hs-command { transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease; }
+        .hs-command:hover { transform: translateY(-2px); border-color: rgba(94, 234, 212, 0.55); background: rgba(18, 23, 26, 0.88); }
+        .hs-hero-title { font-size: clamp(42px, 7vw, 86px); }
+        .hs-hero-copy { font-size: clamp(15px, 1.5vw, 19px); }
+        .hs-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+        @media (max-width: 760px) {
+          .hs-hero-title { font-size: 42px; }
+          .hs-hero-copy { font-size: 15px; }
+          .hs-hero-actions button { flex: 1 1 100%; }
+        }
         @keyframes hsRingDraw { from { stroke-dashoffset: 360; } to { stroke-dashoffset: 0; } }
         .hs-ring { stroke-dasharray: 360; animation: hsRingDraw 2s ease-out forwards; }
       `}</style>
@@ -850,40 +868,94 @@ function HomeView({ setSection }) {
 
       <div style={{ position: 'relative', zIndex: 1 }}>
         {/* HERO */}
-        <section className="hs-fade" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 32, alignItems: 'center', paddingTop: 18, paddingBottom: 36, borderBottom: '1px solid #252e33' }}>
-          <div style={{ minWidth: 0 }}>
-            <div className="font-mono" style={{ fontSize: 11, letterSpacing: 3, color: '#c97b3f', textTransform: 'uppercase', marginBottom: 10 }}>
-              ◆ CABLE.LAB · High-Speed Manufacturing · v1
+        <section
+          className="hs-fade"
+          style={{
+            minHeight: 'clamp(520px, 74vh, 760px)',
+            position: 'relative',
+            overflow: 'hidden',
+            border: '1px solid #252e33',
+            borderRadius: 4,
+            background: '#0a0d0f',
+            boxShadow: '0 32px 90px rgba(0, 0, 0, 0.45)',
+          }}
+        >
+          <video
+            aria-label="Mission-critical high-speed data cable hero animation"
+            autoPlay
+            loop
+            muted
+            playsInline
+            poster="/hero/hs-main-hero-mission-poster.jpg"
+            preload="metadata"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              opacity: 0.78,
+            }}
+          >
+            <source src="/hero/hs-main-hero-mission.webm" type="video/webm" />
+            <source src="/hero/hs-main-hero-mission.mp4" type="video/mp4" />
+          </video>
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(10, 13, 15, 0.96) 0%, rgba(10, 13, 15, 0.78) 34%, rgba(10, 13, 15, 0.18) 76%, rgba(10, 13, 15, 0.5) 100%)' }} />
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(0deg, rgba(10, 13, 15, 0.9) 0%, rgba(10, 13, 15, 0.16) 42%, rgba(10, 13, 15, 0.48) 100%)' }} />
+          <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 1, background: 'linear-gradient(90deg, transparent, #5eead4, #c97b3f, transparent)', animation: 'hsScan 5s linear infinite', opacity: 0.78 }} />
+
+          <div
+            style={{
+              position: 'relative',
+              zIndex: 2,
+              minHeight: 'inherit',
+              display: 'grid',
+              gridTemplateRows: '1fr auto',
+              padding: 'clamp(22px, 5vw, 54px)',
+              gap: 28,
+            }}
+          >
+            <div style={{ maxWidth: 900, alignSelf: 'center' }}>
+              <div className="font-mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 11, letterSpacing: 3, color: '#5eead4', textTransform: 'uppercase', marginBottom: 14, padding: '7px 10px', border: '1px solid rgba(94, 234, 212, 0.35)', background: 'rgba(10, 13, 15, 0.58)' }}>
+                <span style={{ color: '#c97b3f' }}>◆</span> Mission-critical high-speed data paths
+              </div>
+              <h1 className="hs-hero-title" style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontWeight: 300, lineHeight: 0.96, color: '#f0ebe2', margin: 0, textShadow: '0 10px 40px rgba(0, 0, 0, 0.62)' }}>
+                High-Speed Cable Workbench
+              </h1>
+              <p className="hs-hero-copy" style={{ marginTop: 20, color: '#d8e5e4', lineHeight: 1.55, maxWidth: 740, textShadow: '0 8px 30px rgba(0, 0, 0, 0.72)' }}>
+                From AI server links to machine-vision cameras and SI labs, design the cable that keeps the eye open.
+              </p>
+              <div className="hs-hero-actions">
+                <HsPrimaryCTA onClick={() => setSection('sim')} label="Open Process Sim" />
+                <HsSecondaryCTA onClick={() => setSection('si')} label="Open SI Lab" />
+                <HsSecondaryCTA onClick={() => setSection('progression')} label="Progression" />
+                <HsSecondaryCTA onClick={() => setSection('library')} label="Cable Library" />
+              </div>
+              <div style={{ marginTop: 18, fontSize: 11, color: '#b4c0c4', fontFamily: 'JetBrains Mono, monospace', maxWidth: 720, lineHeight: 1.6 }}>
+                The Ask agent can drive every tool here, save company defaults, and turn a cable request into a buildable manufacturing recipe.
+              </div>
             </div>
-            <h1 style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 'clamp(28px, 5vw, 46px)', fontWeight: 300, lineHeight: 1.05, color: '#f0ebe2', margin: 0, letterSpacing: '-0.01em' }}>
-              From a strand of copper to a <span style={{ color: '#c97b3f', fontStyle: 'italic' }}>controlled-impedance</span> cable.
-            </h1>
-            <p style={{ marginTop: 18, color: '#a7b0b6', fontSize: 14, lineHeight: 1.6, maxWidth: 640 }}>
-              Build a Cat 6A / Cat 8 / USB4 / shielded-pair recipe stage-by-stage and watch its predicted Z₀, IL, NEXT, and skew update in real time.
-              Every formula cited (Wadell, SCTE 51, IEC 61156). Every test path local. Every datasheet URL clickable.
-            </p>
-            <div className="hs-ctas" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 22 }}>
-              <HsPrimaryCTA onClick={() => setSection('sim')} label="Open Process Sim" />
-              <HsSecondaryCTA onClick={() => setSection('si')} label="Open SI Lab" />
-              <HsSecondaryCTA onClick={() => setSection('progression')} label="Progression walkthrough" />
-            </div>
-            <div style={{ marginTop: 16, fontSize: 11, color: '#6b7479', fontFamily: 'JetBrains Mono, monospace' }}>
-              ⓘ The <span style={{ color: '#fbbf24' }}>Ask</span> button bottom-left chats with a manufacturing-engineer agent — it can drive every tool here, save your custom cables, and remember company defaults.
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(142px, 1fr))', gap: 1, marginLeft: 'auto', width: 'min(760px, 100%)', border: '1px solid rgba(167, 176, 182, 0.18)', background: 'rgba(167, 176, 182, 0.18)', backdropFilter: 'blur(10px)' }}>
+              <HsHeroReadout value="9" label="mfg stages" accent="#c97b3f" />
+              <HsHeroReadout value={cableCount} label="cable presets" accent="#5eead4" />
+              <HsHeroReadout value="112G" label="PAM4 examples" accent="#fbbf24" />
+              <HsHeroReadout value={standardCount} label="standards" accent="#a78bfa" />
             </div>
           </div>
-          {/* Decorative coax cross-section badge */}
-          <div className="hs-md" style={{ display: 'none', flexShrink: 0 }}>
-            <CoaxBadge />
-          </div>
-          <style>{`@media (min-width: 768px) { .hs-md { display: block !important; } }`}</style>
         </section>
 
-        {/* STATS BAR */}
-        <section className="hs-fade" style={{ animationDelay: '120ms', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 1, background: '#252e33', border: '1px solid #252e33', borderRadius: 4, marginTop: 32, overflow: 'hidden' }}>
-          <HsStatTile value="9" label="Mfg stages" sub="conductor → jacket pipeline" color="#c97b3f" />
-          <HsStatTile value={cableCount} label="Cable presets" sub="Cat · USB4 · IB · DAC · STP" color="#5eead4" />
-          <HsStatTile value="276" label="Z₀ formula" sub="log/√εᵣ · Wadell" color="#fbbf24" />
-          <HsStatTile value={standardCount} label="Standards" sub="TIA · IEC · IEEE · SCTE · MIL" color="#a78bfa" />
+        {/* MISSION STRIP */}
+        <section className="hs-fade" style={{ animationDelay: '120ms', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10, marginTop: 14 }}>
+          {missionCommands.map((item) => (
+            <HsCommandCard
+              key={item.label}
+              label={item.label}
+              sub={item.sub}
+              accent={item.accent}
+              onClick={() => setSection(item.id)}
+            />
+          ))}
         </section>
 
         {/* TOOL CARDS */}
@@ -1033,6 +1105,37 @@ function HsPrimaryCTA({ onClick, label }) {
       }}
     >
       {label} →
+    </button>
+  );
+}
+function HsHeroReadout({ value, label, accent }) {
+  return (
+    <div style={{ background: 'rgba(10, 13, 15, 0.72)', padding: '13px 14px' }}>
+      <div style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 29, fontWeight: 500, color: accent, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#d7e0df', textTransform: 'uppercase', letterSpacing: 1.7, marginTop: 6 }}>{label}</div>
+    </div>
+  );
+}
+function HsCommandCard({ label, sub, accent, onClick }) {
+  return (
+    <button
+      className="hs-command"
+      onClick={onClick}
+      style={{
+        background: 'rgba(18, 23, 26, 0.78)',
+        color: '#f0ebe2',
+        border: '1px solid #252e33',
+        borderLeft: `3px solid ${accent}`,
+        borderRadius: 4,
+        padding: 15,
+        textAlign: 'left',
+        cursor: 'pointer',
+        minHeight: 96,
+      }}
+    >
+      <div style={{ fontFamily: 'Bricolage Grotesque, sans-serif', fontSize: 17, color: accent, fontWeight: 500 }}>{label}</div>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: '#a7b0b6', lineHeight: 1.5, marginTop: 7 }}>{sub}</div>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#6b7479', letterSpacing: 1.6, textTransform: 'uppercase', marginTop: 12 }}>Open →</div>
     </button>
   );
 }
