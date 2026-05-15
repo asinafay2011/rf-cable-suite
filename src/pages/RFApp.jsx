@@ -3763,13 +3763,39 @@ function ShieldingEffectivenessLab() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))", gap: 18, marginTop: 22, alignItems: "stretch" }}>
         <section style={{ ...RF_FAILURE_UI.panel, overflow: "hidden", minWidth: 0 }}>
           <div style={{ position: "relative", height: "clamp(390px, 34vw, 560px)", background: "radial-gradient(circle at 24% 18%, #142327, #050808 62%)" }}>
-            <img
-              src={activePreset.image}
-              alt={`${activePreset.label} Blender RF shielding cutaway`}
-              style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", opacity: 0.98 }}
+            <style>{`
+              @media (prefers-reduced-motion: reduce) {
+                .shielding-explainer-video { display: none; }
+                .shielding-explainer-poster { opacity: 1 !important; }
+              }
+            `}</style>
+            <div
+              className="shielding-explainer-poster"
+              style={{
+                position: "absolute",
+                inset: 0,
+                backgroundImage: "url(/shielding/rf-shielding-explainer-poster.jpg)",
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                opacity: 0,
+              }}
             />
-            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.02), rgba(0,0,0,0.42))" }} />
-            <div style={{ position: "absolute", top: 16, left: 16, ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>Blender shielding scene</div>
+            <video
+              className="shielding-explainer-video"
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="metadata"
+              poster="/shielding/rf-shielding-explainer-poster.jpg"
+              aria-label={`${activePreset.label} RF shielding effectiveness explainer`}
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", opacity: 0.96 }}
+            >
+              <source src="/shielding/rf-shielding-explainer-veo31.webm" type="video/webm" />
+              <source src="/shielding/rf-shielding-explainer-veo31.mp4" type="video/mp4" />
+            </video>
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.04), rgba(0,0,0,0.48))" }} />
+            <div style={{ position: "absolute", top: 16, left: 16, ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>RF shielding explainer</div>
             <div style={{ position: "absolute", right: 16, top: 16, padding: "9px 11px", border: `1px solid ${result.gradeColor}`, borderRadius: 4, background: "rgba(5,9,11,0.78)", color: result.gradeColor, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>
               {result.grade}
             </div>
