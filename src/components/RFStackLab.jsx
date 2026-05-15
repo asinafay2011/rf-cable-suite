@@ -1693,12 +1693,12 @@ function StackExplainerVideo() {
         loop
         muted
         playsInline
-        poster="/stack/rf-stack-lab-explainer-poster.jpg"
+        poster="/stack/rf-stack-lab-process-poster.jpg"
         preload="metadata"
         style={S.stackExplainerVideo}
       >
-        <source src="/stack/rf-stack-lab-explainer-veo31.webm" type="video/webm" />
-        <source src="/stack/rf-stack-lab-explainer-veo31.mp4" type="video/mp4" />
+        <source src="/stack/rf-stack-lab-process.webm" type="video/webm" />
+        <source src="/stack/rf-stack-lab-process.mp4" type="video/mp4" />
       </video>
       <div style={S.stackExplainerVignette} />
     </div>
