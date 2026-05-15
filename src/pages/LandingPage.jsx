@@ -39,6 +39,12 @@ export default function LandingPage() {
         .cable-glow { animation: glowPulse 4s ease-in-out infinite; }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
         .fade-up { animation: fadeUp 0.8s ease-out backwards; }
+        .hero-poster-bg { opacity: 0; }
+        @media (prefers-reduced-motion: reduce) {
+          .hero-motion-video { display: none; }
+          .hero-poster-bg { opacity: 1; }
+          .fade-up { animation: none; }
+        }
       `}</style>
 
       {/* Decorative background */}
@@ -77,9 +83,30 @@ export default function LandingPage() {
       </header>
 
       {/* Hero */}
-      <section className="relative z-10 max-w-6xl mx-auto px-6 md:px-12 pt-12 pb-24">
-        <div className="grid md:grid-cols-[1fr_auto] gap-8 md:gap-16 items-center">
-          <div className="fade-up">
+      <section className="relative z-10 overflow-hidden border-y border-[#252e33]" style={{ minHeight: 'min(760px, calc(100svh - 96px))' }}>
+        <div
+          className="hero-poster-bg absolute inset-0 bg-cover bg-center transition-opacity duration-300"
+          style={{ backgroundImage: 'url(/hero/rf-main-hero-poster.jpg)' }}
+        />
+        <video
+          className="hero-motion-video absolute inset-0 h-full w-full object-cover opacity-75"
+          style={{ objectPosition: '64% center' }}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          poster="/hero/rf-main-hero-poster.jpg"
+          aria-hidden="true"
+        >
+          <source src="/hero/rf-main-hero-higgsfield.webm" type="video/webm" />
+          <source src="/hero/rf-main-hero-higgsfield-noaudio.mp4" type="video/mp4" />
+        </video>
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(10,13,15,0.97)_0%,rgba(10,13,15,0.86)_34%,rgba(10,13,15,0.42)_68%,rgba(10,13,15,0.82)_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,13,15,0.75)_0%,rgba(10,13,15,0.06)_42%,rgba(10,13,15,0.82)_100%)]" />
+
+        <div className="relative max-w-6xl mx-auto px-6 md:px-12 py-14 md:py-20 min-h-[inherit] flex items-center">
+          <div className="fade-up max-w-3xl">
             <div className="font-mono text-[11px] tracking-[0.3em] text-[#c97b3f] uppercase mb-6">
               ◆ Engineering workbench · v1
             </div>
@@ -88,13 +115,13 @@ export default function LandingPage() {
               to a <span className="italic text-[#c97b3f]">controlled-impedance</span><br />
               cable
             </h1>
-            <p className="text-lg text-[#a7b0b6] max-w-xl leading-relaxed mb-8">
-              Two engineering apps + a tool-using AI agent — coaxial cable workbench, high-speed
-              cable manufacturing curriculum, and a Touchstone-grade VNA Lab. Every calculation
-              local. Every formula cited.
+            <p className="text-lg text-[#cbd5dc] max-w-xl leading-relaxed mb-8">
+              Coaxial cable workbench, high-speed cable manufacturing curriculum, and a
+              Touchstone-grade VNA Lab with a tool-using RF agent. Every calculation local.
+              Every formula cited.
             </p>
 
-            <div className="flex flex-wrap gap-3 mb-12">
+            <div className="flex flex-wrap gap-3 mb-10">
               {lastApp ? (
                 <Link
                   to={lastApp === 'highspeed' ? '/highspeed' : '/rf'}
@@ -114,32 +141,26 @@ export default function LandingPage() {
               )}
               <Link
                 to="/rf"
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-md border border-[#384249] hover:border-[#c97b3f] hover:bg-[#1f1610] text-[#f0ebe2] text-sm font-semibold uppercase tracking-wider transition-colors"
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-md border border-[#c97b3f]/70 bg-[#0a0d0f]/45 hover:bg-[#1f1610] text-[#f0ebe2] text-sm font-semibold uppercase tracking-wider transition-colors backdrop-blur"
                 style={{ fontFamily: 'JetBrains Mono, monospace' }}
               >
                 <Radio size={14} /> RF Workbench
               </Link>
               <Link
                 to="/highspeed"
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-md border border-[#384249] hover:border-[#c97b3f] hover:bg-[#1f1610] text-[#f0ebe2] text-sm font-semibold uppercase tracking-wider transition-colors"
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-md border border-[#384249] bg-[#0a0d0f]/45 hover:border-[#c97b3f] hover:bg-[#1f1610] text-[#f0ebe2] text-sm font-semibold uppercase tracking-wider transition-colors backdrop-blur"
                 style={{ fontFamily: 'JetBrains Mono, monospace' }}
               >
                 <Cable size={14} /> CABLE.LAB
               </Link>
             </div>
 
-            {/* Stats inline */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 max-w-2xl pt-6 border-t border-[#252e33]">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 max-w-2xl pt-6 border-t border-[#384249]/70">
               <Stat n="18" label="AI tools" tone={C.teal} />
               <Stat n="20+" label="cable presets" tone={C.teal} />
               <Stat n=".s1p" label="Touchstone ready" tone={C.amber} />
               <Stat n="0" label="telemetry" tone={C.copper} />
             </div>
-          </div>
-
-          {/* Decorative cable cross-section */}
-          <div className="hidden md:block fade-up" style={{ animationDelay: '0.2s' }}>
-            <CableArt />
           </div>
         </div>
       </section>
