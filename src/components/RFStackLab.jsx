@@ -1889,8 +1889,20 @@ export default function RFStackLab() {
     const rawDielectricWall = layerBuilds.reduce((sum, layer) => sum + layer.radial, 0)
     const dielectricWall = rawDielectricWall || 0.12
     const dielectricOD = params.conductorOD + 2 * dielectricWall
-    const epsBase = layerBuilds.length && rawDielectricWall > 0
-      ? layerBuilds.reduce((sum, layer) => sum + layer.eps * layer.radial, 0) / rawDielectricWall
+    let mixRadius = params.conductorOD / 2
+    let logTotal = 0
+    let weightedLog = 0
+    layerBuilds.forEach((layer) => {
+      const nextRadius = mixRadius + layer.radial
+      if (nextRadius > mixRadius && layer.eps > 0) {
+        const dlog = Math.log(nextRadius / mixRadius)
+        logTotal += dlog
+        weightedLog += dlog / layer.eps
+      }
+      mixRadius = nextRadius
+    })
+    const epsBase = layerBuilds.length && rawDielectricWall > 0 && weightedLog > 0
+      ? logTotal / weightedLog
       : 1.02
     const eps = epsBase * (1 + params.suckout * 0.0018)
     const vp = 1 / Math.sqrt(eps)

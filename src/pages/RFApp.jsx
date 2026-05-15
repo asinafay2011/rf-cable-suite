@@ -60,7 +60,7 @@ Multi-tool orchestration (chain calls in one turn whenever the engineer's questi
 - Prefer parallel tool calls (multiple tool_use blocks in one turn) when calls are independent. Chain sequentially only when one feeds the next.
 
 Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP and Y Ω"):
-- The user describes a target — e.g. "conductor 0.045 inch, hit 80% VP at 50 Ω". Call \`design_dielectric_stack\` with the parsed targets. The tool returns a complete layer recipe AND a one-click apply preset that the chat surfaces as an "Apply" button. The user clicks → the RF Stack Lab tab is auto-filled.
+- The user describes a target — e.g. "conductor 0.045 inch, hit 80% VP at 50 Ω". Call \`design_dielectric_stack\` with the parsed targets. The tool dry-runs the recipe against the RF stack calculator before exposing an Apply preset. Only tell the user to click Apply if \`_preflight.allow_apply\` is true; if Apply is held, adjust the tool input/recipe or explain what failed.
 - Auto-detect units: if the conductor OD is between 0.005 and 0.5 it is almost certainly inches (RF inner conductors are 0.020 / 0.032 / 0.045 / 0.057"); pass it as \`conductor_od_inch\`. If between 0.5 and 30 and the user said "mm", pass as \`conductor_od_mm\`.
 - Default to a HD-inside / LD-outside MIX unless the user specifies otherwise — it gives the lowest dielectric loss while still hitting target VP.
 - PTFE tape must come from the Material Library. Use real 962-96000 tape part numbers returned by \`design_dielectric_stack\` / \`lookup_material_library\`; do not invent tape thickness, density, or width when a library match exists.
@@ -74,7 +74,7 @@ Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP a
 - When \`design_dielectric_stack\` is used for a factory build, the tool returns a downloadable filled shop MI .xlsx based on MI-ST962-032-130. Tell the user to download it from the tool card; it fills the Taping (3-Bay) sheets with selected Material Library tape, lay direction, pitch set-point, tension, and OD after each wrap.
 - Manufacturing rule (enforced by the tool): if conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm). The tool reports the clamp in its notes — surface that fact to the user so they understand why the recipe uses thinner tape with more passes.
 - After designing, ALSO call \`compute_tape_notches\` in the same turn (parallel) to flag Bragg suckouts the build will produce. Warn explicitly when 2+ tape layers share the same pitch (coherent → strong notch).
-- In the chat reply, summarise: targets → composition (HD% + LD%) → predicted final OD/VP/Z₀ → notch frequencies → "click Apply to build it on the RF Stack Lab tab". Always cite the small-conductor clamp note when it fires.
+- In the chat reply, summarise: targets → composition (HD% + LD%) → predicted final OD/VP/Z₀ → notch frequencies → preflight status. Say "click Apply" only when the returned tool card actually shows an Apply button. Always cite the small-conductor clamp note when it fires.
 
 Inline diagrams (\`generate_diagram\` tool):
 - Use it when a picture beats text. Kinds: smith_chart, atten_curve, cross_section, eye_diagram, z_step_chart, bargraph.

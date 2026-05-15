@@ -2011,7 +2011,9 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
   const presetData = parsedResult?._apply_preset
   const presetLabel = parsedResult?.label
   const downloadSpec = parsedResult?._download
-  const canApplyPreset = presetSection && presetData && !partial && !parsedResult?.error
+  const preflight = parsedResult?._preflight
+  const applyBlocked = Boolean(parsedResult?._apply_blocked || preflight?.allow_apply === false)
+  const canApplyPreset = presetSection && presetData && !applyBlocked && !partial && !parsedResult?.error
   const canDownload = downloadSpec && !partial && !parsedResult?.error
   const applyPreset = () => {
     if (onJumpToSection) onJumpToSection(presetSection)
@@ -2060,6 +2062,30 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
         {/* Inline what-if panel for results that include _whatif_panel */}
         {!partial && !parsedResult?.error && parsedResult?._whatif_panel && (
           <WhatIfPanel spec={parsedResult._whatif_panel} accent={accent} />
+        )}
+
+        {!partial && !parsedResult?.error && preflight && (
+          <div className="px-2.5 py-1.5 border-t text-[11px]" style={{ borderColor: '#1a2226', background: preflight.allow_apply ? '#07110f' : '#140c0a' }}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono uppercase tracking-wider" style={{ color: preflight.allow_apply ? '#5eead4' : '#fbbf24' }}>
+                {preflight.allow_apply ? 'Preflight pass' : 'Apply held'}
+              </span>
+              <span className="text-[#6b7479]">{preflight.message}</span>
+            </div>
+            {Array.isArray(preflight.checks) && preflight.checks.length > 0 && (
+              <div className="mt-1 grid gap-1">
+                {preflight.checks.map((check) => (
+                  <div key={check.name} className="flex items-center justify-between gap-2 font-mono text-[10px]">
+                    <span style={{ color: check.pass ? '#5eead4' : '#f87171' }}>{check.name}</span>
+                    <span className="text-[#a7b0b6]">
+                      {check.actual} / {check.target}{check.unit && check.unit !== 'VP' ? ` ${check.unit}` : ''}
+                      <span className="text-[#6b7479]"> Δ {check.delta}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Inline Apply button when the tool result carries a preset */}

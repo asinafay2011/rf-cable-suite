@@ -1637,6 +1637,109 @@ function _overlapLayers(o) {
   return ptfeWrapLayers(o)
 }
 
+function _simulateTapePassPlan({ conductorOdMm, tapeThicknessMm, overlap, tensionFactor, hdPasses = 0, ldPasses = 0 }) {
+  const d = Number(conductorOdMm)
+  const perPass = Number(tapeThicknessMm) * _overlapLayers(overlap) * Number(tensionFactor)
+  if (!(d > 0) || !(perPass > 0)) return null
+  let r = d / 2
+  let logTot = 0
+  let weighted = 0
+  for (const item of [
+    { density: 1.6, passes: Math.max(0, Math.round(hdPasses)) },
+    { density: 0.7, passes: Math.max(0, Math.round(ldPasses)) },
+  ]) {
+    if (!item.passes) continue
+    const rNext = r + perPass * item.passes
+    const dl = Math.log(rNext / r)
+    logTot += dl
+    weighted += dl / _densityToEps(item.density)
+    r = rNext
+  }
+  if (!(logTot > 0) || !(weighted > 0)) return null
+  const finalOdMm = 2 * r
+  const epsEff = logTot / weighted
+  const vp = 1 / Math.sqrt(epsEff)
+  const z0 = (60 / Math.sqrt(epsEff)) * Math.log(finalOdMm / d)
+  return { hdPasses, ldPasses, finalOdMm, epsEff, vp, z0, totalPasses: hdPasses + ldPasses }
+}
+
+function _findBestTapePassPlan({ conductorOdMm, tapeThicknessMm, overlap, tensionFactor, targetZ0, targetVp, targetOdMm, mode, fHD, dielectricThkTarget }) {
+  const perPass = Number(tapeThicknessMm) * _overlapLayers(overlap) * Number(tensionFactor)
+  const nominalPasses = perPass > 0 ? Math.max(1, Number(dielectricThkTarget) / perPass) : 1
+  const maxPasses = Math.max(1, Math.min(48, Math.ceil(nominalPasses + 10)))
+  const preferMode = String(mode || 'mix').toLowerCase()
+  let best = null
+
+  const scorePlan = (sim) => {
+    if (!sim) return Infinity
+    let score = 0
+    if (targetZ0 != null) score += Math.pow((sim.z0 - targetZ0) / 0.75, 2)
+    if (targetVp != null) score += Math.pow((sim.vp - targetVp) / 0.006, 2)
+    if (targetOdMm != null) {
+      const odTol = Math.max(0.06, targetOdMm * 0.012)
+      score += Math.pow((sim.finalOdMm - targetOdMm) / odTol, 2)
+      if (sim.finalOdMm < targetOdMm) score += Math.pow((targetOdMm - sim.finalOdMm) / odTol, 2) * 0.25
+    }
+    if (preferMode === 'mix' && sim.totalPasses > 0 && fHD > 0 && fHD < 1) {
+      score += Math.pow((sim.hdPasses / sim.totalPasses - fHD) / 0.35, 2) * 0.12
+    }
+    return score
+  }
+
+  for (let total = 1; total <= maxPasses; total++) {
+    const plans = []
+    if (preferMode === 'hd') plans.push({ hdPasses: total, ldPasses: 0 })
+    else if (preferMode === 'ld') plans.push({ hdPasses: 0, ldPasses: total })
+    else {
+      for (let hdPasses = 0; hdPasses <= total; hdPasses++) {
+        plans.push({ hdPasses, ldPasses: total - hdPasses })
+      }
+    }
+    for (const plan of plans) {
+      const sim = _simulateTapePassPlan({
+        conductorOdMm,
+        tapeThicknessMm,
+        overlap,
+        tensionFactor,
+        ...plan,
+      })
+      const score = scorePlan(sim)
+      if (!best || score < best.score) best = { ...sim, score }
+    }
+  }
+
+  return best || { hdPasses: 1, ldPasses: 0, totalPasses: 1 }
+}
+
+function _makePreflightValidation({ predicted, targetZ0, targetVp, targetOdMm }) {
+  const checks = []
+  const addCheck = ({ name, target, actual, tolerance, unit }) => {
+    if (target == null || actual == null || !isFinite(target) || !isFinite(actual)) return
+    const delta = actual - target
+    checks.push({
+      name,
+      target: round(target, unit === 'mm' ? 3 : unit === 'VP' ? 4 : 2),
+      actual: round(actual, unit === 'mm' ? 3 : unit === 'VP' ? 4 : 2),
+      delta: round(delta, unit === 'mm' ? 3 : unit === 'VP' ? 4 : 2),
+      tolerance,
+      unit,
+      pass: Math.abs(delta) <= tolerance,
+    })
+  }
+  addCheck({ name: 'Z0', target: targetZ0, actual: predicted?.z0_ohm, tolerance: 1.5, unit: 'ohm' })
+  addCheck({ name: 'VP', target: targetVp, actual: predicted?.vp, tolerance: 0.015, unit: 'VP' })
+  addCheck({ name: 'Dielectric OD', target: targetOdMm, actual: predicted?.final_od_mm, tolerance: Math.max(0.18, (targetOdMm || 0) * 0.03), unit: 'mm' })
+  const allowApply = checks.every((check) => check.pass)
+  return {
+    status: allowApply ? 'pass' : 'blocked',
+    allow_apply: allowApply,
+    checks,
+    message: allowApply
+      ? 'Preflight passed against the RF stack calculator targets; Apply is enabled.'
+      : 'Preflight blocked Apply because the calculated stack does not match target Z0/VP/dielectric OD closely enough.',
+  }
+}
+
 async function designDielectricStack(input) {
   const rawInput = input || {}
   const overlapWasSpecified = rawInput.overlap != null && rawInput.overlap !== ''
@@ -1763,11 +1866,23 @@ async function designDielectricStack(input) {
   const pitchLimitedByWtm = initialPitch.pitchLimited
   if (t_per_pass <= 0) throw new Error('Per-pass thickness is zero.')
 
-  // Split target dielectric thickness between HD and LD layers
-  const HD_thk_target = dielectricThk_target * f_HD
-  const LD_thk_target = dielectricThk_target * (1 - f_HD)
-  const HD_passes = Math.max(0, Math.round(HD_thk_target / t_per_pass))
-  const LD_passes = Math.max(0, Math.round(LD_thk_target / t_per_pass))
+  // Pick integer WTM passes by dry-running the same Z0/VP/OD calculation the
+  // RF stack view uses. This avoids handing out an Apply preset that is visibly
+  // low on dielectric OD and therefore low on impedance.
+  const passPlan = _findBestTapePassPlan({
+    conductorOdMm: d,
+    tapeThicknessMm: tape_thickness_mm,
+    overlap: ovr,
+    tensionFactor: tension_factor,
+    targetZ0: target_z0_ohm,
+    targetVp: target_vp,
+    targetOdMm: D_target,
+    mode,
+    fHD,
+    dielectricThkTarget: dielectricThk_target,
+  })
+  const HD_passes = Math.max(0, Math.round(passPlan.hdPasses || 0))
+  const LD_passes = Math.max(0, Math.round(passPlan.ldPasses || 0))
 
   // Build the layer recipe (HD goes inside since high-εᵣ closer to conductor lowers loss
   // contribution from peripheral E-field; LD outside lifts VP)
@@ -1818,6 +1933,7 @@ async function designDielectricStack(input) {
       density: L.density,
       overlap: L.overlap,
       overlap_pct: normalizePtfeWrap(L.overlap).percent,
+      tension_factor: L.tension_factor,
       passes: L.passes,
       tape_thickness_mm: round(L.tape_thickness_mm, 4),
       tape_thickness_mil: L.tape_thickness_mil,
@@ -1865,6 +1981,7 @@ async function designDielectricStack(input) {
 
   const predicted = {
     final_od_mm: round(finalOD, 4),
+    target_dielectric_od_mm: round(D_target, 4),
     eps_eff: round(eps_eff_actual, 4),
     vp: round(VP_actual, 4),
     z0_ohm: round(Z0_actual, 3),
@@ -1872,6 +1989,12 @@ async function designDielectricStack(input) {
     delta_vp: target_vp != null ? round(VP_actual - target_vp, 4) : null,
     bragg_notch_1_ghz: notch1,
   }
+  const preflight = _makePreflightValidation({
+    predicted,
+    targetZ0: target_z0_ohm,
+    targetVp: target_vp,
+    targetOdMm: D_target,
+  })
   const targetSummary = `${target_z0_ohm ? `${round(target_z0_ohm, 2)} ohm` : ''}${target_vp ? ` ${round(target_vp * 100, 1)}% VP` : ''} conductor ${round(d / 25.4, 4)} in`.trim()
   const miWorkbook = await makePtfeMiWorkbook({
     miNumber: mi_number || 'MI-ST962-AUTO',
@@ -1894,6 +2017,7 @@ async function designDielectricStack(input) {
       target_vp: target_vp != null ? round(target_vp, 3) : null,
       target_z0_ohm: target_z0_ohm != null ? round(target_z0_ohm, 2) : null,
       eps_target: round(eps_target, 3),
+      dielectric_od_mm: round(D_target, 4),
     },
     composition: {
       mode,
@@ -1903,12 +2027,13 @@ async function designDielectricStack(input) {
     },
     layers: stackOut,
     predicted,
+    _preflight: preflight,
     label: `${target_z0_ohm ? `${target_z0_ohm} Ω` : ''}${target_vp ? ` · ${(target_vp*100).toFixed(0)}% VP` : ''} · d=${d.toFixed(3)} mm`.trim(),
     _section: 'stack',
-    _apply_preset: {
+    ...(preflight.allow_apply ? { _apply_preset: {
       conductor_od_mm: round(d, 4),
       target_z0: target_z0_ohm,
-      layers: layers.map((L) => ({
+      layers: stackOut.map((L) => ({
         preset: L.preset,
         part_number: L.part_number,
         material_id: L.material_id,
@@ -1919,11 +2044,15 @@ async function designDielectricStack(input) {
         tape_thickness_mil: L.tape_thickness_mil,
         tape_width_mm: L.tape_width_mm,
         tape_width_in: L.tape_width_in,
+        pitch_setpoint_mm: L.pitch_setpoint_mm,
+        pitch_setpoint_in: L.pitch_setpoint_in,
+        OD_after_mm: L.OD_after_mm,
+        OD_before_mm: L.OD_before_mm,
         overlap: L.overlap,
         tension_factor: L.tension_factor,
         passes: L.passes,
       })),
-    },
+    } } : { _apply_blocked: preflight.message }),
     _download: {
       filename: miFilename,
       mime: miWorkbook.mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -1941,6 +2070,10 @@ async function designDielectricStack(input) {
         ? `MI template has two 3-bay taping sheets, so ${miWorkbook.omittedTapingEntries} extra taping pass${miWorkbook.omittedTapingEntries === 1 ? '' : 'es'} were kept in the JSON recipe but not placed in the shop MI workbook.`
         : null,
       miWorkbook.warning || null,
+      `Preflight: target dielectric OD ${D_target.toFixed(3)} mm; dry-run recipe gives ${finalOD.toFixed(3)} mm, ${Z0_actual.toFixed(1)} ohm, ${(VP_actual * 100).toFixed(1)}% VP.`,
+      !preflight.allow_apply
+        ? 'Apply is held until the recipe matches the RF stack calculator targets closely enough.'
+        : null,
       snappedTape
         ? `Tape request snapped to stocked material: ${baseTape.partNumber} (${baseTape.thicknessMil} mil, ${baseTape.densityCode}, ${baseTape.widthIn.toFixed(3)} in).`
         : null,
