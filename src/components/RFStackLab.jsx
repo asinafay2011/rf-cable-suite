@@ -1684,6 +1684,27 @@ function ShieldLayerCard({ layer, index, unitMode, dielectricOD, onUpdate, onRem
   )
 }
 
+function StackExplainerVideo() {
+  return (
+    <div style={S.stackExplainer}>
+      <video
+        aria-label="RF Stack Lab build-up animation"
+        autoPlay
+        loop
+        muted
+        playsInline
+        poster="/stack/rf-stack-lab-explainer-poster.jpg"
+        preload="metadata"
+        style={S.stackExplainerVideo}
+      >
+        <source src="/stack/rf-stack-lab-explainer-veo31.webm" type="video/webm" />
+        <source src="/stack/rf-stack-lab-explainer-veo31.mp4" type="video/mp4" />
+      </video>
+      <div style={S.stackExplainerVignette} />
+    </div>
+  )
+}
+
 export default function RFStackLab() {
   const [params, setParams] = useState(PRESETS.phaseStable)
   const [ptfeStack, setPtfeStack] = useState([])
@@ -2056,13 +2077,14 @@ export default function RFStackLab() {
     <section style={S.root} data-testid="rf-stack-lab">
       <header style={S.hero}>
         <div style={S.heroIcon}><Layers size={20} /></div>
-        <div>
+        <div style={S.heroText}>
           <div style={S.eyebrow}>RF Stack Lab</div>
           <h1 style={S.title}>Build the cable, then validate the RF symptoms.</h1>
           <p style={S.copy}>
             One workspace for PTFE tape build-up, SPC flatwire shields, foil/braid coverage, Bragg suckout, impedance, return loss, VSWR, insertion loss, and TDR.
           </p>
         </div>
+        <StackExplainerVideo />
       </header>
 
       <div style={S.grid}>
@@ -2257,11 +2279,15 @@ function ChartCard({ title, sub, data, xKey = 'f', yKey, color, xFmt, yFmt, yDom
 
 const S = {
   root: { display: 'flex', flexDirection: 'column', gap: 16 },
-  hero: { border: `1px solid ${C.border}`, background: 'linear-gradient(135deg, rgba(15,22,24,0.98), rgba(22,11,6,0.78))', padding: 18, borderRadius: 3, display: 'flex', gap: 14, alignItems: 'flex-start' },
+  hero: { border: `1px solid ${C.border}`, background: 'linear-gradient(135deg, rgba(15,22,24,0.98), rgba(22,11,6,0.78))', padding: 18, borderRadius: 3, display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap' },
   heroIcon: { width: 42, height: 42, border: `1px solid ${C.borderHi}`, display: 'grid', placeItems: 'center', color: C.amber, flex: '0 0 auto' },
+  heroText: { flex: '1 1 440px', minWidth: 0, alignSelf: 'center' },
   eyebrow: { fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 4, color: C.copperHi, marginBottom: 6 },
   title: { fontFamily: 'Fraunces, serif', fontSize: 'clamp(26px, 4vw, 44px)', fontWeight: 400, lineHeight: 1.02, margin: 0, color: C.text },
   copy: { maxWidth: 780, color: C.dim, fontSize: 13, lineHeight: 1.7, margin: '10px 0 0' },
+  stackExplainer: { position: 'relative', flex: '1 1 360px', minWidth: 280, maxWidth: 560, aspectRatio: '16 / 9', overflow: 'hidden', border: `1px solid ${C.borderHi}`, background: '#050809', boxShadow: '0 18px 46px rgba(0,0,0,0.28)' },
+  stackExplainerVideo: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
+  stackExplainerVignette: { position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(180deg, rgba(3,7,8,0.05), rgba(3,7,8,0.22))' },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 16 },
   viewerCard: { border: `1px solid ${C.border}`, background: C.panel, borderRadius: 3, overflow: 'hidden' },
   controlsCard: { border: `1px solid ${C.border}`, background: C.panel, borderRadius: 3, padding: 14 },
