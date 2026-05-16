@@ -2352,6 +2352,281 @@ function LayerRail({ computed }) {
   )
 }
 
+const BUILD_PROCESS_STAGES = [
+  { id: 'conductor', num: '01', label: 'Conductor', color: C.copperHi },
+  { id: 'ptfe', num: '02', label: 'PTFE tape', color: '#fff2c4' },
+  { id: 'spiral', num: '03', label: 'SPC spiral gap', color: C.braid },
+  { id: 'foil', num: '04', label: 'Foil tape', color: C.foil },
+  { id: 'braid', num: '05', label: 'Braid shield', color: C.teal },
+  { id: 'jacket', num: '06', label: 'Jacket / cutaway', color: C.sky },
+]
+
+function smoothStep(value) {
+  const t = clamp(value, 0, 1)
+  return t * t * (3 - 2 * t)
+}
+
+function BuildProcessVideo({ computed }) {
+  const [startedAt, setStartedAt] = useState(() => performance.now())
+  const [now, setNow] = useState(() => performance.now())
+  const stageCount = BUILD_PROCESS_STAGES.length
+  const spiralGap = computed.spiralInstalled ? computed.spiralGap : DEFAULT_SPIRAL_GAP_PCT
+  const spiralBobbins = computed.spiralInstalled ? computed.spiralBobbins : DEFAULT_SPIRAL_BOBBINS
+  const braidCoverage = computed.braidInstalled ? computed.braidCoverage : 95
+
+  useEffect(() => {
+    let alive = true
+    let timerId = 0
+    const tick = () => {
+      if (!alive) return
+      setNow(performance.now())
+    }
+    timerId = window.setInterval(tick, 120)
+    tick()
+    return () => {
+      alive = false
+      window.clearInterval(timerId)
+    }
+  }, [])
+
+  const elapsed = ((now - startedAt) % 28500) / 28500
+  const activeStage = Math.min(stageCount - 1, Math.floor(elapsed * stageCount))
+  const progressFor = (index) => {
+    const start = index / stageCount
+    const end = (index + 0.92) / stageCount
+    return smoothStep((elapsed - start) / (end - start))
+  }
+  const conductorP = Math.max(0.24, progressFor(0))
+  const ptfeP = progressFor(1)
+  const spiralP = progressFor(2)
+  const foilP = progressFor(3)
+  const braidP = progressFor(4)
+  const jacketP = progressFor(5)
+  const cableReveal = (p) => (p < 0.015 ? 0 : p * 1016)
+  const conductorReveal = (p) => Math.max(1, p * 1092)
+  const reset = () => setStartedAt(performance.now())
+  const diagonalBands = Array.from({ length: 34 }, (_, index) => index)
+  const braidBands = Array.from({ length: 48 }, (_, index) => index)
+  const timelinePct = `${elapsed * 100}%`
+
+  return (
+    <div style={S.processVideoShell}>
+      <div style={S.processVideoTop}>
+        <div>
+          <div style={S.cardEyebrow}>Shop build video</div>
+          <h3 style={S.processVideoTitle}>Conductor → PTFE → SPC spiral → foil → braid → jacket</h3>
+        </div>
+        <button type="button" onClick={reset} style={S.processReplayBtn}>
+          <Play size={13} /> Replay
+        </button>
+      </div>
+      <div style={S.processVideoStage}>
+        <svg viewBox="0 0 1200 420" role="img" aria-label="Animated RF cable build process from conductor through jacket" style={S.processSvg}>
+          <defs>
+            <linearGradient id="rfBuildCopper" x1="0" x2="1">
+              <stop offset="0" stopColor="#7c330b" />
+              <stop offset="0.18" stopColor="#ff9a3d" />
+              <stop offset="0.48" stopColor="#b95716" />
+              <stop offset="0.78" stopColor="#ffd19b" />
+              <stop offset="1" stopColor="#8b3d11" />
+            </linearGradient>
+            <linearGradient id="rfBuildPtfe" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0" stopColor="#ffffff" />
+              <stop offset="0.52" stopColor="#fff8df" />
+              <stop offset="1" stopColor="#d8d0b8" />
+            </linearGradient>
+            <linearGradient id="rfBuildSpc" x1="0" x2="1">
+              <stop offset="0" stopColor="#7f8586" />
+              <stop offset="0.34" stopColor="#f7f6ec" />
+              <stop offset="0.6" stopColor="#aeb4b2" />
+              <stop offset="1" stopColor="#ffffff" />
+            </linearGradient>
+            <linearGradient id="rfBuildFoil" x1="0" x2="1">
+              <stop offset="0" stopColor="#7b5012" />
+              <stop offset="0.42" stopColor="#ffcd5a" />
+              <stop offset="0.68" stopColor="#b97618" />
+              <stop offset="1" stopColor="#fff0a0" />
+            </linearGradient>
+            <linearGradient id="rfBuildJacket" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0" stopColor="#39454a" />
+              <stop offset="0.5" stopColor="#141d20" />
+              <stop offset="1" stopColor="#020506" />
+            </linearGradient>
+            <clipPath id="rfBuildCableClip">
+              <rect x="92" y="130" width="1016" height="160" rx="80" />
+            </clipPath>
+            <clipPath id="rfBuildConductorReveal">
+              <rect x="54" y="184" width={conductorReveal(conductorP)} height="52" rx="26" />
+            </clipPath>
+            <clipPath id="rfBuildPtfeReveal">
+              <rect x="92" y="130" width={cableReveal(ptfeP)} height="160" rx="80" />
+            </clipPath>
+            <clipPath id="rfBuildSpiralReveal">
+              <rect x="92" y="122" width={cableReveal(spiralP)} height="176" rx="88" />
+            </clipPath>
+            <clipPath id="rfBuildFoilReveal">
+              <rect x="92" y="124" width={cableReveal(foilP)} height="172" rx="86" />
+            </clipPath>
+            <clipPath id="rfBuildBraidReveal">
+              <rect x="92" y="112" width={cableReveal(braidP)} height="196" rx="98" />
+            </clipPath>
+            <clipPath id="rfBuildJacketReveal">
+              <rect x={1108 - jacketP * 1016} y="104" width={jacketP * 1016} height="212" rx="106" />
+            </clipPath>
+            <mask id="rfBuildJacketMask" maskUnits="userSpaceOnUse">
+              <rect x="0" y="0" width="1200" height="420" fill="white" />
+              <rect x="178" y="162" width="360" height="96" rx="48" fill="black" />
+            </mask>
+          </defs>
+
+          <rect width="1200" height="420" fill="#061011" />
+          <ellipse cx="600" cy="324" rx="504" ry="38" fill="#000" opacity="0.42" />
+          <path d="M70 346 C240 312 374 366 560 330 S902 304 1130 338" fill="none" stroke="#5eead4" strokeOpacity="0.14" strokeWidth="2" />
+
+          <g clipPath="url(#rfBuildConductorReveal)">
+            <rect x="54" y="194" width="1092" height="32" rx="16" fill="url(#rfBuildCopper)" />
+            <rect x="82" y="198" width="1036" height="5" rx="3" fill="#fff4cd" opacity="0.45" />
+          </g>
+
+          <g clipPath="url(#rfBuildPtfeReveal)">
+            <rect x="92" y="144" width="1016" height="132" rx="66" fill="url(#rfBuildPtfe)" opacity={0.96 * ptfeP} />
+            {diagonalBands.map((index) => (
+              <line
+                key={`ptfe-${index}`}
+                x1={-110 + index * 45}
+                y1="306"
+                x2={80 + index * 45}
+                y2="112"
+                stroke="#c6baa0"
+                strokeWidth="2"
+                strokeOpacity="0.34"
+              />
+            ))}
+            <rect x="94" y="151" width="1012" height="16" rx="8" fill="#fff" opacity="0.26" />
+          </g>
+
+          <g clipPath="url(#rfBuildSpiralReveal)">
+            <rect x="92" y="130" width="1016" height="160" rx="80" fill="#0b1112" opacity={0.32 * spiralP} />
+            {diagonalBands.map((index) => (
+              <line
+                key={`spiral-${index}`}
+                x1={-154 + index * 52}
+                y1="310"
+                x2={84 + index * 52}
+                y2="110"
+                stroke="url(#rfBuildSpc)"
+                strokeWidth="13"
+                strokeLinecap="round"
+                strokeOpacity={0.9}
+              />
+            ))}
+            {diagonalBands.map((index) => (
+              <line
+                key={`spiral-gap-${index}`}
+                x1={-128 + index * 52}
+                y1="306"
+                x2={110 + index * 52}
+                y2="114"
+                stroke="#11191a"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeOpacity="0.72"
+              />
+            ))}
+          </g>
+
+          <g clipPath="url(#rfBuildFoilReveal)">
+            <rect x="92" y="132" width="1016" height="156" rx="78" fill="url(#rfBuildFoil)" opacity={0.82 * foilP} />
+            {Array.from({ length: 17 }, (_, index) => (
+              <line
+                key={`foil-${index}`}
+                x1={-90 + index * 78}
+                y1="292"
+                x2={70 + index * 78}
+                y2="128"
+                stroke="#fff2a8"
+                strokeWidth="5"
+                strokeOpacity="0.44"
+              />
+            ))}
+          </g>
+
+          <g clipPath="url(#rfBuildBraidReveal)">
+            <rect x="92" y="126" width="1016" height="168" rx="84" fill="#0c1010" opacity={0.18 * braidP} />
+            {braidBands.map((index) => (
+              <line
+                key={`braid-z-${index}`}
+                x1={-180 + index * 31}
+                y1="316"
+                x2={50 + index * 31}
+                y2="106"
+                stroke={index % 3 === 0 ? '#b77939' : '#e0ddcd'}
+                strokeWidth="3"
+                strokeOpacity={0.78}
+              />
+            ))}
+            {braidBands.map((index) => (
+              <line
+                key={`braid-s-${index}`}
+                x1={-190 + index * 31}
+                y1="104"
+                x2={54 + index * 31}
+                y2="318"
+                stroke={index % 4 === 0 ? '#a17037' : '#9aa1a0'}
+                strokeWidth="3"
+                strokeOpacity={0.7}
+              />
+            ))}
+          </g>
+
+          <g clipPath="url(#rfBuildJacketReveal)" mask="url(#rfBuildJacketMask)">
+            <rect x="92" y="118" width="1016" height="184" rx="92" fill="url(#rfBuildJacket)" opacity="0.98" />
+            <rect x="92" y="134" width="1016" height="26" rx="13" fill="#7c8b91" opacity="0.22" />
+          </g>
+
+          <g opacity="0.9">
+            <circle cx={92 + elapsed * 1016} cy="102" r="5" fill={BUILD_PROCESS_STAGES[activeStage].color} />
+            <path d={`M${92 + elapsed * 1016} 108 L${92 + elapsed * 1016} 122`} stroke={BUILD_PROCESS_STAGES[activeStage].color} strokeWidth="2" />
+          </g>
+
+          <g>
+            <rect x="70" y="34" width="388" height="54" rx="3" fill="#071011" stroke="#243138" />
+            <text x="90" y="57" fill={BUILD_PROCESS_STAGES[activeStage].color} fontFamily="JetBrains Mono, monospace" fontSize="12" letterSpacing="2">
+              {BUILD_PROCESS_STAGES[activeStage].num} / {BUILD_PROCESS_STAGES[activeStage].label}
+            </text>
+            <text x="90" y="76" fill="#a7b0b6" fontFamily="JetBrains Mono, monospace" fontSize="10">
+              {activeStage === 2
+                ? `${spiralBobbins} bobbins with ${fmt(spiralGap, 0)}% open gap between flatwires`
+                : activeStage === 4
+                  ? `${fmt(braidCoverage, 0)}% braid coverage over foil`
+                  : 'fixed camera, layer-by-layer RF build'}
+            </text>
+          </g>
+        </svg>
+      </div>
+      <div style={S.processTimeline}>
+        <span style={{ ...S.processTimelineFill, width: timelinePct }} />
+        {BUILD_PROCESS_STAGES.map((stage, index) => (
+          <button
+            key={stage.id}
+            type="button"
+            onClick={() => setStartedAt(performance.now() - (index / stageCount) * 28500)}
+            style={{
+              ...S.processStageBtn,
+              ...(activeStage === index ? S.processStageBtnActive : {}),
+              borderColor: activeStage === index ? `${stage.color}aa` : 'rgba(167,176,182,0.18)',
+              color: activeStage === index ? stage.color : C.dim,
+            }}
+          >
+            <span>{stage.num}</span>
+            <strong>{stage.label}</strong>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function PTFELayerCard({ layer, index, canRemove, conductorOD, onUpdate, onReplay, onRemove }) {
   const direction = layer.direction === 'S' ? 'S' : 'Z'
   const accent = direction === 'Z' ? C.amber : C.sky
@@ -3343,6 +3618,7 @@ export default function RFStackLab() {
             </div>
             <div style={S.liveBadge}>live model</div>
           </div>
+          <BuildProcessVideo computed={computed} />
           <div style={S.viewerStage}>
             <div ref={mountRef} style={S.viewerMount} />
             {status && <div style={S.viewerStatus}>{status}</div>}
@@ -4421,6 +4697,16 @@ const S = {
   cardEyebrow: { fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: C.copperHi, textTransform: 'uppercase', letterSpacing: 3 },
   cardTitle: { margin: '4px 0 0', color: C.text, fontSize: 18, fontWeight: 500 },
   liveBadge: { fontFamily: 'JetBrains Mono, monospace', color: C.teal, border: `1px solid ${C.teal}66`, padding: '5px 8px', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.6 },
+  processVideoShell: { borderBottom: `1px solid rgba(167,176,182,0.13)`, background: 'linear-gradient(180deg, rgba(6,16,17,0.98), rgba(5,9,10,0.98))', padding: 14, display: 'grid', gap: 10 },
+  processVideoTop: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  processVideoTitle: { margin: '4px 0 0', color: C.text, fontSize: 15, fontWeight: 600 },
+  processReplayBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, minHeight: 32, padding: '0 11px', background: '#070b0c', border: `1px solid ${C.teal}66`, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer', whiteSpace: 'nowrap' },
+  processVideoStage: { border: `1px solid rgba(94,234,212,0.22)`, background: '#05090a', minHeight: 238, overflow: 'hidden' },
+  processSvg: { width: '100%', height: '100%', minHeight: 238, display: 'block' },
+  processTimeline: { position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 7, paddingTop: 8 },
+  processTimelineFill: { position: 'absolute', left: 0, top: 0, height: 2, background: `linear-gradient(90deg, ${C.amber}, ${C.teal})`, boxShadow: '0 0 18px rgba(94,234,212,0.5)' },
+  processStageBtn: { position: 'relative', zIndex: 1, minWidth: 0, minHeight: 46, display: 'grid', gap: 2, alignContent: 'center', background: '#070b0c', border: '1px solid', padding: '6px 7px', fontFamily: 'JetBrains Mono, monospace', fontSize: 9, textAlign: 'left', textTransform: 'uppercase', letterSpacing: 0.9, cursor: 'pointer' },
+  processStageBtnActive: { background: 'rgba(94,234,212,0.075)' },
   viewerStage: { height: 520, background: 'radial-gradient(circle at 45% 38%, rgba(94,234,212,0.08), transparent 42%), #071011', position: 'relative' },
   viewerMount: { width: '100%', height: '100%' },
   viewerStatus: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 11, textTransform: 'uppercase', letterSpacing: 2 },
