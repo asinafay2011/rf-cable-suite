@@ -1,10 +1,14 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { MessageSquare, Send, Loader2, Trash2, Minimize2, Wrench, ChevronRight, ChevronDown, Eye, EyeOff, Image as ImageIcon, X as XIcon, Paperclip, Download, Mic, MicOff, HelpCircle, Globe } from 'lucide-react'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { useIsMobile } from './useIsMobile.js'
 
 const MODEL_DEFAULT = 'claude-sonnet-4-6'
 const MAX_TOOL_TURNS = 6
+const MAX_STORED_MESSAGES = 40
+const MAX_STORED_CHAT_BYTES = 700_000
+const MAX_STORED_STRING = 12_000
+const MAX_STORED_TOOL_RESULT_STRING = 80_000
 
 const DEFAULT_MODELS = [
   { id: 'claude-opus-4-7',           label: 'Opus 4.7',   tier: 'flagship' },
@@ -40,8 +44,162 @@ function sanitizeToolResultContent(content) {
   }
 }
 
+function compactString(value, max = MAX_STORED_STRING) {
+  if (typeof value !== 'string' || value.length <= max) return value
+  return `${value.slice(0, max)}\n\n[trimmed ${value.length - max} chars from saved chat history]`
+}
+
+function compactForStorage(value, depth = 0) {
+  if (value == null) return value
+  if (typeof value === 'string') return compactString(value)
+  if (typeof value !== 'object') return value
+  if (depth > 5) return '[trimmed nested object from saved chat history]'
+  if (Array.isArray(value)) return value.slice(0, 80).map((item) => compactForStorage(item, depth + 1))
+  const out = {}
+  for (const [key, child] of Object.entries(value)) {
+    if ((key === 'base64' || key === 'data') && typeof child === 'string' && child.length > 2000) {
+      out[key] = `[${key} payload omitted from saved chat history: ${child.length} chars]`
+    } else {
+      out[key] = compactForStorage(child, depth + 1)
+    }
+  }
+  return out
+}
+
+function compactToolResultForStorage(content) {
+  if (typeof content !== 'string') return compactForStorage(content)
+  try {
+    const parsed = JSON.parse(content)
+    return JSON.stringify(compactForStorage(redactDownloadPayload(parsed)))
+  } catch {
+    return compactString(content, MAX_STORED_TOOL_RESULT_STRING)
+  }
+}
+
+function compactBlockForStorage(block) {
+  if (!block || typeof block !== 'object') return block
+  if (block.type === 'tool_result') {
+    return {
+      type: 'tool_result',
+      tool_use_id: block.tool_use_id,
+      content: compactToolResultForStorage(block.content),
+    }
+  }
+  if (block.type === 'image') {
+    return {
+      type: 'text',
+      text: `[image attachment omitted from saved chat history${block.source?.media_type ? `: ${block.source.media_type}` : ''}]`,
+    }
+  }
+  if (block.type === 'document') {
+    return {
+      type: 'text',
+      text: `[document attachment omitted from saved chat history${block._pdfMeta?.name ? `: ${block._pdfMeta.name}` : ''}]`,
+    }
+  }
+  if (block.type === 'tool_use') {
+    return {
+      type: 'tool_use',
+      id: block.id,
+      name: block.name,
+      input: compactForStorage(block.input || {}),
+    }
+  }
+  if (block.type === 'text') return { type: 'text', text: compactString(block.text || '') }
+  if (block.type === 'thinking') {
+    return {
+      type: 'thinking',
+      thinking: compactString(block.thinking || '', 4000),
+      signature: block.signature || '',
+    }
+  }
+  return compactForStorage(block)
+}
+
+function compactMessageForStorage(message) {
+  if (!message || typeof message !== 'object') return null
+  const role = message.role === 'assistant' ? 'assistant' : 'user'
+  if (typeof message.content === 'string') return { role, content: compactString(message.content) }
+  if (Array.isArray(message.content)) {
+    return {
+      role,
+      content: message.content.map(compactBlockForStorage).filter(Boolean),
+    }
+  }
+  return { role, content: compactString(String(message.content ?? '')) }
+}
+
+function compactMessagesForStorage(messages) {
+  if (!Array.isArray(messages)) return []
+  let compacted = messages
+    .slice(-MAX_STORED_MESSAGES)
+    .map(compactMessageForStorage)
+    .filter(Boolean)
+  while (compacted.length > 4 && JSON.stringify(compacted).length > MAX_STORED_CHAT_BYTES) {
+    compacted = compacted.slice(2)
+  }
+  return compacted
+}
+
+function loadStoredMessages(storageKey) {
+  if (!storageKey) return []
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return []
+    return compactMessagesForStorage(JSON.parse(raw))
+  } catch {
+    try { localStorage.removeItem(storageKey) } catch {}
+    return []
+  }
+}
+
+function hasDownloadPayload(spec) {
+  return Boolean(spec?.base64 || spec?.text || spec?.content || spec?.data)
+}
+
+class AgentItemBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+
+  componentDidCatch(error) {
+    console.error('Agent message render failed', error)
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null })
+    }
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children
+    return (
+      <div className="text-[12px] text-[#fbbf24] bg-[#1f1610] border border-[#7c4a16] rounded px-2.5 py-2">
+        Agent card skipped because saved tool data was malformed.
+        <button
+          type="button"
+          onClick={this.props.onClear}
+          className="ml-2 underline text-[#f0ebe2] hover:text-[#fbbf24]"
+        >
+          Clear chat
+        </button>
+      </div>
+    )
+  }
+}
+
 function downloadToolFile(spec) {
   if (!spec || typeof window === 'undefined') return
+  if (!hasDownloadPayload(spec)) {
+    window.alert('This file payload was removed from saved chat history to keep the app fast. Ask the agent to regenerate the MI download.')
+    return
+  }
   const filename = spec.filename || 'tool-result.txt'
   const mime = spec.mime || 'application/octet-stream'
   let blob
@@ -239,13 +397,7 @@ export default function FloatingAgent({
     window.addEventListener('pointerup', onUp)
   }
   const [messages, setMessages] = useState(() => {
-    if (!storageKey) return []
-    try {
-      const raw = localStorage.getItem(storageKey)
-      return raw ? JSON.parse(raw) : []
-    } catch {
-      return []
-    }
+    return loadStoredMessages(storageKey)
   })
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -268,7 +420,7 @@ export default function FloatingAgent({
   useEffect(() => {
     if (!storageKey) return
     try {
-      localStorage.setItem(storageKey, JSON.stringify(messages))
+      localStorage.setItem(storageKey, JSON.stringify(compactMessagesForStorage(messages)))
     } catch {}
   }, [messages, storageKey])
 
@@ -1120,13 +1272,15 @@ export default function FloatingAgent({
             return r?._apply_preset != null || r?._download != null
           })
           .map((item, i) => (
-            <ViewItem
+            <AgentItemBoundary key={i} resetKey={`${item.kind}-${i}-${item.name || ''}`} onClear={clear}>
+              <ViewItem
               key={i}
               item={item}
               accent={accent}
               jumpTarget={item.kind === 'tool' ? toolToSection?.[item.name] : null}
               onJumpToSection={onJumpToSection}
-            />
+              />
+            </AgentItemBoundary>
           ))}
 
         {toolStatus === 'executing' && (
