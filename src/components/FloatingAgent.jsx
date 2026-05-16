@@ -2020,10 +2020,11 @@ function buildApplyPreview(result) {
   return rows.length ? { rows, warnings } : null
 }
 
-function ToolGuardrailPanel({ safetyAudit, machineGuard, tolerance, miQa, measuredTest, calibrationHint, accent }) {
+function ToolGuardrailPanel({ safetyAudit, machineGuard, tolerance, miQa, miRenderQa, measuredTest, calibrationHint, accent }) {
   const blockers = (safetyAudit?.blocks?.length || 0) + (machineGuard?.blocks?.length || 0) + (miQa?.blocks?.length || 0)
   const warnings = (safetyAudit?.warnings?.length || 0) + (machineGuard?.warnings?.length || 0) + (miQa?.warnings?.length || 0)
   const tone = blockers ? '#f87171' : warnings ? '#fbbf24' : '#5eead4'
+  const renderPage = miRenderQa?.pages?.[0]
   return (
     <div className="px-2.5 py-1.5 border-t text-[11px]" style={{ borderColor: '#1a2226', background: '#080d0f' }}>
       <div className="flex items-center justify-between gap-2">
@@ -2055,6 +2056,39 @@ function ToolGuardrailPanel({ safetyAudit, machineGuard, tolerance, miQa, measur
       {miQa?.checks?.length > 0 && (
         <div className="mt-1 text-[10px] font-mono" style={{ color: accent }}>
           MI QA: {miQa.status} · {miQa.checks.slice(0, 2).map((check) => `${check.name} ${check.actual}`).join(' · ')}
+        </div>
+      )}
+      {renderPage && (
+        <div className="mt-1 border p-2 font-mono text-[10px]" style={{ borderColor: '#1f2a2f', background: '#f7f5ef', color: '#111' }}>
+          <div className="flex items-center justify-between gap-2 border-b border-[#111] pb-1 text-[12px] font-bold">
+            <span>{renderPage.title}</span>
+            <span>{renderPage.mi_number || 'MI-ST962-AUTO'}</span>
+          </div>
+          <div className="mt-1 grid grid-cols-2 gap-1">
+            {(renderPage.materials || []).slice(0, 3).map((material) => (
+              <React.Fragment key={`${material.description}-${material.part_number}`}>
+                <span>{material.description}</span>
+                <b>{material.part_number || '-'}</b>
+              </React.Fragment>
+            ))}
+          </div>
+          <div className="mt-1 grid grid-cols-[1fr_42px_54px_42px] border border-[#111]">
+            <b className="border-b border-[#111] px-1">Parameter</b>
+            <b className="border-b border-l border-[#111] px-1 text-center">Min</b>
+            <b className="border-b border-l border-[#111] px-1 text-center">Nom</b>
+            <b className="border-b border-l border-[#111] px-1 text-center">Max</b>
+            {(renderPage.parameter_rows || []).slice(0, 6).map((row) => (
+              <React.Fragment key={row.label}>
+                <span className="border-b border-[#999] px-1">{row.label}</span>
+                <span className="border-b border-l border-[#999] px-1 text-center">{row.min}</span>
+                <b className="border-b border-l border-[#999] px-1 text-center">{row.nom}</b>
+                <span className="border-b border-l border-[#999] px-1 text-center">{row.max}</span>
+              </React.Fragment>
+            ))}
+          </div>
+          <div className="mt-1 text-[#333]">
+            MI Render QA: {miRenderQa.status} · {miRenderQa.message}
+          </div>
         </div>
       )}
       {measuredTest && (
@@ -2097,6 +2131,7 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
   const machineGuard = parsedResult?._machine_guard
   const tolerance = parsedResult?._tolerance
   const miQa = parsedResult?._mi_qa
+  const miRenderQa = parsedResult?._mi_render_qa
   const measuredTest = parsedResult?._measured_test
   const calibrationHint = parsedResult?._calibration_hint
   const applyBlocked = Boolean(parsedResult?._apply_blocked || preflight?.allow_apply === false)
@@ -2124,6 +2159,7 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
         machineGuard,
         tolerance,
         miQa,
+        miRenderQa,
         measuredTest,
         calibrationHint,
       },
@@ -2219,12 +2255,13 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
           </div>
         )}
 
-        {!partial && !parsedResult?.error && (safetyAudit || machineGuard || tolerance || miQa || measuredTest || calibrationHint) && (
+        {!partial && !parsedResult?.error && (safetyAudit || machineGuard || tolerance || miQa || miRenderQa || measuredTest || calibrationHint) && (
           <ToolGuardrailPanel
             safetyAudit={safetyAudit}
             machineGuard={machineGuard}
             tolerance={tolerance}
             miQa={miQa}
+            miRenderQa={miRenderQa}
             measuredTest={measuredTest}
             calibrationHint={calibrationHint}
             accent={accent}

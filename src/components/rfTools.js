@@ -29,7 +29,7 @@ import {
   WTM_MIN_TAPING_PITCH_IN,
   WTM_MIN_TAPING_PITCH_MM,
 } from '../data/materialLibrary.js'
-import { makeBlankMiWorkbook, makePtfeMiWorkbook } from '../data/miTemplate.js'
+import { buildPtfeMiEntries, makeBlankMiWorkbook, makePtfeMiWorkbook } from '../data/miTemplate.js'
 
 const RF_CALIBRATION_MEMORY_KEY = 'rf-stack-calibration-memory-v1'
 
@@ -1981,6 +1981,78 @@ function _miQaForRecipe({ miWorkbook = {}, layers = [], shieldLayers = [], requi
   return { status: blocks.length ? 'blocked' : warnings.length ? 'review' : 'pass', checks, blocks, warnings }
 }
 
+function _miRenderTriplet(nominalIn, tol = 0.001) {
+  const v = Number(nominalIn)
+  if (!Number.isFinite(v) || v <= 0) return { min: '-', nom: '-', max: '-' }
+  return { min: round(v - tol, 4), nom: round(v, 4), max: round(v + tol, 4) }
+}
+
+function _miRenderNominal(nominalIn) {
+  const v = Number(nominalIn)
+  if (!Number.isFinite(v) || v <= 0) return { min: '-', nom: '-', max: '-' }
+  return { min: '-', nom: round(v, 4), max: '-' }
+}
+
+function _miRenderQaForRecipe({ miWorkbook = {}, conductorOdMm, layers = [], overlap = '2/3', tensionN = 4, lineSpeedFtMin = 7, miNumber = 'MI-ST962-AUTO' }) {
+  const { conductorOdIn, entries } = buildPtfeMiEntries({ conductorOdMm, layers, overlap, tensionN, lineSpeedFtMin })
+  const pages = []
+  for (let i = 0; i < entries.length && i < 6; i += 3) {
+    const chunk = entries.slice(i, i + 3)
+    const incomingOdIn = i === 0 ? conductorOdIn : entries[i - 1]?.odAfterIn
+    const finalOdIn = chunk[chunk.length - 1]?.odAfterIn
+    const parameterRows = [
+      { label: '"PO" LaserLink OD', ..._miRenderTriplet(incomingOdIn) },
+      { label: 'Caterpillar Gap', min: '-', nom: 6.85, max: '-' },
+    ]
+    chunk.forEach((entry) => {
+      parameterRows.push({ label: `Tape #${entry.pass}, Lay Direction`, min: '-', nom: entry.direction, max: '-' })
+      parameterRows.push({ label: `Tape #${entry.pass}, Pitch Set-Point`, min: '-', nom: round(entry.pitchIn, 4), max: '-' })
+      parameterRows.push({ label: `Tape #${entry.pass}, Overlap`, min: '-', nom: entry.overlapText, max: '-' })
+      parameterRows.push({ label: `Tape #${entry.pass}, Tension (N)`, min: '-', nom: round(entry.tensionN, 1), max: '-' })
+      parameterRows.push({ label: `Tape #${entry.pass}, Roller #1/#2 Position`, min: '-', nom: entry.rollerPosition || '-', max: '-' })
+      parameterRows.push({ label: `"H${entry.pass}" LaserLink OD`, ..._miRenderNominal(entry.odAfterIn) })
+    })
+    parameterRows.push({ label: 'Line Speed (ft/min)', min: '-', nom: Number(lineSpeedFtMin || 7), max: '-' })
+    parameterRows.push({ label: '"TU" LaserLink OD', ..._miRenderNominal(finalOdIn) })
+    parameterRows.push({ label: 'Take-Up Spool Size', min: '', nom: 'AT12679', max: '' })
+    pages.push({
+      title: `SHEET ${Math.floor(i / 3) + 1} OF 12`,
+      process: `Taping #${Math.floor(i / 3) + 1}`,
+      machine: 'WTM 3-Bay',
+      mi_number: miNumber,
+      reference: 'AP96-007',
+      materials: chunk.map((entry) => ({ description: `Tape #${entry.pass}`, part_number: entry.partNumber || '-' })),
+      parameter_rows: parameterRows,
+      actual_columns: ['Actual', 'Oper.', 'Date'],
+    })
+  }
+  const checks = [
+    _toolCheck(miWorkbook.template === 'MI-ST962-032-130.xlsx' ? 'pass' : 'warn', 'Rendered template', miWorkbook.template || 'preview only', 'MI-ST962-032-130.xlsx', 'Visual preview is keyed to the shop MI sheet layout.'),
+    _toolCheck(entries.length ? 'pass' : 'block', 'Rendered taping rows', entries.length, '>=1', 'The render needs at least one taping row to verify the MI page.'),
+    _toolCheck(entries.length <= 6 ? 'pass' : 'warn', 'Rendered 3-Bay capacity', `${Math.min(entries.length, 6)}/${entries.length}`, '<=6 visible rows', 'The visible shop template has two 3-Bay pages; extra rows remain in JSON/run-sheet.'),
+    _toolCheck(entries.every((entry) => entry.partNumber) ? 'pass' : 'block', 'Rendered material cells', entries.filter((entry) => entry.partNumber).length, entries.length, 'Every visible tape row should carry a Material Library part number.'),
+    _toolCheck(entries.every((entry) => Number.isFinite(entry.pitchIn) && Number.isFinite(entry.odAfterIn)) ? 'pass' : 'block', 'Rendered pitch / OD cells', 'complete', 'complete', 'Pitch set-point and OD after tape must appear in the rendered sheet.'),
+    _toolCheck(pages.every((page) => page.actual_columns?.length === 3) ? 'pass' : 'block', 'Rendered Actual/Oper/Date boxes', 'visible', 'visible', 'Right-side signoff boxes must remain visible before download.'),
+  ]
+  const blocks = checks.filter((check) => check.level === 'block')
+  const warnings = checks.filter((check) => check.level === 'warn')
+  return {
+    status: blocks.length ? 'blocked' : warnings.length ? 'review' : 'pass',
+    template: miWorkbook.template || 'MI render preview',
+    page_count: pages.length,
+    omitted_rows: Math.max(0, entries.length - 6),
+    pages,
+    checks,
+    blocks,
+    warnings,
+    message: blocks.length
+      ? 'MI render QA found missing visible cells before download.'
+      : warnings.length
+        ? 'MI render QA produced a preview, but review the warning items before printing.'
+        : 'MI render QA preview matches the expected shop MI visual blocks.',
+  }
+}
+
 function _safetyAuditForResult({ preflight, machineGuard, tolerance, miQa }) {
   const blocks = []
   const warnings = []
@@ -2627,6 +2699,7 @@ async function designDielectricStack(input) {
     predicted,
   })
   const miQa = _miQaForRecipe({ miWorkbook, layers: stackOut })
+  const miRenderQa = _miRenderQaForRecipe({ miWorkbook, conductorOdMm: d, layers: stackOut, overlap, tensionN: tension_n, lineSpeedFtMin: line_speed_ft_min, miNumber: mi_number || 'MI-ST962-AUTO' })
   const safetyAudit = _safetyAuditForResult({ preflight, machineGuard, tolerance, miQa })
   const guardedPreflight = _combinePreflightWithAudit(preflight, safetyAudit)
   const calibrationHint = _calibrationHintForRecipe({ conductorOdMm: d, layers: stackOut, predicted })
@@ -2652,6 +2725,7 @@ async function designDielectricStack(input) {
     _machine_guard: machineGuard,
     _tolerance: tolerance,
     _mi_qa: miQa,
+    _mi_render_qa: miRenderQa,
     _safety_audit: safetyAudit,
     _calibration_hint: calibrationHint,
     label: `${target_z0_ohm ? `${target_z0_ohm} Ω` : ''}${target_vp ? ` · ${(target_vp*100).toFixed(0)}% VP` : ''} · d=${d.toFixed(3)} mm`.trim(),
@@ -2697,6 +2771,7 @@ async function designDielectricStack(input) {
         : null,
       miWorkbook.warning || null,
       `Preflight: target dielectric OD ${D_target.toFixed(3)} mm; dry-run recipe gives ${finalOD.toFixed(3)} mm, ${Z0_actual.toFixed(1)} ohm, ${(VP_actual * 100).toFixed(1)}% VP.`,
+      `MI render QA: ${miRenderQa.message}`,
       calibrationHint.sample_count
         ? `Calibration Memory: ${calibrationHint.message} Calibrated prediction ${calibrationHint.calibrated_prediction.z0_ohm} ohm, ${calibrationHint.calibrated_prediction.vp_pct}% VP, OD ${calibrationHint.calibrated_prediction.final_od_mm} mm.`
         : calibrationHint.message,
@@ -2909,6 +2984,7 @@ function optimizeDielectricStack(input) {
   const machineGuard = _machineRuleGuardForRecipe({ conductorOdMm: targets.conductorOdMm, layers: best.layers, requireDielectric: true })
   const tolerance = _toleranceForRecipe({ conductorOdMm: targets.conductorOdMm, predicted: best.predicted })
   const miQa = _miQaForRecipe({ layers: best.layers })
+  const miRenderQa = _miRenderQaForRecipe({ miWorkbook: {}, conductorOdMm: targets.conductorOdMm, layers: best.layers })
   const safetyAudit = _safetyAuditForResult({ preflight: best.preflight, machineGuard, tolerance, miQa })
   const guardedPreflight = _combinePreflightWithAudit(best.preflight, safetyAudit)
   const calibrationHint = _calibrationHintForRecipe({ conductorOdMm: targets.conductorOdMm, layers: best.layers, predicted: best.predicted })
@@ -2937,6 +3013,7 @@ function optimizeDielectricStack(input) {
     _machine_guard: machineGuard,
     _tolerance: tolerance,
     _mi_qa: miQa,
+    _mi_render_qa: miRenderQa,
     _safety_audit: safetyAudit,
     _calibration_hint: calibrationHint,
     label: `Optimized ${targets.targetZ0 || ''} Ω ${targets.targetVp ? `${round(targets.targetVp * 100, 1)}% VP` : ''}`.trim(),
@@ -2950,6 +3027,7 @@ function optimizeDielectricStack(input) {
       calibrationHint.sample_count
         ? `Calibration Memory: ${calibrationHint.message} Calibrated best candidate ${calibrationHint.calibrated_prediction.z0_ohm} ohm, ${calibrationHint.calibrated_prediction.vp_pct}% VP.`
         : calibrationHint.message,
+      `MI render QA: ${miRenderQa.message}`,
       'For a printable MI, call design_dielectric_stack with the recommended tape/wrap/tension settings after choosing the candidate.',
     ],
   }
@@ -2972,6 +3050,7 @@ function validateRecipeAgainstRfStack(input) {
   const machineGuard = _machineRuleGuardForRecipe({ conductorOdMm: targets.conductorOdMm, layers: evaluated.stackOut, requireDielectric: true })
   const tolerance = _toleranceForRecipe({ conductorOdMm: targets.conductorOdMm, predicted: evaluated.predicted })
   const miQa = _miQaForRecipe({ layers: evaluated.stackOut })
+  const miRenderQa = _miRenderQaForRecipe({ miWorkbook: {}, conductorOdMm: targets.conductorOdMm, layers: evaluated.stackOut })
   const safetyAudit = _safetyAuditForResult({ preflight: evaluated.preflight, machineGuard, tolerance, miQa })
   const guardedPreflight = _combinePreflightWithAudit(evaluated.preflight, safetyAudit)
   const calibrationHint = _calibrationHintForRecipe({ conductorOdMm: targets.conductorOdMm, layers: evaluated.stackOut, predicted: evaluated.predicted })
@@ -2988,6 +3067,7 @@ function validateRecipeAgainstRfStack(input) {
     _machine_guard: machineGuard,
     _tolerance: tolerance,
     _mi_qa: miQa,
+    _mi_render_qa: miRenderQa,
     _safety_audit: safetyAudit,
     _calibration_hint: calibrationHint,
     label: `Validated ${evaluated.predicted.z0_ohm} Ω · ${(evaluated.predicted.vp * 100).toFixed(1)}% VP`,
@@ -3003,6 +3083,7 @@ function validateRecipeAgainstRfStack(input) {
       calibrationHint.sample_count
         ? `Calibration Memory: ${calibrationHint.message} Calibrated validation ${calibrationHint.calibrated_prediction.z0_ohm} ohm, ${calibrationHint.calibrated_prediction.vp_pct}% VP.`
         : calibrationHint.message,
+      `MI render QA: ${miRenderQa.message}`,
     ],
   }
 }

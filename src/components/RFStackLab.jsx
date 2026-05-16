@@ -612,19 +612,113 @@ function buildToleranceSimulator(computed) {
 }
 
 function buildMiVisualQa(computed, ptfeStack, shieldStack) {
+  const render = buildMiSheetRenderPreview(computed, ptfeStack, shieldStack)
   const checks = []
-  checks.push(guardCheck(ptfeStack.length ? 'pass' : 'block', 'Taping pages', `${ptfeStack.length} rows`, 'PTFE rows map into the MI-ST962 3-Bay taping sheets.'))
-  checks.push(guardCheck(ptfeStack.length <= 6 ? 'pass' : 'warn', '3-Bay capacity', `${ptfeStack.length}/6`, 'Current template has two 3-Bay pages; extra passes stay in JSON/run sheet.'))
+  checks.push(guardCheck(render.rowCount ? 'pass' : 'block', 'Taping pages', `${render.rowCount} rows`, 'PTFE rows map into the MI-ST962 3-Bay taping sheets.'))
+  checks.push(guardCheck(render.rowCount <= 6 ? 'pass' : 'warn', '3-Bay capacity', `${render.rowCount}/6`, 'Current template has two 3-Bay pages; extra passes stay in JSON/run sheet.'))
   const missingPtfe = ptfeStack.filter((layer) => !(layer.partNumber || layer.part_number)).length
   checks.push(guardCheck(missingPtfe ? 'block' : 'pass', 'PTFE part numbers', missingPtfe ? `${missingPtfe} missing` : 'complete', 'MI should print real Material Library part numbers.'))
   const missingPitch = (computed.ptfeBuilds || []).filter((layer) => !Number.isFinite(Number(layer.pitch)) || !Number.isFinite(Number(layer.odAfterMm))).length
   checks.push(guardCheck(missingPitch ? 'block' : 'pass', 'Pitch / OD cells', missingPitch ? `${missingPitch} missing` : 'complete', 'Each tape row needs pitch set-point and OD after tape.'))
+  checks.push(guardCheck(render.pages.length ? 'pass' : 'warn', 'Sheet render preview', render.pages.length ? `${render.pages.length} page${render.pages.length === 1 ? '' : 's'}` : 'empty', 'Render preview should show the same visible sheet blocks before download.'))
+  checks.push(guardCheck(render.pages.every((page) => page.actualColumns) ? 'pass' : 'block', 'Actual / Oper / Date boxes', render.pages.length ? 'visible' : 'missing', 'The visual render keeps right-side signoff boxes visible like the shop MI.'))
   const shieldTypes = new Set(shieldStack.map((layer) => layer.type))
   checks.push(guardCheck(shieldStack.length ? 'pass' : 'warn', 'Shield run sheet', shieldStack.length ? Array.from(shieldTypes).join(' + ') : 'none', 'Spiral/foil/braid settings are carried in the run sheet view.'))
   if (shieldTypes.has('spiral')) checks.push(guardCheck(computed.spiralGap >= 1 ? 'pass' : 'block', 'Spiral visual gap', `${fmt(computed.spiralGap, 1)}%`, '3D/MI should show no overlap for SPC spiral.'))
   const blocks = checks.filter((check) => check.level === 'block')
   const warnings = checks.filter((check) => check.level === 'warn')
-  return { status: blocks.length ? 'blocked' : warnings.length ? 'review' : 'pass', blocks, warnings, checks }
+  return { status: blocks.length ? 'blocked' : warnings.length ? 'review' : 'pass', blocks, warnings, checks, render }
+}
+
+function miTriplet(nominalIn, tol = 0.001) {
+  const v = Number(nominalIn)
+  if (!Number.isFinite(v) || v <= 0) return { min: '-', nom: '-', max: '-' }
+  return { min: fmt(v - tol, 4), nom: fmt(v, 4), max: fmt(v + tol, 4) }
+}
+
+function miNominal(nominalIn) {
+  const v = Number(nominalIn)
+  if (!Number.isFinite(v) || v <= 0) return { min: '-', nom: '-', max: '-' }
+  return { min: '-', nom: fmt(v, 4), max: '-' }
+}
+
+function buildMiSheetRenderPreview(computed, ptfeStack, shieldStack) {
+  const builds = Array.isArray(computed.ptfeBuilds) ? computed.ptfeBuilds : []
+  const rows = []
+  let odCursorMm = Number(computed.conductorOD) || 0
+  builds.forEach((layer, layerIndex) => {
+    const passes = Math.max(1, Math.round(Number(layer.passes) || 1))
+    const radialMm = Number(layer.radial)
+    const odAfterMm = Number(layer.odAfterMm)
+    const perPassBuildMm = Number.isFinite(radialMm) && radialMm > 0
+      ? (radialMm * 2) / passes
+      : Number.isFinite(odAfterMm) && odAfterMm > odCursorMm
+        ? (odAfterMm - odCursorMm) / passes
+        : 0
+    for (let pass = 0; pass < passes; pass++) {
+      odCursorMm += perPassBuildMm
+      const index = rows.length + 1
+      const fallbackDirection = index % 2 ? 'Z' : 'S'
+      rows.push({
+        index,
+        partNumber: layer.partNumber || layer.part_number || ptfeStack[layerIndex]?.partNumber || '-',
+        direction: `${layer.direction || fallbackDirection}-DIRECTION`,
+        pitchIn: Number(layer.pitch) / MM_PER_IN,
+        overlap: `${ptfeOverlapKey(layer.overlap).toUpperCase()} WRAP`,
+        tension: Number(layer.tensionN ?? layer.tension ?? 4),
+        roller: `${index - 1}/${Math.max(6, rows.length + 3)}`,
+        odAfterIn: odCursorMm / MM_PER_IN,
+      })
+    }
+  })
+  const pages = []
+  for (let i = 0; i < rows.length && i < 6; i += 3) {
+    const chunk = rows.slice(i, i + 3)
+    const incomingOdIn = i === 0 ? computed.conductorOD / MM_PER_IN : rows[i - 1]?.odAfterIn
+    const finalOdIn = chunk[chunk.length - 1]?.odAfterIn
+    const parameterRows = [
+      { label: '"PO" LaserLink OD', ...miTriplet(incomingOdIn) },
+      { label: 'Caterpillar Gap', min: '-', nom: '6.85', max: '-' },
+    ]
+    chunk.forEach((entry) => {
+      parameterRows.push({ label: `Tape #${entry.index}, Lay Direction`, min: '-', nom: entry.direction, max: '-' })
+      parameterRows.push({ label: `Tape #${entry.index}, Pitch Set-Point`, min: '-', nom: fmt(entry.pitchIn, 4), max: '-' })
+      parameterRows.push({ label: `Tape #${entry.index}, Overlap`, min: '-', nom: entry.overlap, max: '-' })
+      parameterRows.push({ label: `Tape #${entry.index}, Tension (N)`, min: '-', nom: fmt(entry.tension, 1), max: '-' })
+      parameterRows.push({ label: `Tape #${entry.index}, Roller #1/#2 Position`, min: '-', nom: entry.roller, max: '-' })
+      parameterRows.push({ label: `"H${entry.index}" LaserLink OD`, ...miNominal(entry.odAfterIn) })
+    })
+    parameterRows.push({ label: 'Line Speed (ft/min)', min: '-', nom: '7', max: '-' })
+    parameterRows.push({ label: '"TU" LaserLink OD', ...miNominal(finalOdIn) })
+    parameterRows.push({ label: 'Take-Up Spool Size', min: '', nom: 'AT12679', max: '' })
+    pages.push({
+      title: `SHEET ${Math.floor(i / 3) + 1} OF 12`,
+      process: `Taping #${Math.floor(i / 3) + 1}`,
+      machine: 'WTM 3-Bay',
+      reference: 'AP96-007',
+      materials: chunk.map((entry) => ({ description: `Tape #${entry.index}`, partNumber: entry.partNumber })),
+      parameterRows,
+      actualColumns: true,
+    })
+  }
+  if (!pages.length && ptfeStack.length === 0) {
+    pages.push({
+      title: 'SHEET 0 OF 12',
+      process: 'Taping',
+      machine: 'WTM 3-Bay',
+      reference: 'AP96-007',
+      materials: [{ description: 'Tape #1', partNumber: '-' }, { description: 'Tape #2', partNumber: '-' }, { description: 'Tape #3', partNumber: '-' }],
+      parameterRows: [{ label: '"PO" LaserLink OD', ...miTriplet(computed.conductorOD / MM_PER_IN) }],
+      actualColumns: true,
+    })
+  }
+  return {
+    template: 'MI-ST962-032-130.xlsx',
+    rowCount: rows.length,
+    pages,
+    omittedRows: Math.max(0, rows.length - 6),
+    shieldFooter: shieldStack.length ? shieldStack.map((layer) => layer.type).join(' + ') : 'shield rows pending',
+  }
 }
 
 function buildSafetyAuditor(preview, machineGuard, tolerance, miQa) {
@@ -2828,6 +2922,7 @@ export default function RFStackLab() {
         machineGuard: detail.machineGuard || null,
         tolerance: detail.tolerance || null,
         miQa: detail.miQa || null,
+        miRenderQa: detail.miRenderQa || null,
         measuredTest: detail.measuredTest || null,
         calibrationHint: detail.calibrationHint || null,
       }
@@ -3933,15 +4028,79 @@ function ToleranceCard({ tolerance }) {
 
 function MiVisualQaCard({ qa }) {
   return (
-    <div style={S.intelCard}>
-      <div style={S.intelTitle}><GitCompare size={14} /> MI Visual QA Before Download</div>
+    <div style={{ ...S.intelCard, ...S.miRenderCard }}>
+      <div style={S.intelTitle}><GitCompare size={14} /> MI Visual Render QA Before Download</div>
       <div style={S.guardSummary}>
         <span>{qa.status}</span>
         <span>{qa.blocks.length} blocks</span>
         <span>{qa.warnings.length} review</span>
       </div>
+      <MiSheetRenderPreview render={qa.render} />
       <div style={S.checkList}>
         {qa.checks.map((item, index) => <GuardrailRow key={`${item.label}-${index}`} item={item} />)}
+      </div>
+    </div>
+  )
+}
+
+function MiSheetRenderPreview({ render }) {
+  const page = render?.pages?.[0]
+  if (!page) return <div style={S.emptyState}>No MI render preview available yet.</div>
+  return (
+    <div style={S.miRenderSheet}>
+      <div style={S.miRenderHeader}>
+        <strong>{page.title}</strong>
+        <b>MI-ST962-AUTO</b>
+      </div>
+      <div style={S.miRenderMeta}>
+        <span style={S.miMetaCell}>Process Step</span>
+        <strong style={S.miMetaCell}>{page.process}</strong>
+        <span style={S.miMetaCell}>Machine ID</span>
+        <strong style={S.miMetaCell}>{page.machine}</strong>
+      </div>
+      <div style={S.miRenderBody}>
+        <div style={S.miRenderLeft}>
+          <div style={S.miSectionTitle}>Materials</div>
+          <div style={S.miMaterialsGrid}>
+            <b style={S.miHeadCell}>Description</b>
+            <b style={S.miHeadCell}>Part Number</b>
+            {page.materials.map((material) => (
+              <React.Fragment key={`${material.description}-${material.partNumber}`}>
+                <span style={S.miLabelCell}>{material.description}</span>
+                <strong style={S.miValueCell}>{material.partNumber || '-'}</strong>
+              </React.Fragment>
+            ))}
+          </div>
+          <div style={S.miParameterGrid}>
+            <span style={S.miHeadCell} />
+            <b style={S.miHeadCell}>Min.</b>
+            <b style={S.miHeadCell}>Nom.</b>
+            <b style={S.miHeadCell}>Max.</b>
+            {page.parameterRows.slice(0, 18).map((row) => (
+              <React.Fragment key={row.label}>
+                <span style={S.miLabelCell}>{row.label}</span>
+                <strong style={S.miValueCell}>{row.min}</strong>
+                <strong style={S.miValueCell}>{row.nom}</strong>
+                <strong style={S.miValueCell}>{row.max}</strong>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+        <div style={S.miRenderRight}>
+          <strong>REFERENCE {page.reference}</strong>
+          <div style={S.miFootageBox}>Estimated<br />Footage</div>
+          <div style={S.miActualHead}>
+            <b>Actual</b>
+            <b>Oper.</b>
+            <b>Date</b>
+          </div>
+          <div style={S.miActualGrid}>
+            {Array.from({ length: 16 }).map((_, index) => <span key={index} style={S.miDashedRow} />)}
+          </div>
+        </div>
+      </div>
+      <div style={S.miRenderNote}>
+        Template {render.template} · {render.omittedRows ? `${render.omittedRows} extra rows stay in JSON/run sheet` : 'all visible rows fit'} · {render.shieldFooter}
       </div>
     </div>
   )
@@ -4109,6 +4268,11 @@ function ApprovalQueueCard({ queue, onApply, onReject }) {
               {item.safetyAudit && (
                 <div style={S.assumptionLine}>
                   safety: {item.safetyAudit.status || 'review'} · blocks {item.safetyAudit.blocks?.length || 0} · warnings {item.safetyAudit.warnings?.length || 0}
+                </div>
+              )}
+              {item.miRenderQa && (
+                <div style={S.assumptionLine}>
+                  MI render: {item.miRenderQa.status} · {item.miRenderQa.page_count || 0} page preview · {item.miRenderQa.message}
                 </div>
               )}
               {item.calibrationHint && (
@@ -4344,6 +4508,7 @@ const S = {
   intelCard: { border: `1px solid ${C.borderHi}`, background: '#080d0f', padding: 12, display: 'grid', gap: 10, minWidth: 0 },
   runSheetCard: { gridColumn: '1 / -1' },
   workflowWideCard: { gridColumn: '1 / -1' },
+  miRenderCard: { gridColumn: '1 / -1' },
   intelTitle: { display: 'flex', alignItems: 'center', gap: 7, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.7 },
   previewHero: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))', gap: 7, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
   calibratedStrip: { display: 'grid', gridTemplateColumns: 'auto repeat(3, minmax(70px, 1fr))', gap: 7, alignItems: 'center', border: `1px solid rgba(94,234,212,0.18)`, background: 'rgba(94,234,212,0.05)', padding: 8, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
@@ -4365,6 +4530,24 @@ const S = {
   previewMiniGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 6, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
   calibrationList: { display: 'grid', gap: 7, maxHeight: 260, overflow: 'auto', paddingRight: 2 },
   calibrationItem: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start', border: `1px solid rgba(167,176,182,0.12)`, background: '#070b0c', padding: 8, color: C.dim, fontSize: 11 },
+  miRenderSheet: { border: '1px solid #0a0a0a', background: '#f6f6f2', color: '#050505', padding: 10, display: 'grid', gap: 6, fontFamily: 'Arial, sans-serif', fontSize: 11, overflowX: 'auto' },
+  miRenderHeader: { display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', border: '2px solid #111', borderBottom: 0, padding: '5px 8px', fontSize: 18, fontWeight: 800 },
+  miRenderMeta: { display: 'grid', gridTemplateColumns: '120px minmax(120px, 1fr) 120px minmax(120px, 1fr)', border: '1px solid #111', alignItems: 'center' },
+  miMetaCell: { borderRight: '1px solid #111', padding: '3px 6px', minHeight: 22 },
+  miRenderBody: { display: 'grid', gridTemplateColumns: 'minmax(440px, 1fr) minmax(210px, 0.42fr)', gap: 8, alignItems: 'start' },
+  miRenderLeft: { display: 'grid', gap: 0 },
+  miSectionTitle: { border: '2px solid #111', borderBottom: 0, background: '#d9ead3', padding: '4px 8px', fontSize: 17, fontWeight: 800 },
+  miMaterialsGrid: { display: 'grid', gridTemplateColumns: 'minmax(150px, 0.45fr) minmax(190px, 0.55fr)', border: '1px solid #111' },
+  miParameterGrid: { display: 'grid', gridTemplateColumns: 'minmax(230px, 1fr) 72px 72px 72px', border: '1px solid #111', borderTop: 0 },
+  miHeadCell: { borderRight: '1px solid #111', borderBottom: '1px solid #111', background: '#e6e6e6', padding: '3px 5px', textAlign: 'center' },
+  miLabelCell: { borderRight: '1px solid #111', borderBottom: '1px solid #999', padding: '3px 5px', textAlign: 'right', fontWeight: 700 },
+  miValueCell: { borderRight: '1px solid #111', borderBottom: '1px solid #999', background: '#d9d9d9', padding: '3px 5px', textAlign: 'center', minHeight: 18 },
+  miRenderRight: { display: 'grid', gap: 6, textAlign: 'center', fontSize: 13 },
+  miFootageBox: { border: '2px dashed #111', minHeight: 54, display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 16 },
+  miActualHead: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 0, textDecoration: 'underline', fontSize: 15 },
+  miActualGrid: { display: 'grid', gridTemplateRows: 'repeat(16, 18px)', border: '1px dashed #111', borderBottom: 0 },
+  miDashedRow: { borderBottom: '1px dashed #111' },
+  miRenderNote: { color: '#333', fontSize: 10, borderTop: '1px solid #aaa', paddingTop: 4 },
   reasonList: { display: 'grid', gap: 7 },
   reasonRow: { display: 'grid', gridTemplateColumns: 'minmax(76px, 0.3fr) minmax(90px, 0.35fr) minmax(0, 1fr)', gap: 8, alignItems: 'start', border: `1px solid rgba(167,176,182,0.12)`, background: '#070b0c', padding: 8, color: C.dim, fontSize: 11 },
   versionList: { display: 'grid', gap: 7, maxHeight: 330, overflow: 'auto', paddingRight: 2 },
