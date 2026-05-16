@@ -112,10 +112,10 @@ const RF_SECTION_LABELS = {
   launch: 'Connector Launch Lab',
   shielding: 'Shielding Effectiveness Lab',
   scanner: 'Near-field / EMI Scanner Lab',
-  stack: 'RF Stack Lab',
-  suckout: 'RF Stack Lab',
-  dielectric: 'RF Stack Lab',
-  materials: 'Material Library',
+  stack: 'RF Stack / Suckout / MI Lab',
+  suckout: 'RF Stack / Suckout / MI Lab',
+  dielectric: 'RF Stack / Suckout / MI Lab',
+  materials: 'Material Library / MI Templates',
   wizard: 'Wizard',
   cheat: 'Cheat Sheet',
   compare: 'Compare',
@@ -217,11 +217,11 @@ const RF_TOOL_TO_SECTION = {
   lookup_connector:         { id: 'connectors', label: 'Connectors' },
   lookup_material_library:  { id: 'materials', label: 'Material Library' },
   generate_blank_mi_template:{ id: 'materials', label: 'Material Library' },
-  design_dielectric_stack:  { id: 'stack', label: 'RF Stack Lab' },
-  optimize_dielectric_stack:{ id: 'stack', label: 'RF Stack Lab' },
-  validate_recipe_against_rf_stack:{ id: 'stack', label: 'RF Stack Lab' },
-  design_shield_stack:      { id: 'stack', label: 'RF Stack Lab' },
-  compute_tape_notches:     { id: 'stack', label: 'RF Stack Lab' },
+  design_dielectric_stack:  { id: 'stack', label: 'RF Stack / Suckout / MI Lab' },
+  optimize_dielectric_stack:{ id: 'stack', label: 'RF Stack / Suckout / MI Lab' },
+  validate_recipe_against_rf_stack:{ id: 'stack', label: 'RF Stack / Suckout / MI Lab' },
+  design_shield_stack:      { id: 'stack', label: 'RF Stack / Suckout / MI Lab' },
+  compute_tape_notches:     { id: 'stack', label: 'RF Stack / Suckout / MI Lab' },
   connector_launch_analyzer:{ id: 'tools', label: 'Tools' },
   shielding_effectiveness_predictor:{ id: 'tools', label: 'Tools' },
   sparameter_cascade:       { id: 'tools', label: 'Tools' },
@@ -1231,8 +1231,8 @@ Pending Shop Memory rules: ${pendingCount}. Pending rules are not active; tell t
     {
       group: "build", label: "Build",
       children: [
-        { id: "stack", label: "RF Stack Lab" },
-        { id: "materials", label: "Material Library" },
+        { id: "stack", label: "Stack / Suckout / MI" },
+        { id: "materials", label: "Materials / MI Template" },
       ],
     },
     {
@@ -1398,7 +1398,7 @@ Pending Shop Memory rules: ${pendingCount}. Pending rules are not active; tell t
                         <div
                           role="menu"
                           style={{
-                            position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 180,
+                            position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 230,
                             background: "#0a0705", border: "1px solid #3a2e1f", borderRadius: 4,
                             boxShadow: "0 8px 24px rgba(0,0,0,0.6)", zIndex: 50, padding: 4,
                             display: "flex", flexDirection: "column", gap: 2,
@@ -1416,6 +1416,7 @@ Pending Shop Memory rules: ${pendingCount}. Pending rules are not active; tell t
                                   textAlign: "left",
                                   padding: "8px 14px",
                                   borderRadius: 3,
+                                  whiteSpace: "nowrap",
                                   ...(isActive
                                     ? { background: "#2a1d14", color: "#fbbf24" }
                                     : c.hot
@@ -2189,15 +2190,15 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
   const tools = [
     { id: 'library', icon: 'cable', title: 'Cable Library', sub: `${cableCount} presets · RG / LMR / Heliax / phase-stable`, accent: '#c97b3f' },
     { id: 'connectors', icon: 'plug', title: 'Connector Library', sub: `${connectorCount} types · N / SMA / TNC / 7-16 DIN`, accent: '#fbbf24' },
-    { id: 'design', icon: 'layers', title: 'Design Workbench', sub: 'Compose chains · paste configs · share', accent: '#5eead4' },
+    { id: 'design', icon: 'layers', title: 'Design / Clone Workbench', sub: 'Compose chains · clone library cable · share', accent: '#5eead4' },
     { id: 'link', icon: 'link', title: 'Link Budget', sub: 'TX → cable → FSPL → RX with margin', accent: '#7dd3fc' },
     { id: 'tools', icon: 'tools', title: 'Tools', sub: 'Friis NF · IP3 · Smith · path loss', accent: '#a78bfa' },
     { id: 'failure', icon: 'failure', title: 'RF Failure Theater', sub: 'Blender defect → TDR · S11 · VSWR story', accent: '#f87171' },
     { id: 'launch', icon: 'launch', title: 'Connector Launch Lab', sub: 'Pin depth · strip length · ferrule step → S11', accent: '#38bdf8' },
     { id: 'shielding', icon: 'shielding', title: 'Shielding Effectiveness Lab', sub: 'Braid · foil gap · bond quality → leakage dB', accent: '#22d3ee' },
     { id: 'scanner', icon: 'scanner', title: 'Near-field / EMI Scanner', sub: 'Probe scan · hotspot map · spectrum clue', accent: '#f472b6' },
-    { id: 'stack', icon: 'wave', title: 'RF Stack Lab', sub: 'PTFE build · shield coverage · RF symptoms', accent: '#e89357' },
-    { id: 'wizard', icon: 'sparkles', title: 'Cable Selector', sub: 'Wizard: pick the right cable for the job', accent: '#84cc16' },
+    { id: 'stack', icon: 'wave', title: 'Stack / Suckout / MI Lab', sub: 'PTFE · spiral/foil/braid · notch check · apply MI', accent: '#e89357' },
+    { id: 'wizard', icon: 'sparkles', title: 'Cable Selector / Clone', sub: 'Wizard + library profile for picking a starting cable', accent: '#84cc16' },
     { id: 'cheat', icon: 'book', title: 'Cheat Sheet', sub: 'Formulas · constants · standards', accent: '#cbd5e1' },
   ];
 
@@ -2303,7 +2304,7 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
         {/* STATS BAR */}
         <section className="rf-fade" style={{ animationDelay: '120ms', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 18 }}>
           <CommandCard label="Design workbench" sub="Compose a cable chain and test margin." accent="#5eead4" onClick={() => setTab('design')} />
-          <CommandCard label="Agent build flow" sub="Ask for a cable, then apply the stack." accent="#fbbf24" onClick={() => setTab('wizard')} />
+          <CommandCard label="Build + MI flow" sub="Agent preflight, apply stack, then fill MI." accent="#fbbf24" onClick={() => setTab('stack')} />
           <CommandCard label="Connector launch" sub="Pin plane, strip length, ferrule step." accent="#38bdf8" onClick={() => setTab('launch')} />
           <CommandCard label="Failure theater" sub="Turn damage into TDR and S11 clues." accent="#f87171" onClick={() => setTab('failure')} />
         </section>
@@ -2410,16 +2411,16 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
 
         {/* WHAT'S NEW */}
         <section style={{ marginTop: 40, padding: 18, background: '#12171a', border: '1px solid #252e33', borderRadius: 4 }}>
-          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 3, color: '#c97b3f', textTransform: 'uppercase', marginBottom: 10 }}>◆ Recently added</div>
+          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 3, color: '#c97b3f', textTransform: 'uppercase', marginBottom: 10 }}>◆ Workflows grouped</div>
           <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 8, fontSize: 13, color: '#a7b0b6' }}>
             <NewItem accent="#e89357">
-              <strong style={{ color: '#fbbf24' }}>RF Stack Lab</strong> — PTFE build-up, SPC flatwire shields, foil/braid coverage, suckout, TDR, S11, VSWR, and insertion loss in one macro view.
+              <strong style={{ color: '#fbbf24' }}>Stack / Suckout / MI Lab</strong> — PTFE build-up, SPC flatwire shields, foil/braid coverage, suckout, TDR, S11, VSWR, insertion loss, and MI apply all live together.
             </NewItem>
             <NewItem accent="#5eead4">
-              <strong style={{ color: '#fbbf24' }}>Library expansion</strong> — 8 new entries (RG-316 / 393, LMR-200 / 900, Heliax LDF5, Sucoflex 104, UT-085, RG-6 / 11) with linked datasheets.
+              <strong style={{ color: '#fbbf24' }}>Design / Clone Workbench</strong> — library profiles, cable selector, compare mode, and design chain all share the same cable starting point.
             </NewItem>
             <NewItem accent="#a78bfa">
-              <strong style={{ color: '#fbbf24' }}>Company defaults memory</strong> — Cu price, preferred materials, and tolerances persist on this device. The agent reads them automatically.
+              <strong style={{ color: '#fbbf24' }}>Materials / MI Templates</strong> — stocked PTFE, SPC spiral, foil, braid families, and blank MI templates stay in the Build menu instead of becoming separate tabs.
             </NewItem>
           </ul>
         </section>
