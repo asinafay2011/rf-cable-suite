@@ -2020,7 +2020,7 @@ function buildApplyPreview(result) {
   return rows.length ? { rows, warnings } : null
 }
 
-function ToolGuardrailPanel({ safetyAudit, machineGuard, tolerance, miQa, measuredTest, accent }) {
+function ToolGuardrailPanel({ safetyAudit, machineGuard, tolerance, miQa, measuredTest, calibrationHint, accent }) {
   const blockers = (safetyAudit?.blocks?.length || 0) + (machineGuard?.blocks?.length || 0) + (miQa?.blocks?.length || 0)
   const warnings = (safetyAudit?.warnings?.length || 0) + (machineGuard?.warnings?.length || 0) + (miQa?.warnings?.length || 0)
   const tone = blockers ? '#f87171' : warnings ? '#fbbf24' : '#5eead4'
@@ -2062,6 +2062,16 @@ function ToolGuardrailPanel({ safetyAudit, machineGuard, tolerance, miQa, measur
           OCR/test import: {measuredTest.fields_detected} fields · Z0 {measuredTest.z0_ohm || '—'} · VP {measuredTest.vp_pct || '—'} · notch {measuredTest.suckout_ghz || '—'}
         </div>
       )}
+      {calibrationHint && (
+        <div className="mt-1 border px-2 py-1 font-mono text-[10px]" style={{ borderColor: '#1f2a2f', background: '#07110f', color: '#a7b0b6' }}>
+          <div className="uppercase tracking-wider" style={{ color: '#5eead4' }}>
+            Calibration Memory · {calibrationHint.confidence} · {calibrationHint.matched_count || 0}/{calibrationHint.sample_count || 0} match
+          </div>
+          <div>
+            raw {calibrationHint.raw_prediction?.z0_ohm ?? '—'} Ω → calibrated {calibrationHint.calibrated_prediction?.z0_ohm ?? '—'} Ω · VP {calibrationHint.calibrated_prediction?.vp_pct ?? '—'}%
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -2088,6 +2098,7 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
   const tolerance = parsedResult?._tolerance
   const miQa = parsedResult?._mi_qa
   const measuredTest = parsedResult?._measured_test
+  const calibrationHint = parsedResult?._calibration_hint
   const applyBlocked = Boolean(parsedResult?._apply_blocked || preflight?.allow_apply === false)
   const canApplyPreset = presetSection && presetData && !applyBlocked && !partial && !parsedResult?.error
   const canDownload = downloadSpec && !partial && !parsedResult?.error
@@ -2114,6 +2125,7 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
         tolerance,
         miQa,
         measuredTest,
+        calibrationHint,
       },
     }))
     setQueued(true)
@@ -2207,13 +2219,14 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
           </div>
         )}
 
-        {!partial && !parsedResult?.error && (safetyAudit || machineGuard || tolerance || miQa || measuredTest) && (
+        {!partial && !parsedResult?.error && (safetyAudit || machineGuard || tolerance || miQa || measuredTest || calibrationHint) && (
           <ToolGuardrailPanel
             safetyAudit={safetyAudit}
             machineGuard={machineGuard}
             tolerance={tolerance}
             miQa={miQa}
             measuredTest={measuredTest}
+            calibrationHint={calibrationHint}
             accent={accent}
           />
         )}

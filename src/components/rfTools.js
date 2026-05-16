@@ -31,6 +31,8 @@ import {
 } from '../data/materialLibrary.js'
 import { makeBlankMiWorkbook, makePtfeMiWorkbook } from '../data/miTemplate.js'
 
+const RF_CALIBRATION_MEMORY_KEY = 'rf-stack-calibration-memory-v1'
+
 // ── Material properties database ────────────────────────
 export const MATERIAL_DB = {
   copper:    { name: 'Copper (Cu)',         rho_ohm_m: 1.68e-8, mu_r: 1, sigma_S_per_m: 5.96e7, density_g_cm3: 8.96, tmax_c: 200,  notes: 'Best general-purpose conductor for RF cable.' },
@@ -2016,6 +2018,103 @@ function _combinePreflightWithAudit(preflight, audit) {
   }
 }
 
+function _readRfCalibrationMemory() {
+  try {
+    if (typeof localStorage === 'undefined') return []
+    const parsed = JSON.parse(localStorage.getItem(RF_CALIBRATION_MEMORY_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function _uniqueTruthy(items) {
+  return Array.from(new Set((items || []).filter(Boolean)))
+}
+
+function _calibrationToolScore(sample, signature) {
+  let score = 0
+  const conductorDelta = Math.abs(Number(sample.conductorOdIn) - signature.conductorOdIn)
+  if (Number.isFinite(conductorDelta)) {
+    const pct = conductorDelta / Math.max(0.001, signature.conductorOdIn)
+    score += Math.max(0, Math.min(30, 30 - pct * 150))
+  }
+  const sampleParts = new Set(sample.ptfeParts || [])
+  const partHits = signature.ptfeParts.filter((part) => sampleParts.has(part)).length
+  if (partHits) score += Math.min(30, partHits * 12)
+  const sampleWraps = new Set(sample.ptfeWraps || [])
+  const wrapHits = signature.ptfeWraps.filter((wrap) => sampleWraps.has(wrap)).length
+  if (wrapHits) score += Math.min(18, wrapHits * 7)
+  const sampleShields = new Set(sample.shieldTypes || [])
+  const shieldHits = signature.shieldTypes.filter((type) => sampleShields.has(type)).length
+  if (shieldHits) score += Math.min(18, shieldHits * 6)
+  if ((sample.scope || 'dielectric') === (signature.shieldTypes.length ? 'full_stack' : 'dielectric')) score += 8
+  return score
+}
+
+function _weightedCalibrationAverage(items, key) {
+  let total = 0
+  let weight = 0
+  items.forEach((item) => {
+    const value = Number(item.sample?.deltas?.[key])
+    if (!Number.isFinite(value)) return
+    const w = Math.max(1, Number(item.score) || 1)
+    total += value * w
+    weight += w
+  })
+  return weight ? total / weight : null
+}
+
+function _calibrationHintForRecipe({ conductorOdMm, layers = [], predicted = {}, shieldLayers = [] }) {
+  const samples = _readRfCalibrationMemory().filter((sample) => sample?.deltas)
+  const signature = {
+    conductorOdIn: conductorOdMm / 25.4,
+    ptfeParts: _uniqueTruthy(layers.map((layer) => layer.part_number || layer.partNumber)),
+    ptfeWraps: _uniqueTruthy(layers.map((layer) => normalizePtfeWrap(layer.overlap).key)),
+    shieldTypes: _uniqueTruthy(shieldLayers.map((layer) => layer.type)),
+  }
+  const scored = samples
+    .map((sample) => ({ sample, score: _calibrationToolScore(sample, signature) }))
+    .sort((a, b) => b.score - a.score)
+  const matches = scored.filter((item) => item.score >= 22).slice(0, 8)
+  const pool = matches.length ? matches : scored.slice(0, 8)
+  const z0Bias = _weightedCalibrationAverage(pool, 'z0')
+  const vpBias = _weightedCalibrationAverage(pool, 'vpPct')
+  const odPool = signature.shieldTypes.length ? pool : pool.filter((item) => (item.sample.scope || 'dielectric') === 'dielectric')
+  const odBiasIn = _weightedCalibrationAverage(odPool, 'odIn')
+  const rawZ0 = Number(predicted.z0_ohm)
+  const rawVp = Number(predicted.vp)
+  const rawOdMm = Number(predicted.final_od_mm)
+  const calibratedVpPct = Number.isFinite(rawVp) ? rawVp * 100 + (Number.isFinite(vpBias) ? vpBias : 0) : null
+  const confidence = matches.length >= 3 ? 'high' : matches.length ? 'medium' : samples.length ? 'global' : 'none'
+  return {
+    sample_count: samples.length,
+    matched_count: matches.length,
+    confidence,
+    bias: {
+      z0_ohm: Number.isFinite(z0Bias) ? round(z0Bias, 3) : null,
+      vp_pct_points: Number.isFinite(vpBias) ? round(vpBias, 3) : null,
+      od_in: Number.isFinite(odBiasIn) ? round(odBiasIn, 5) : null,
+    },
+    raw_prediction: {
+      z0_ohm: Number.isFinite(rawZ0) ? round(rawZ0, 3) : null,
+      vp: Number.isFinite(rawVp) ? round(rawVp, 4) : null,
+      final_od_mm: Number.isFinite(rawOdMm) ? round(rawOdMm, 4) : null,
+    },
+    calibrated_prediction: {
+      z0_ohm: Number.isFinite(rawZ0) ? round(rawZ0 + (Number.isFinite(z0Bias) ? z0Bias : 0), 3) : null,
+      vp: Number.isFinite(calibratedVpPct) ? round(calibratedVpPct / 100, 4) : null,
+      vp_pct: Number.isFinite(calibratedVpPct) ? round(calibratedVpPct, 2) : null,
+      final_od_mm: Number.isFinite(rawOdMm) ? round(rawOdMm + ((Number.isFinite(odBiasIn) ? odBiasIn : 0) * 25.4), 4) : null,
+    },
+    message: samples.length
+      ? matches.length
+        ? `Calibration Memory found ${matches.length} matching shop sample${matches.length === 1 ? '' : 's'}; compare raw vs calibrated prediction before Apply.`
+        : 'Calibration Memory has samples, but none closely match this conductor/tape/shield process; using global bias only.'
+      : 'No Calibration Memory samples yet. Save actual tested reels in RF Stack Lab to make future agent builds smarter.',
+  }
+}
+
 function _parseFirstReportNumber(text, patterns) {
   for (const pattern of patterns) {
     const match = String(text || '').match(pattern)
@@ -2530,6 +2629,7 @@ async function designDielectricStack(input) {
   const miQa = _miQaForRecipe({ miWorkbook, layers: stackOut })
   const safetyAudit = _safetyAuditForResult({ preflight, machineGuard, tolerance, miQa })
   const guardedPreflight = _combinePreflightWithAudit(preflight, safetyAudit)
+  const calibrationHint = _calibrationHintForRecipe({ conductorOdMm: d, layers: stackOut, predicted })
   const miFilename = `${String(mi_number || 'MI-ST962-AUTO').replace(/[^a-z0-9._-]+/gi, '-')}-${round(d / 25.4, 4)}in-${Math.round((target_vp || VP_actual) * 100)}vp.${miWorkbook.extension || 'xlsx'}`
 
   return {
@@ -2553,6 +2653,7 @@ async function designDielectricStack(input) {
     _tolerance: tolerance,
     _mi_qa: miQa,
     _safety_audit: safetyAudit,
+    _calibration_hint: calibrationHint,
     label: `${target_z0_ohm ? `${target_z0_ohm} Ω` : ''}${target_vp ? ` · ${(target_vp*100).toFixed(0)}% VP` : ''} · d=${d.toFixed(3)} mm`.trim(),
     _section: 'stack',
     ...(guardedPreflight.allow_apply ? { _apply_preset: {
@@ -2596,6 +2697,9 @@ async function designDielectricStack(input) {
         : null,
       miWorkbook.warning || null,
       `Preflight: target dielectric OD ${D_target.toFixed(3)} mm; dry-run recipe gives ${finalOD.toFixed(3)} mm, ${Z0_actual.toFixed(1)} ohm, ${(VP_actual * 100).toFixed(1)}% VP.`,
+      calibrationHint.sample_count
+        ? `Calibration Memory: ${calibrationHint.message} Calibrated prediction ${calibrationHint.calibrated_prediction.z0_ohm} ohm, ${calibrationHint.calibrated_prediction.vp_pct}% VP, OD ${calibrationHint.calibrated_prediction.final_od_mm} mm.`
+        : calibrationHint.message,
       !guardedPreflight.allow_apply
         ? 'Apply is held until the recipe matches the RF stack calculator targets closely enough.'
         : null,
@@ -2807,6 +2911,7 @@ function optimizeDielectricStack(input) {
   const miQa = _miQaForRecipe({ layers: best.layers })
   const safetyAudit = _safetyAuditForResult({ preflight: best.preflight, machineGuard, tolerance, miQa })
   const guardedPreflight = _combinePreflightWithAudit(best.preflight, safetyAudit)
+  const calibrationHint = _calibrationHintForRecipe({ conductorOdMm: targets.conductorOdMm, layers: best.layers, predicted: best.predicted })
 
   return {
     targets: {
@@ -2833,6 +2938,7 @@ function optimizeDielectricStack(input) {
     _tolerance: tolerance,
     _mi_qa: miQa,
     _safety_audit: safetyAudit,
+    _calibration_hint: calibrationHint,
     label: `Optimized ${targets.targetZ0 || ''} Ω ${targets.targetVp ? `${round(targets.targetVp * 100, 1)}% VP` : ''}`.trim(),
     _section: 'stack',
     ...(guardedPreflight.allow_apply ? { _apply_preset: _stackApplyPreset(targets.conductorOdMm, targets.targetZ0, best.layers) } : { _apply_blocked: guardedPreflight.message }),
@@ -2841,6 +2947,9 @@ function optimizeDielectricStack(input) {
       guardedPreflight.allow_apply
         ? 'Best candidate passed RF Stack Lab preflight; Apply is enabled.'
         : 'Best candidate is still outside tolerance; Apply is held. Consider a different tape thickness, tension target, or measured OD constraint.',
+      calibrationHint.sample_count
+        ? `Calibration Memory: ${calibrationHint.message} Calibrated best candidate ${calibrationHint.calibrated_prediction.z0_ohm} ohm, ${calibrationHint.calibrated_prediction.vp_pct}% VP.`
+        : calibrationHint.message,
       'For a printable MI, call design_dielectric_stack with the recommended tape/wrap/tension settings after choosing the candidate.',
     ],
   }
@@ -2865,6 +2974,7 @@ function validateRecipeAgainstRfStack(input) {
   const miQa = _miQaForRecipe({ layers: evaluated.stackOut })
   const safetyAudit = _safetyAuditForResult({ preflight: evaluated.preflight, machineGuard, tolerance, miQa })
   const guardedPreflight = _combinePreflightWithAudit(evaluated.preflight, safetyAudit)
+  const calibrationHint = _calibrationHintForRecipe({ conductorOdMm: targets.conductorOdMm, layers: evaluated.stackOut, predicted: evaluated.predicted })
   return {
     targets: {
       conductor_od_mm: round(targets.conductorOdMm, 4),
@@ -2879,6 +2989,7 @@ function validateRecipeAgainstRfStack(input) {
     _tolerance: tolerance,
     _mi_qa: miQa,
     _safety_audit: safetyAudit,
+    _calibration_hint: calibrationHint,
     label: `Validated ${evaluated.predicted.z0_ohm} Ω · ${(evaluated.predicted.vp * 100).toFixed(1)}% VP`,
     _section: 'stack',
     ...(guardedPreflight.allow_apply ? { _apply_preset: _stackApplyPreset(targets.conductorOdMm, targets.targetZ0, evaluated.stackOut) } : { _apply_blocked: guardedPreflight.message }),
@@ -2889,6 +3000,9 @@ function validateRecipeAgainstRfStack(input) {
       raw.use_od_after_overrides
         ? 'Validation used provided OD_after values as measured overrides.'
         : 'Validation independently calculated OD from tape thickness, wrap, tension, and passes.',
+      calibrationHint.sample_count
+        ? `Calibration Memory: ${calibrationHint.message} Calibrated validation ${calibrationHint.calibrated_prediction.z0_ohm} ohm, ${calibrationHint.calibrated_prediction.vp_pct}% VP.`
+        : calibrationHint.message,
     ],
   }
 }

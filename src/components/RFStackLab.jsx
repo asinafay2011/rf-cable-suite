@@ -185,6 +185,7 @@ const MIL_TO_MM = 0.0254
 const MM_PER_IN = 25.4
 const GOLDEN_HISTORY_KEY = 'rf-stack-golden-history-v1'
 const RECIPE_VERSION_HISTORY_KEY = 'rf-stack-recipe-versions-v1'
+const CALIBRATION_MEMORY_KEY = 'rf-stack-calibration-memory-v1'
 const EMPTY_MEASURED_TEST = {
   cableId: '',
   measuredZ0: '',
@@ -393,6 +394,21 @@ function readRecipeVersions() {
 function writeRecipeVersions(items) {
   try {
     localStorage.setItem(RECIPE_VERSION_HISTORY_KEY, JSON.stringify(items.slice(0, 36)))
+  } catch {}
+}
+
+function readCalibrationMemory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CALIBRATION_MEMORY_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function writeCalibrationMemory(items) {
+  try {
+    localStorage.setItem(CALIBRATION_MEMORY_KEY, JSON.stringify(items.slice(0, 80)))
   } catch {}
 }
 
@@ -749,6 +765,170 @@ function buildAutoTestDiagnosis(measured, correlation, doctor, computed) {
     lines.push({ level: 'info', title: 'Pitch-linked suckout', body: `${doctor.root.label} is close to the measured/primary suckout. Stagger pitch before changing unrelated dimensions.` })
   }
   return lines.length ? lines : correlation.items.slice(0, 3).map((item) => ({ level: item.level, title: item.title, body: item.body }))
+}
+
+function uniqueTruthy(items) {
+  return Array.from(new Set(items.filter(Boolean)))
+}
+
+function buildCalibrationSample({ label, params, ptfeStack, shieldStack, measured, computed, correlation }) {
+  const measuredZ0 = numeric(measured.measuredZ0)
+  const measuredVp = numeric(measured.measuredVp)
+  const measuredFinalOdIn = numeric(measured.measuredFinalOdIn)
+  const measuredSuckout = numeric(measured.measuredSuckoutGHz)
+  const hasMeasured = [measuredZ0, measuredVp, measuredFinalOdIn, measuredSuckout].some((value) => Number.isFinite(value))
+  if (!hasMeasured) return null
+
+  const predictedFinalOdIn = (computed.jacketInstalled ? computed.jacketOD : computed.dielectricOD) / MM_PER_IN
+  const predictedSuckout = primarySuckoutGHz(computed)
+  const ptfeParts = uniqueTruthy(ptfeStack.map((layer) => layer.partNumber || layer.part_number))
+  const ptfeWraps = uniqueTruthy(ptfeStack.map((layer) => ptfeOverlapKey(layer.overlap)))
+  const shieldTypes = uniqueTruthy(shieldStack.map((layer) => layer.type))
+  return {
+    id: `cal-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    label: label || measured.cableId || `Calibration ${new Date().toLocaleDateString()}`,
+    cableId: measured.cableId || '',
+    createdAt: new Date().toISOString(),
+    scope: shieldTypes.length ? 'full_stack' : 'dielectric',
+    conductorOdIn: params.conductorOD / MM_PER_IN,
+    dielectricOdIn: computed.dielectricOD / MM_PER_IN,
+    ptfeParts,
+    ptfeWraps,
+    shieldTypes,
+    shieldSummary: {
+      spiralGap: computed.spiralInstalled ? computed.spiralGap : null,
+      foilOverlap: computed.foilInstalled ? computed.foilOverlap : null,
+      braidCoverage: computed.braidInstalled ? computed.braidCoverage : null,
+    },
+    predicted: {
+      z0: computed.z0,
+      vpPct: computed.vp * 100,
+      finalOdIn: predictedFinalOdIn,
+      dielectricOdIn: computed.dielectricOD / MM_PER_IN,
+      suckoutGHz: predictedSuckout,
+    },
+    measured: {
+      z0: measuredZ0,
+      vpPct: measuredVp,
+      finalOdIn: measuredFinalOdIn,
+      suckoutGHz: measuredSuckout,
+      rlDb: numeric(measured.measuredRlDb),
+      vswr: numeric(measured.measuredVswr),
+      ilDb: numeric(measured.measuredIlDb),
+      capPfFt: numeric(measured.measuredCapPfFt),
+    },
+    deltas: {
+      z0: Number.isFinite(measuredZ0) ? measuredZ0 - computed.z0 : null,
+      vpPct: Number.isFinite(measuredVp) ? measuredVp - computed.vp * 100 : null,
+      odIn: Number.isFinite(measuredFinalOdIn) ? measuredFinalOdIn - predictedFinalOdIn : null,
+      suckoutGHz: Number.isFinite(measuredSuckout) && predictedSuckout ? measuredSuckout - predictedSuckout : null,
+    },
+    diagnosis: (correlation?.items || []).slice(0, 3),
+    notes: measured.notes || '',
+  }
+}
+
+function calibrationCurrentSignature(computed, ptfeStack, shieldStack) {
+  return {
+    conductorOdIn: computed.conductorOD / MM_PER_IN,
+    ptfeParts: uniqueTruthy(ptfeStack.map((layer) => layer.partNumber || layer.part_number)),
+    ptfeWraps: uniqueTruthy(ptfeStack.map((layer) => ptfeOverlapKey(layer.overlap))),
+    shieldTypes: uniqueTruthy(shieldStack.map((layer) => layer.type)),
+  }
+}
+
+function calibrationScore(sample, signature) {
+  let score = 0
+  const conductorDelta = Math.abs(Number(sample.conductorOdIn) - signature.conductorOdIn)
+  if (Number.isFinite(conductorDelta)) {
+    const pct = conductorDelta / Math.max(0.001, signature.conductorOdIn)
+    score += clamp(30 - pct * 150, 0, 30)
+  }
+  const sampleParts = new Set(sample.ptfeParts || [])
+  const partHits = signature.ptfeParts.filter((part) => sampleParts.has(part)).length
+  if (partHits) score += Math.min(30, partHits * 12)
+  const sampleWraps = new Set(sample.ptfeWraps || [])
+  const wrapHits = signature.ptfeWraps.filter((wrap) => sampleWraps.has(wrap)).length
+  if (wrapHits) score += Math.min(18, wrapHits * 7)
+  const sampleShields = new Set(sample.shieldTypes || [])
+  const shieldHits = signature.shieldTypes.filter((type) => sampleShields.has(type)).length
+  if (shieldHits) score += Math.min(18, shieldHits * 6)
+  if ((sample.scope || 'dielectric') === (signature.shieldTypes.length ? 'full_stack' : 'dielectric')) score += 8
+  return score
+}
+
+function weightedAverage(items, key) {
+  let total = 0
+  let weight = 0
+  items.forEach((item) => {
+    const value = Number(item.sample?.deltas?.[key])
+    if (!Number.isFinite(value)) return
+    const w = Math.max(1, Number(item.score) || 1)
+    total += value * w
+    weight += w
+  })
+  return weight ? total / weight : null
+}
+
+function buildCalibrationMemory(samples, computed, ptfeStack, shieldStack, measured) {
+  const signature = calibrationCurrentSignature(computed, ptfeStack, shieldStack)
+  const valid = (samples || []).filter((sample) => sample?.deltas && (
+    Number.isFinite(sample.deltas.z0) || Number.isFinite(sample.deltas.vpPct) || Number.isFinite(sample.deltas.odIn)
+  ))
+  const scored = valid
+    .map((sample) => ({ sample, score: calibrationScore(sample, signature) }))
+    .sort((a, b) => b.score - a.score)
+  const matches = scored.filter((item) => item.score >= 22).slice(0, 8)
+  const pool = matches.length ? matches : scored.slice(0, 8)
+  const z0Bias = weightedAverage(pool, 'z0')
+  const vpBias = weightedAverage(pool, 'vpPct')
+  const odBiasIn = weightedAverage(pool, 'odIn')
+  const finalOdIn = (computed.jacketInstalled ? computed.jacketOD : computed.dielectricOD) / MM_PER_IN
+  const confidence = matches.length >= 3 ? 'high' : matches.length ? 'medium' : valid.length ? 'global' : 'none'
+  const recommendations = []
+  if (!valid.length) {
+    recommendations.push({ level: 'info', text: 'Save actual Z0, VP, and OD from a tested reel to start calibrating this shop model.' })
+  } else if (!matches.length) {
+    recommendations.push({ level: 'info', text: 'No close process match yet, so the calibrated prediction is using global shop bias only.' })
+  }
+  if (Number.isFinite(z0Bias) && Math.abs(z0Bias) > 0.8) {
+    recommendations.push({
+      level: 'warn',
+      text: z0Bias < 0
+        ? `Similar builds test ${fmt(Math.abs(z0Bias), 1)} Ω lower than the calculator. Bias next design toward larger dielectric OD or less compression.`
+        : `Similar builds test ${fmt(z0Bias, 1)} Ω higher than the calculator. Bias next design toward smaller dielectric OD or denser/tighter PTFE.`,
+    })
+  }
+  if (Number.isFinite(vpBias) && Math.abs(vpBias) > 0.6) {
+    recommendations.push({
+      level: 'warn',
+      text: vpBias < 0
+        ? `VP is usually ${fmt(Math.abs(vpBias), 1)} pt low on matching builds; actual εr is higher than the model.`
+        : `VP is usually ${fmt(vpBias, 1)} pt high on matching builds; actual stack is more air-like than the model.`,
+    })
+  }
+  if (Number.isFinite(odBiasIn) && Math.abs(odBiasIn) > 0.001) {
+    recommendations.push({
+      level: odBiasIn < 0 ? 'warn' : 'info',
+      text: odBiasIn < 0
+        ? `Actual OD lands ${fmt(Math.abs(odBiasIn), 4)} in under model on matching builds; account for shrink-back.`
+        : `Actual OD lands ${fmt(odBiasIn, 4)} in over model on matching builds; check tape build, shield compression, or jacket drawdown.`,
+    })
+  }
+  if (!recommendations.length) recommendations.push({ level: 'pass', text: 'Calibration samples track the calculator closely for this kind of build.' })
+  return {
+    samples: valid,
+    matches,
+    confidence,
+    canSave: [measured.measuredZ0, measured.measuredVp, measured.measuredFinalOdIn, measured.measuredSuckoutGHz].some((value) => numeric(value) != null),
+    bias: { z0: z0Bias, vpPct: vpBias, odIn: odBiasIn },
+    calibrated: {
+      z0: computed.z0 + (Number.isFinite(z0Bias) ? z0Bias : 0),
+      vpPct: computed.vp * 100 + (Number.isFinite(vpBias) ? vpBias : 0),
+      finalOdIn: finalOdIn + (Number.isFinite(odBiasIn) ? odBiasIn : 0),
+    },
+    recommendations,
+  }
 }
 
 function measuredSampleFromEntry(entry, fallbackComputed = null) {
@@ -2463,6 +2643,7 @@ export default function RFStackLab() {
   const [measuredPaste, setMeasuredPaste] = useState('')
   const [goldenHistory, setGoldenHistory] = useState(() => readGoldenHistory())
   const [recipeVersions, setRecipeVersions] = useState(() => readRecipeVersions())
+  const [calibrationSamples, setCalibrationSamples] = useState(() => readCalibrationMemory())
   const [approvalQueue, setApprovalQueue] = useState([])
   const [compareGoldenId, setCompareGoldenId] = useState('')
   const [runSheetCopied, setRunSheetCopied] = useState(false)
@@ -2648,6 +2829,7 @@ export default function RFStackLab() {
         tolerance: detail.tolerance || null,
         miQa: detail.miQa || null,
         measuredTest: detail.measuredTest || null,
+        calibrationHint: detail.calibrationHint || null,
       }
       setApprovalQueue((current) => [queued, ...current].slice(0, 12))
     }
@@ -2881,6 +3063,7 @@ export default function RFStackLab() {
   const toleranceSim = useMemo(() => buildToleranceSimulator(computed), [computed])
   const miVisualQa = useMemo(() => buildMiVisualQa(computed, ptfeStack, shieldStack), [computed, ptfeStack, shieldStack])
   const safetyAudit = useMemo(() => buildSafetyAuditor(preApplyPreview, machineRuleGuard, toleranceSim, miVisualQa), [preApplyPreview, machineRuleGuard, toleranceSim, miVisualQa])
+  const calibrationMemory = useMemo(() => buildCalibrationMemory(calibrationSamples, computed, ptfeStack, shieldStack, measured), [calibrationSamples, computed, ptfeStack, shieldStack, measured])
   const feedbackLearner = useMemo(() => buildFeedbackLearner(goldenHistory, measured, computed), [goldenHistory, measured, computed])
   const suckoutDoctor = useMemo(() => buildSuckoutDoctor(computed, measured), [computed, measured])
   const agentPlanner = useMemo(() => buildAgentPlanner(computed, ptfeStack, shieldStack, measured, safetyAudit, approvalQueue), [computed, ptfeStack, shieldStack, measured, safetyAudit, approvalQueue])
@@ -2955,6 +3138,32 @@ export default function RFStackLab() {
     setGoldenHistory((current) => {
       const next = current.filter((entry) => entry.id !== id)
       writeGoldenHistory(next)
+      return next
+    })
+  }
+
+  const saveCalibrationSample = () => {
+    const sample = buildCalibrationSample({
+      label: measured.cableId || activePreset || `Calibration ${new Date().toLocaleDateString()}`,
+      params,
+      ptfeStack,
+      shieldStack,
+      measured,
+      computed,
+      correlation,
+    })
+    if (!sample) return
+    setCalibrationSamples((current) => {
+      const next = [sample, ...current].slice(0, 80)
+      writeCalibrationMemory(next)
+      return next
+    })
+  }
+
+  const deleteCalibrationSample = (id) => {
+    setCalibrationSamples((current) => {
+      const next = current.filter((entry) => entry.id !== id)
+      writeCalibrationMemory(next)
       return next
     })
   }
@@ -3185,6 +3394,7 @@ export default function RFStackLab() {
 
       <ClosedLoopIntelligence
         preview={preApplyPreview}
+        calibration={calibrationMemory}
         learner={feedbackLearner}
         doctor={suckoutDoctor}
         history={goldenHistory}
@@ -3196,6 +3406,8 @@ export default function RFStackLab() {
         runSheetCopied={runSheetCopied}
         copyRunSheet={copyRunSheet}
         computed={computed}
+        onSaveCalibration={saveCalibrationSample}
+        onDeleteCalibration={deleteCalibrationSample}
       />
 
       <AgentGuardrailPack
@@ -3391,6 +3603,7 @@ function GoldenRecipeHistory({ history, onLoad, onDelete }) {
 
 function ClosedLoopIntelligence({
   preview,
+  calibration,
   learner,
   doctor,
   history,
@@ -3402,6 +3615,8 @@ function ClosedLoopIntelligence({
   runSheetCopied,
   copyRunSheet,
   computed,
+  onSaveCalibration,
+  onDeleteCalibration,
 }) {
   return (
     <section style={S.closedLoopShell}>
@@ -3415,7 +3630,8 @@ function ClosedLoopIntelligence({
         </div>
       </div>
       <div style={S.closedLoopGrid}>
-        <PreApplyPreviewCard preview={preview} computed={computed} />
+        <PreApplyPreviewCard preview={preview} computed={computed} calibration={calibration} />
+        <CalibrationMemoryCard calibration={calibration} onSave={onSaveCalibration} onDelete={onDeleteCalibration} />
         <MeasuredFeedbackLearner learner={learner} />
         <SuckoutDoctorCard doctor={doctor} />
         <GoldenCompareCard
@@ -3431,7 +3647,8 @@ function ClosedLoopIntelligence({
   )
 }
 
-function PreApplyPreviewCard({ preview, computed }) {
+function PreApplyPreviewCard({ preview, computed, calibration }) {
+  const hasCalibration = calibration && calibration.confidence !== 'none'
   return (
     <div style={S.intelCard}>
       <div style={S.intelTitle}><Target size={14} /> Preview Before Apply</div>
@@ -3440,11 +3657,66 @@ function PreApplyPreviewCard({ preview, computed }) {
         <span>{fmt(computed.vp * 100, 1)}% VP</span>
         <span>OD {fmt((computed.jacketInstalled ? computed.jacketOD : computed.dielectricOD) / MM_PER_IN, 4)} in</span>
       </div>
+      {hasCalibration && (
+        <div style={S.calibratedStrip}>
+          <span>calibrated</span>
+          <strong>{fmt(calibration.calibrated.z0, 1)} Ω</strong>
+          <strong>{fmt(calibration.calibrated.vpPct, 1)}% VP</strong>
+          <strong>{fmt(calibration.calibrated.finalOdIn, 4)} in OD</strong>
+        </div>
+      )}
       <div style={S.checkList}>
         {preview.checks.map((check) => (
           <CheckRow key={check.label} item={check} />
         ))}
       </div>
+    </div>
+  )
+}
+
+function CalibrationMemoryCard({ calibration, onSave, onDelete }) {
+  const matches = calibration.matches || []
+  const recent = matches.length ? matches.map((item) => item.sample) : (calibration.samples || []).slice(0, 4)
+  return (
+    <div style={S.intelCard}>
+      <div style={S.runSheetHead}>
+        <div style={S.intelTitle}><Brain size={14} /> Calibration Memory</div>
+        <button type="button" style={S.miniBtn} onClick={onSave} disabled={!calibration.canSave}>
+          Save actual
+        </button>
+      </div>
+      <div style={S.biasGrid}>
+        <BiasChip label="Z0 bias" value={calibration.bias.z0} suffix=" Ω" digits={1} />
+        <BiasChip label="VP bias" value={calibration.bias.vpPct} suffix=" pt" digits={1} />
+        <BiasChip label="OD bias" value={calibration.bias.odIn} suffix=" in" digits={4} />
+      </div>
+      <div style={S.intelMiniText}>
+        {calibration.samples.length} saved calibration sample{calibration.samples.length === 1 ? '' : 's'} · {matches.length} process match{matches.length === 1 ? '' : 'es'} · confidence {calibration.confidence}
+      </div>
+      <div style={S.checkList}>
+        {calibration.recommendations.map((item, index) => (
+          <div key={index} style={{ ...S.learningLine, borderColor: item.level === 'pass' ? `${C.teal}55` : item.level === 'warn' ? `${C.amber}55` : `${C.sky}55` }}>
+            {item.text}
+          </div>
+        ))}
+      </div>
+      {recent.length > 0 && (
+        <div style={S.calibrationList}>
+          {recent.slice(0, 4).map((sample) => (
+            <div key={sample.id} style={S.calibrationItem}>
+              <div>
+                <strong>{sample.label}</strong>
+                <small>
+                  ΔZ0 {formatDelta(sample.deltas?.z0, 1, ' Ω')} · ΔVP {formatDelta(sample.deltas?.vpPct, 1, ' pt')} · ΔOD {formatDelta(sample.deltas?.odIn, 4, ' in')}
+                </small>
+              </div>
+              <button type="button" style={S.iconBtn} onClick={() => onDelete(sample.id)} title="Delete calibration sample">
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -3839,6 +4111,11 @@ function ApprovalQueueCard({ queue, onApply, onReject }) {
                   safety: {item.safetyAudit.status || 'review'} · blocks {item.safetyAudit.blocks?.length || 0} · warnings {item.safetyAudit.warnings?.length || 0}
                 </div>
               )}
+              {item.calibrationHint && (
+                <div style={S.assumptionLine}>
+                  calibration: {item.calibrationHint.confidence} · raw {item.calibrationHint.raw_prediction?.z0_ohm ?? '—'} Ω → calibrated {item.calibrationHint.calibrated_prediction?.z0_ohm ?? '—'} Ω
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -4069,6 +4346,7 @@ const S = {
   workflowWideCard: { gridColumn: '1 / -1' },
   intelTitle: { display: 'flex', alignItems: 'center', gap: 7, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.7 },
   previewHero: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))', gap: 7, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+  calibratedStrip: { display: 'grid', gridTemplateColumns: 'auto repeat(3, minmax(70px, 1fr))', gap: 7, alignItems: 'center', border: `1px solid rgba(94,234,212,0.18)`, background: 'rgba(94,234,212,0.05)', padding: 8, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
   checkList: { display: 'grid', gap: 7 },
   checkRow: { display: 'grid', gridTemplateColumns: '9px minmax(0, 1fr) auto', gap: 8, alignItems: 'center', border: `1px solid rgba(167,176,182,0.12)`, background: '#070b0c', padding: 8, minWidth: 0 },
   checkLight: { width: 7, height: 7, borderRadius: 999, boxShadow: '0 0 12px currentColor' },
@@ -4085,6 +4363,8 @@ const S = {
   miniBtn: { minHeight: 28, padding: '0 9px', background: 'rgba(94,234,212,0.08)', border: `1px solid ${C.teal}66`, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer' },
   dangerMiniBtn: { minHeight: 28, padding: '0 9px', background: 'rgba(248,113,113,0.06)', border: `1px solid ${C.red}66`, color: C.red, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer' },
   previewMiniGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 6, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+  calibrationList: { display: 'grid', gap: 7, maxHeight: 260, overflow: 'auto', paddingRight: 2 },
+  calibrationItem: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start', border: `1px solid rgba(167,176,182,0.12)`, background: '#070b0c', padding: 8, color: C.dim, fontSize: 11 },
   reasonList: { display: 'grid', gap: 7 },
   reasonRow: { display: 'grid', gridTemplateColumns: 'minmax(76px, 0.3fr) minmax(90px, 0.35fr) minmax(0, 1fr)', gap: 8, alignItems: 'start', border: `1px solid rgba(167,176,182,0.12)`, background: '#070b0c', padding: 8, color: C.dim, fontSize: 11 },
   versionList: { display: 'grid', gap: 7, maxHeight: 330, overflow: 'auto', paddingRight: 2 },
