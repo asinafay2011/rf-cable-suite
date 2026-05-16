@@ -183,6 +183,19 @@ const PTFE_SOLID_DENSITY = 2.15
 const PTFE_SOLID_EPS = 2.1
 const MIL_TO_MM = 0.0254
 const MM_PER_IN = 25.4
+const GOLDEN_HISTORY_KEY = 'rf-stack-golden-history-v1'
+const EMPTY_MEASURED_TEST = {
+  cableId: '',
+  measuredZ0: '',
+  measuredVp: '',
+  measuredSuckoutGHz: '',
+  measuredFinalOdIn: '',
+  measuredIlDb: '',
+  measuredRlDb: '',
+  measuredVswr: '',
+  measuredCapPfFt: '',
+  notes: '',
+}
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value))
@@ -217,6 +230,154 @@ function rlToVswr(rlDb) {
 
 function fmt(value, digits = 1) {
   return Number.isFinite(value) ? value.toFixed(digits) : '—'
+}
+
+function parseFirstNumber(text, patterns) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    if (match) {
+      const value = Number(String(match[1]).replace(/,/g, ''))
+      if (Number.isFinite(value)) return value
+    }
+  }
+  return ''
+}
+
+function parseMeasuredPaste(text) {
+  const source = String(text || '')
+  if (!source.trim()) return {}
+  return {
+    cableId: source.match(/\b(?:MI[-\w.]+|ST[-\w.]+|962[-\w.]+)/i)?.[0] || '',
+    measuredZ0: parseFirstNumber(source, [
+      /(?:av\.?\s*)?z(?:0|o)\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)/i,
+      /impedance[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i,
+    ]),
+    measuredVp: parseFirstNumber(source, [
+      /v(?:p|elocity)[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*%/i,
+      /velocity[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i,
+    ]),
+    measuredSuckoutGHz: parseFirstNumber(source, [
+      /suck\s*out[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i,
+      /notch[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*(?:g|ghz)/i,
+      /dip[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*(?:g|ghz)/i,
+    ]),
+    measuredFinalOdIn: parseFirstNumber(source, [
+      /(?:final|outgoing|tu)?\s*o\.?d\.?[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*(?:in|inch|")/i,
+      /(?:final|outgoing|tu)?\s*od[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i,
+    ]),
+    measuredIlDb: parseFirstNumber(source, [
+      /(?:insertion\s*loss|s21|attenuation)[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*dB/i,
+    ]),
+    measuredRlDb: parseFirstNumber(source, [
+      /(?:return\s*loss|rl|s11)[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*dB/i,
+    ]),
+    measuredVswr: parseFirstNumber(source, [
+      /vswr[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i,
+    ]),
+    measuredCapPfFt: parseFirstNumber(source, [
+      /(?:capacitance|cap\.?|pf\/ft)[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i,
+      /([0-9]+(?:\.[0-9]+)?)\s*pF\s*\/\s*ft/i,
+    ]),
+  }
+}
+
+function numeric(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function buildMeasuredCorrelation(measured, computed) {
+  const z0 = numeric(measured.measuredZ0)
+  const vp = numeric(measured.measuredVp)
+  const suckout = numeric(measured.measuredSuckoutGHz)
+  const finalOdIn = numeric(measured.measuredFinalOdIn)
+  const rlDb = numeric(measured.measuredRlDb)
+  const vswr = numeric(measured.measuredVswr)
+  const ilDb = numeric(measured.measuredIlDb)
+  const capPfFt = numeric(measured.measuredCapPfFt)
+  const predictedVp = computed.vp * 100
+  const predictedFinalOdIn = (computed.jacketInstalled ? computed.jacketOD : computed.dielectricOD) / MM_PER_IN
+  const notchCandidates = [
+    ...computed.ptfeNotches.map((item) => ({ label: item.label, freq: item.freq, source: 'PTFE pitch' })),
+    ...(computed.spiralCoverage > 0 ? [{ label: 'SPC spiral', freq: computed.spiralNotch, source: 'spiral pitch/gap' }] : []),
+    ...(computed.helicalCoverage > 0 ? [{ label: 'SPC helical', freq: computed.helicalNotch, source: 'helical pitch' }] : []),
+  ].filter((item) => Number.isFinite(item.freq))
+  const nearestNotch = suckout && notchCandidates.length
+    ? notchCandidates.reduce((best, item) => {
+      const error = Math.abs(item.freq - suckout)
+      return !best || error < best.error ? { ...item, error } : best
+    }, null)
+    : null
+  const items = []
+  if (z0 != null) {
+    const delta = z0 - computed.z0
+    if (Math.abs(delta) <= 1.5) {
+      items.push({ level: 'pass', title: 'Impedance correlation', body: `Measured ${fmt(z0, 1)} Ω is within ${fmt(Math.abs(delta), 1)} Ω of the stack prediction.` })
+    } else if (delta < 0) {
+      items.push({ level: 'warn', title: 'Impedance is low', body: `Measured Z0 is ${fmt(Math.abs(delta), 1)} Ω below prediction. Check low dielectric OD, dense/compressed PTFE, foil/spiral pressure, or conductor OD high.` })
+    } else {
+      items.push({ level: 'warn', title: 'Impedance is high', body: `Measured Z0 is ${fmt(delta, 1)} Ω above prediction. Check high dielectric OD, under-built PTFE, low-density mix, or conductor OD low.` })
+    }
+  }
+  if (vp != null) {
+    const delta = vp - predictedVp
+    if (Math.abs(delta) <= 1.2) {
+      items.push({ level: 'pass', title: 'VP match', body: `Measured VP ${fmt(vp, 1)}% tracks the predicted ${fmt(predictedVp, 1)}%.` })
+    } else if (delta < 0) {
+      items.push({ level: 'warn', title: 'VP is low', body: `Measured VP is ${fmt(Math.abs(delta), 1)} points low. Effective εr is higher than expected: look for high-density tape, shrink-back, tight tension, or moisture/void collapse.` })
+    } else {
+      items.push({ level: 'warn', title: 'VP is high', body: `Measured VP is ${fmt(delta, 1)} points high. Dielectric is acting more air-like than the model: check LD tape ratio, wall build, and OD measurement.` })
+    }
+  }
+  if (finalOdIn != null) {
+    const delta = finalOdIn - predictedFinalOdIn
+    if (Math.abs(delta) <= 0.002) {
+      items.push({ level: 'pass', title: 'OD tracks build', body: `Measured OD ${fmt(finalOdIn, 4)} in is close to predicted ${fmt(predictedFinalOdIn, 4)} in.` })
+    } else if (delta < 0) {
+      items.push({ level: 'warn', title: 'OD is low', body: `Measured OD is ${fmt(Math.abs(delta), 4)} in under model. That usually lowers impedance and points to tape shrink-back, low wrap build, or tighter jacket drawdown.` })
+    } else {
+      items.push({ level: 'info', title: 'OD is high', body: `Measured OD is ${fmt(delta, 4)} in over model. Check tape overlap, foil/jacket thickness, or loose wrap tension.` })
+    }
+  }
+  if (nearestNotch) {
+    const pct = nearestNotch.error / Math.max(0.1, suckout) * 100
+    if (pct <= 8) {
+      items.push({ level: 'warn', title: 'Suckout matches build pitch', body: `${fmt(suckout, 2)} GHz is close to ${nearestNotch.label} (${fmt(nearestNotch.freq, 2)} GHz). Stagger that pitch or move it above the test band.` })
+    } else {
+      items.push({ level: 'info', title: 'Suckout does not match modeled pitch', body: `${fmt(suckout, 2)} GHz is not close to the modeled PTFE/spiral/helical notches. Inspect connector launch, foil seam, braid transition, or test fixture resonance.` })
+    }
+  }
+  if (rlDb != null && rlDb < 18) {
+    items.push({ level: 'warn', title: 'Return loss risk', body: `Measured RL ${fmt(rlDb, 1)} dB is weak. If impedance and VP match, the likely issue is a localized discontinuity: connector launch, shield transition, or foil/braid step.` })
+  }
+  if (vswr != null && vswr > 1.25) {
+    items.push({ level: 'warn', title: 'VSWR fail clue', body: `Measured VSWR ${fmt(vswr, 2)} is high. Correlate the frequency of the worst point against the notch list and TDR step.` })
+  }
+  if (ilDb != null && ilDb > Math.abs(computed.baseLoss) * 1.35) {
+    items.push({ level: 'info', title: 'Loss above model', body: `Measured loss ${fmt(ilDb, 2)} dB is above the smooth model. Check conductor plating, braid contact, dielectric density, and connector loss.` })
+  }
+  if (capPfFt != null && z0 != null && vp != null) {
+    items.push({ level: 'info', title: 'Capacitance consistency', body: `${fmt(capPfFt, 1)} pF/ft should move opposite Z0. If capacitance is high and Z0 is low, dielectric OD/build is the first suspect.` })
+  }
+  if (!items.length) {
+    items.push({ level: 'info', title: 'Enter measured values', body: 'Paste a test summary or enter Z0, VP, OD, RL/VSWR, and suckout frequency to compare actual test data against this stack.' })
+  }
+  return { items, nearestNotch, predictedVp, predictedFinalOdIn }
+}
+
+function readGoldenHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(GOLDEN_HISTORY_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function writeGoldenHistory(items) {
+  try {
+    localStorage.setItem(GOLDEN_HISTORY_KEY, JSON.stringify(items.slice(0, 24)))
+  } catch {}
 }
 
 function displayMm(valueMm, unitMode) {
@@ -1690,6 +1851,9 @@ export default function RFStackLab() {
   const [shieldStack, setShieldStack] = useState([])
   const [activePreset, setActivePreset] = useState('')
   const [unitMode, setUnitMode] = useState('mm')
+  const [measured, setMeasured] = useState(EMPTY_MEASURED_TEST)
+  const [measuredPaste, setMeasuredPaste] = useState('')
+  const [goldenHistory, setGoldenHistory] = useState(() => readGoldenHistory())
   const modelConfig = useMemo(() => ({
     ptfeStack,
     shieldStack,
@@ -1714,6 +1878,8 @@ export default function RFStackLab() {
     setParams(PRESETS.phaseStable)
     setPtfeStack([])
     setShieldStack([])
+    setMeasured(EMPTY_MEASURED_TEST)
+    setMeasuredPaste('')
   }
 
   const updatePtfeLayer = (id, patch) => {
@@ -2052,6 +2218,71 @@ export default function RFStackLab() {
     return { rl, il, tdr }
   }, [computed, params.freqGHz])
 
+  const correlation = useMemo(() => buildMeasuredCorrelation(measured, computed), [measured, computed])
+
+  const updateMeasured = (key) => (value) => {
+    setMeasured((current) => ({ ...current, [key]: value }))
+  }
+
+  const applyMeasuredPaste = () => {
+    const parsed = parseMeasuredPaste(measuredPaste)
+    setMeasured((current) => ({
+      ...current,
+      ...Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== '' && value != null)),
+      notes: current.notes || measuredPaste.slice(0, 500),
+    }))
+  }
+
+  const saveGoldenRecipe = () => {
+    const id = `golden-${Date.now()}`
+    const label = measured.cableId || activePreset || `RF recipe ${new Date().toLocaleDateString()}`
+    const entry = {
+      id,
+      label,
+      createdAt: new Date().toISOString(),
+      measured,
+      summary: {
+        z0: computed.z0,
+        vp: computed.vp,
+        dielectricOD: computed.dielectricOD,
+        jacketOD: computed.jacketInstalled ? computed.jacketOD : null,
+        primarySuckout: Math.min(
+          computed.tapeNotch,
+          computed.spiralCoverage ? computed.spiralNotch : Infinity,
+          computed.helicalCoverage ? computed.helicalNotch : Infinity,
+        ),
+        shieldCoverage: computed.shieldCoverage,
+      },
+      params,
+      ptfeStack,
+      shieldStack,
+      diagnosis: correlation.items.slice(0, 4),
+    }
+    setGoldenHistory((current) => {
+      const next = [entry, ...current].slice(0, 24)
+      writeGoldenHistory(next)
+      return next
+    })
+  }
+
+  const loadGoldenRecipe = (entry) => {
+    if (!entry) return
+    setParams(entry.params || PRESETS.phaseStable)
+    setPtfeStack(Array.isArray(entry.ptfeStack) ? entry.ptfeStack : [])
+    setShieldStack(Array.isArray(entry.shieldStack) ? entry.shieldStack : [])
+    setMeasured(entry.measured || EMPTY_MEASURED_TEST)
+    setMeasuredPaste('')
+    setActivePreset('')
+  }
+
+  const deleteGoldenRecipe = (id) => {
+    setGoldenHistory((current) => {
+      const next = current.filter((entry) => entry.id !== id)
+      writeGoldenHistory(next)
+      return next
+    })
+  }
+
   return (
     <section style={S.root} data-testid="rf-stack-lab">
       <header style={S.hero}>
@@ -2200,6 +2431,24 @@ export default function RFStackLab() {
         <ChartCard title="TDR impedance trace" sub="dielectric build + shield discontinuities" data={traces.tdr} xKey="x" yKey="z" color={C.sky} xFmt={(v) => `${fmt(v, 0)}%`} yFmt={(v) => `${fmt(v, 0)} Ω`} domainX={[0, 100]} domainY={[42, 62]} referenceY={50} />
       </div>
 
+      <div style={S.correlationGrid}>
+        <MeasuredTestCorrelator
+          measured={measured}
+          measuredPaste={measuredPaste}
+          setMeasuredPaste={setMeasuredPaste}
+          updateMeasured={updateMeasured}
+          applyMeasuredPaste={applyMeasuredPaste}
+          correlation={correlation}
+          computed={computed}
+          onSave={saveGoldenRecipe}
+        />
+        <GoldenRecipeHistory
+          history={goldenHistory}
+          onLoad={loadGoldenRecipe}
+          onDelete={deleteGoldenRecipe}
+        />
+      </div>
+
       <div style={S.notes}>
         <div style={S.noteTitle}><Activity size={13} /> Interpretation</div>
         <p>
@@ -2212,6 +2461,158 @@ export default function RFStackLab() {
           Tape suckout is still here, but now it is tied to the same build recipe: changing PTFE wrap, suckout, calculated flatwire width, or braid coverage updates Z0, TDR, insertion loss, return loss, VSWR, and coverage together.
         </p>
       </div>
+    </section>
+  )
+}
+
+function MeasuredTestCorrelator({ measured, measuredPaste, setMeasuredPaste, updateMeasured, applyMeasuredPaste, correlation, computed, onSave }) {
+  const fields = [
+    ['measuredZ0', 'Av. Z0', 'Ω'],
+    ['measuredVp', 'VP', '%'],
+    ['measuredSuckoutGHz', 'Suckout', 'GHz'],
+    ['measuredFinalOdIn', 'Final OD', 'in'],
+    ['measuredRlDb', 'Return loss', 'dB'],
+    ['measuredVswr', 'VSWR', ''],
+    ['measuredIlDb', 'Loss / S21', 'dB'],
+    ['measuredCapPfFt', 'Cap', 'pF/ft'],
+  ]
+  return (
+    <section style={S.correlationPanel}>
+      <div style={S.correlationHead}>
+        <div>
+          <div style={S.cardEyebrow}>Measured Test Correlator</div>
+          <h2 style={S.cardTitle}>Actual test → root cause → next setting</h2>
+        </div>
+        <button type="button" style={S.saveBtn} onClick={onSave}>Save golden</button>
+      </div>
+      <div style={S.measurePasteGrid}>
+        <label style={S.textareaLabel}>
+          <span>Paste report text</span>
+          <textarea
+            value={measuredPaste}
+            onChange={(event) => setMeasuredPaste(event.target.value)}
+            placeholder={'Example: Av. Zo: 48.3 Ω, VP: 78.5%, suckout at 32 GHz, VSWR 1.25, cap 26.8 pF/ft'}
+            style={S.textarea}
+          />
+        </label>
+        <div style={S.measureActions}>
+          <input
+            value={measured.cableId}
+            onChange={(event) => updateMeasured('cableId')(event.target.value)}
+            placeholder="Cable / MI id"
+            style={S.textInput}
+          />
+          <button type="button" style={S.toolBtn} onClick={applyMeasuredPaste}>Parse text</button>
+          <div style={S.correlationMini}>
+            <span>Predicted</span>
+            <strong>{fmt(computed.z0, 1)} Ω · {fmt(computed.vp * 100, 1)}% VP</strong>
+            <small>OD {fmt((computed.jacketInstalled ? computed.jacketOD : computed.dielectricOD) / MM_PER_IN, 4)} in</small>
+          </div>
+        </div>
+      </div>
+      <div style={S.measureGrid}>
+        {fields.map(([key, label, unit]) => (
+          <MeasurementInput
+            key={key}
+            label={label}
+            unit={unit}
+            value={measured[key]}
+            onChange={updateMeasured(key)}
+          />
+        ))}
+      </div>
+      <label style={S.textareaLabel}>
+        <span>Operator / test notes</span>
+        <textarea
+          value={measured.notes}
+          onChange={(event) => updateMeasured('notes')(event.target.value)}
+          placeholder="Actual OD after shield, connector notes, test date, or what changed on this reel."
+          style={{ ...S.textarea, minHeight: 68 }}
+        />
+      </label>
+      <div style={S.diagnosisList}>
+        {correlation.items.map((item, index) => (
+          <CorrelationBullet key={`${item.title}-${index}`} item={item} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function MeasurementInput({ label, unit, value, onChange }) {
+  return (
+    <label style={S.measureInput}>
+      <span>{label}</span>
+      <div style={S.measureInputRow}>
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          inputMode="decimal"
+          style={S.numberInput}
+        />
+        {unit && <small>{unit}</small>}
+      </div>
+    </label>
+  )
+}
+
+function CorrelationBullet({ item }) {
+  const color = item.level === 'pass' ? C.teal : item.level === 'warn' ? C.amber : C.sky
+  return (
+    <div style={{ ...S.diagnosisItem, borderColor: `${color}66` }}>
+      <span style={{ ...S.diagnosisDot, background: color }} />
+      <div>
+        <strong style={{ color }}>{item.title}</strong>
+        <p>{item.body}</p>
+      </div>
+    </div>
+  )
+}
+
+function GoldenRecipeHistory({ history, onLoad, onDelete }) {
+  return (
+    <section style={S.correlationPanel}>
+      <div style={S.correlationHead}>
+        <div>
+          <div style={S.cardEyebrow}>Golden Recipe History</div>
+          <h2 style={S.cardTitle}>Saved recipe + actual test memory</h2>
+        </div>
+        <div style={S.historyCount}>{history.length}</div>
+      </div>
+      {history.length === 0 ? (
+        <div style={S.emptyState}>
+          Save a golden recipe after entering measured Z0, VP, OD, and suckout. It stays in this browser and can be loaded back into the stack later.
+        </div>
+      ) : (
+        <div style={S.historyList}>
+          {history.map((entry) => {
+            const summary = entry.summary || {}
+            const measured = entry.measured || {}
+            return (
+              <div key={entry.id} style={S.historyItem}>
+                <div style={S.historyTop}>
+                  <div>
+                    <div style={S.historyTitle}>{entry.label}</div>
+                    <div style={S.historyDate}>{new Date(entry.createdAt).toLocaleString()}</div>
+                  </div>
+                  <button type="button" style={S.iconBtn} onClick={() => onDelete(entry.id)} title="Delete recipe">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+                <div style={S.historyStats}>
+                  <span>Z0 {measured.measuredZ0 || fmt(summary.z0, 1)}</span>
+                  <span>VP {measured.measuredVp || fmt((summary.vp || 0) * 100, 1)}%</span>
+                  <span>Notch {measured.measuredSuckoutGHz || fmt(summary.primarySuckout, 1)} GHz</span>
+                </div>
+                {(entry.diagnosis || []).slice(0, 2).map((item, index) => (
+                  <div key={index} style={S.historyDiagnosis}>{item.title}</div>
+                ))}
+                <button type="button" style={S.loadBtn} onClick={() => onLoad(entry)}>Load recipe</button>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </section>
   )
 }
@@ -2320,6 +2721,32 @@ const S = {
   chartCard: { border: `1px solid ${C.border}`, background: C.panel, padding: 12, borderRadius: 3 },
   chartHead: { display: 'flex', justifyContent: 'space-between', marginBottom: 4 },
   chartSub: { color: C.muted, fontSize: 11, marginTop: 3 },
+  correlationGrid: { display: 'grid', gridTemplateColumns: 'minmax(min(100%, 520px), 1.25fr) minmax(min(100%, 360px), 0.75fr)', gap: 12 },
+  correlationPanel: { border: `1px solid ${C.border}`, background: C.panel, padding: 14, borderRadius: 3, display: 'grid', gap: 12, minWidth: 0 },
+  correlationHead: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  saveBtn: { background: 'rgba(251,191,36,0.12)', border: `1px solid ${C.amber}77`, color: C.amber, minHeight: 32, padding: '0 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.4, cursor: 'pointer', whiteSpace: 'nowrap' },
+  measurePasteGrid: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(170px, 0.36fr)', gap: 10 },
+  textareaLabel: { display: 'grid', gap: 6, color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.4 },
+  textarea: { width: '100%', minHeight: 92, resize: 'vertical', background: '#070b0c', color: C.text, border: `1px solid ${C.borderHi}`, padding: 10, fontFamily: 'JetBrains Mono, monospace', fontSize: 11, lineHeight: 1.55, outline: 0 },
+  measureActions: { display: 'grid', gap: 8, alignContent: 'start' },
+  textInput: { width: '100%', minHeight: 34, background: '#070b0c', color: C.text, border: `1px solid ${C.borderHi}`, padding: '0 10px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, outline: 0 },
+  correlationMini: { border: `1px solid rgba(94,234,212,0.2)`, background: 'rgba(94,234,212,0.055)', padding: 9, display: 'grid', gap: 3, color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, lineHeight: 1.35 },
+  measureGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(116px, 1fr))', gap: 8 },
+  measureInput: { display: 'grid', gap: 5, color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2 },
+  measureInputRow: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: 6 },
+  numberInput: { minWidth: 0, minHeight: 32, background: '#070b0c', color: C.text, border: `1px solid ${C.borderHi}`, padding: '0 8px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, outline: 0 },
+  diagnosisList: { display: 'grid', gap: 8 },
+  diagnosisItem: { display: 'grid', gridTemplateColumns: '10px minmax(0, 1fr)', gap: 9, border: '1px solid', background: '#080d0f', padding: 10 },
+  diagnosisDot: { width: 8, height: 8, borderRadius: 999, marginTop: 5, boxShadow: '0 0 13px currentColor' },
+  historyCount: { minWidth: 34, height: 30, display: 'grid', placeItems: 'center', border: `1px solid ${C.borderHi}`, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontWeight: 800 },
+  historyList: { display: 'grid', gap: 9, maxHeight: 560, overflow: 'auto', paddingRight: 2 },
+  historyItem: { border: `1px solid ${C.borderHi}`, background: '#080d0f', padding: 10, display: 'grid', gap: 8 },
+  historyTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
+  historyTitle: { color: C.text, fontFamily: 'JetBrains Mono, monospace', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.4 },
+  historyDate: { color: C.muted, fontSize: 10, marginTop: 3 },
+  historyStats: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+  historyDiagnosis: { color: C.dim, borderLeft: `2px solid ${C.amber}`, paddingLeft: 8, fontSize: 11 },
+  loadBtn: { background: '#070b0c', border: `1px solid ${C.teal}66`, color: C.teal, minHeight: 30, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer' },
   notes: { border: `1px solid ${C.border}`, background: C.panel, padding: 14, color: C.dim, lineHeight: 1.7, fontSize: 12, borderRadius: 3 },
   noteTitle: { display: 'flex', alignItems: 'center', gap: 8, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 2, marginBottom: 6 },
 }
