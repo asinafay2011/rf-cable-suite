@@ -184,6 +184,7 @@ const PTFE_SOLID_EPS = 2.1
 const MIL_TO_MM = 0.0254
 const MM_PER_IN = 25.4
 const GOLDEN_HISTORY_KEY = 'rf-stack-golden-history-v1'
+const RECIPE_VERSION_HISTORY_KEY = 'rf-stack-recipe-versions-v1'
 const EMPTY_MEASURED_TEST = {
   cableId: '',
   measuredZ0: '',
@@ -377,6 +378,21 @@ function readGoldenHistory() {
 function writeGoldenHistory(items) {
   try {
     localStorage.setItem(GOLDEN_HISTORY_KEY, JSON.stringify(items.slice(0, 24)))
+  } catch {}
+}
+
+function readRecipeVersions() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECIPE_VERSION_HISTORY_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function writeRecipeVersions(items) {
+  try {
+    localStorage.setItem(RECIPE_VERSION_HISTORY_KEY, JSON.stringify(items.slice(0, 36)))
   } catch {}
 }
 
@@ -611,6 +627,128 @@ function buildSafetyAuditor(preview, machineGuard, tolerance, miQa) {
     warnings,
     checks,
   }
+}
+
+function buildRecipeSnapshot({ label, source = 'manual', params, ptfeStack, shieldStack, measured, computed }) {
+  const primary = primarySuckoutGHz(computed)
+  return {
+    id: `version-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    label,
+    source,
+    createdAt: new Date().toISOString(),
+    params,
+    ptfeStack,
+    shieldStack,
+    measured,
+    summary: {
+      z0: computed.z0,
+      vp: computed.vp,
+      dielectricOD: computed.dielectricOD,
+      finalOD: computed.jacketInstalled ? computed.jacketOD : computed.dielectricOD,
+      primarySuckout: primary,
+      shieldCoverage: computed.shieldCoverage,
+      ptfeLayers: ptfeStack.length,
+      shieldLayers: shieldStack.length,
+    },
+  }
+}
+
+function buildAgentPlanner(computed, ptfeStack, shieldStack, measured, audit, approvalQueue) {
+  const hasMeasured = Boolean(measured.measuredZ0 || measured.measuredVp || measured.measuredSuckoutGHz || measured.measuredFinalOdIn)
+  return [
+    { step: 'Target', status: computed.conductorOD > 0 && Number.isFinite(computed.z0) ? 'calculated' : 'need input', detail: `50 Ω baseline · ${fmt(computed.freqGHz, 1)} GHz test` },
+    { step: 'Dielectric', status: ptfeStack.length ? 'calculated' : 'need input', detail: ptfeStack.length ? `${ptfeStack.length} PTFE rows · OD ${fmt(computed.dielectricOD / MM_PER_IN, 4)} in` : 'need PTFE tape stack' },
+    { step: 'Shield', status: shieldStack.length ? 'calculated' : 'need input', detail: shieldStack.length ? `${shieldStack.length} layers · ${fmt(computed.shieldCoverage, 1)}% coverage` : 'need spiral/foil/braid/jacket choice' },
+    { step: 'Audit', status: audit.allowApply ? 'audited' : 'blocked', detail: `${audit.blocks.length} blockers · ${audit.warnings.length} warnings` },
+    { step: 'Approval', status: approvalQueue.length ? 'need approval' : 'clear', detail: approvalQueue.length ? `${approvalQueue.length} proposed change${approvalQueue.length === 1 ? '' : 's'}` : 'no pending proposal' },
+    { step: 'Test correlation', status: hasMeasured ? 'calculated' : 'need input', detail: hasMeasured ? `Z0 ${measured.measuredZ0 || '—'} · VP ${measured.measuredVp || '—'}` : 'need VNA/MI actuals' },
+  ]
+}
+
+function buildMissingInputs(computed, ptfeStack, shieldStack, measured, approvalQueue) {
+  const items = []
+  if (!Number.isFinite(computed.conductorOD) || computed.conductorOD <= 0) items.push({ level: 'block', label: 'Conductor OD', detail: 'Need conductor OD before any Z0/VP build.' })
+  if (!ptfeStack.length) items.push({ level: 'block', label: 'PTFE stack', detail: 'Need dielectric recipe or agent-applied PTFE build.' })
+  if (!shieldStack.length) items.push({ level: 'warn', label: 'Shield plan', detail: 'Need spiral/foil/braid/jacket to finish RF stack.' })
+  if (shieldStack.some((layer) => layer.type === 'spiral') && computed.spiralGap < 1) items.push({ level: 'block', label: 'Spiral gap', detail: 'Spiral cannot visually/physically overlap; set a real between-wire gap.' })
+  if (!measured.measuredZ0 && !measured.measuredVp) items.push({ level: 'info', label: 'Actual test', detail: 'Add VNA/test image or paste actual Z0/VP to calibrate the learner.' })
+  if (!approvalQueue.length) items.push({ level: 'info', label: 'Approval queue', detail: 'Queue agent proposals here when you want review before Apply.' })
+  return items.length ? items : [{ level: 'pass', label: 'Inputs complete', detail: 'The current build has the essentials for audit and MI review.' }]
+}
+
+function buildAgentVariants(computed, ptfeStack, shieldStack, audit) {
+  const zError = Math.abs(computed.z0 - 50)
+  const primary = primarySuckoutGHz(computed)
+  const baseScore = clamp(100 - zError * 12 - audit.blocks.length * 24 - audit.warnings.length * 6, 0, 100)
+  return [
+    {
+      id: 'factory',
+      title: 'Safest factory',
+      score: Math.round(clamp(baseScore + (computed.spiralGap >= 8 && computed.spiralGap <= 13 ? 5 : -4), 0, 100)),
+      focus: 'Manufacturable first',
+      changes: ['Prefer 2/3 PTFE unless target OD needs 1/2', 'Keep WTM pitch above .0390', 'Keep spiral gap visible around 10%'],
+    },
+    {
+      id: 'impedance',
+      title: 'Best impedance',
+      score: Math.round(clamp(100 - zError * 18 - (Math.abs(computed.vp * 100 - 78.5) * 1.5), 0, 100)),
+      focus: `${formatDelta(computed.z0 - 50, 1, ' Ω')} from 50 Ω`,
+      changes: computed.z0 < 50
+        ? ['Increase dielectric OD slightly', 'Reduce PTFE compression/tension', 'Check OD after tape before shield']
+        : ['Reduce dielectric OD slightly', 'Use denser/tighter PTFE mix', 'Verify conductor OD is not low'],
+    },
+    {
+      id: 'suckout',
+      title: 'Lowest suckout',
+      score: Math.round(clamp(100 - ((primary && primary < computed.freqGHz) ? 28 : 0) - computed.suckoutDepth * 8, 0, 100)),
+      focus: primary ? `${fmt(primary, 2)} GHz first notch` : 'No notch',
+      changes: ['Stagger repeated PTFE pitches by 8-12%', 'Move spiral/helical pitch away from PTFE harmonics', 'Keep foil seam from lining up with flatwire repeat'],
+    },
+  ]
+}
+
+function buildReasonTrace(computed, ptfeStack, shieldStack) {
+  const rows = []
+  rows.push({ label: 'Z0', value: `${fmt(computed.z0, 1)} Ω`, why: `60/sqrt(εr) · ln(D/d), with d=${fmt(computed.conductorOD / MM_PER_IN, 4)} in and D=${fmt(computed.dielectricOD / MM_PER_IN, 4)} in.` })
+  rows.push({ label: 'VP', value: `${fmt(computed.vp * 100, 1)}%`, why: `VP = 1/sqrt(εr_eff), current εr_eff ${fmt(computed.eps, 3)}.` })
+  ptfeStack.slice(0, 4).forEach((layer, index) => {
+    const notch = computed.ptfeNotches[index]
+    rows.push({
+      label: `Tape #${index + 1}`,
+      value: `${ptfeOverlapKey(layer.overlap)} · ${fmt((notch?.pitch || 0) / MM_PER_IN, 4)} in pitch`,
+      why: `Pitch comes from OD-based WTM formula; ${ptfeOverlapKey(layer.overlap)} selected for wrap/shrink-back behavior.`,
+    })
+  })
+  const spiral = shieldStack.find((layer) => layer.type === 'spiral')
+  if (spiral) {
+    rows.push({ label: 'SPC spiral', value: `${fmt(computed.spiralGap, 1)}% gap`, why: `Width = dielectric OD x pi / ${computed.spiralBobbins} bobbins with open between-wire gap, no overlap.` })
+  }
+  const foil = shieldStack.find((layer) => layer.type === 'foil')
+  if (foil) rows.push({ label: 'Foil', value: `${fmt(Number(foil.overlap ?? computed.foilOverlap), 1)}% overlap`, why: 'Foil overlap controls seam leakage and OD build; confirm 1/2 vs 2/3 against the shop MI.' })
+  const braid = shieldStack.find((layer) => layer.type === 'braid')
+  if (braid) rows.push({ label: 'Braid', value: `${fmt(Number(braid.coverage ?? computed.braidCoverage), 1)}% coverage`, why: 'Coverage from carrier/end/pick setup controls leakage and connector transition risk.' })
+  return rows
+}
+
+function buildAutoTestDiagnosis(measured, correlation, doctor, computed) {
+  const z0 = numeric(measured.measuredZ0)
+  const vp = numeric(measured.measuredVp)
+  const od = numeric(measured.measuredFinalOdIn)
+  const predictedOd = (computed.jacketInstalled ? computed.jacketOD : computed.dielectricOD) / MM_PER_IN
+  const lines = []
+  if (z0 != null && z0 < computed.z0 - 1.5 && od != null && od < predictedOd - 0.0015) {
+    lines.push({ level: 'warn', title: 'Likely dielectric build low', body: 'Z0 is low and OD is low together, so start with tape build/shrink-back before blaming connector launch.' })
+  }
+  if (z0 != null && Math.abs(z0 - computed.z0) <= 1.5 && numeric(measured.measuredVswr) > 1.25) {
+    lines.push({ level: 'warn', title: 'Localized discontinuity', body: 'Impedance average tracks, but VSWR is high. Inspect connector launch, foil/braid transition, or a short crush.' })
+  }
+  if (vp != null && vp < computed.vp * 100 - 1.2) {
+    lines.push({ level: 'warn', title: 'Effective epsilon high', body: 'VP is low, which points toward denser PTFE, over-compression, moisture, or collapsed air volume.' })
+  }
+  if (doctor.root && doctor.root.errorPct <= 10) {
+    lines.push({ level: 'info', title: 'Pitch-linked suckout', body: `${doctor.root.label} is close to the measured/primary suckout. Stagger pitch before changing unrelated dimensions.` })
+  }
+  return lines.length ? lines : correlation.items.slice(0, 3).map((item) => ({ level: item.level, title: item.title, body: item.body }))
 }
 
 function measuredSampleFromEntry(entry, fallbackComputed = null) {
@@ -2324,6 +2462,8 @@ export default function RFStackLab() {
   const [measured, setMeasured] = useState(EMPTY_MEASURED_TEST)
   const [measuredPaste, setMeasuredPaste] = useState('')
   const [goldenHistory, setGoldenHistory] = useState(() => readGoldenHistory())
+  const [recipeVersions, setRecipeVersions] = useState(() => readRecipeVersions())
+  const [approvalQueue, setApprovalQueue] = useState([])
   const [compareGoldenId, setCompareGoldenId] = useState('')
   const [runSheetCopied, setRunSheetCopied] = useState(false)
   const modelConfig = useMemo(() => ({
@@ -2489,6 +2629,30 @@ export default function RFStackLab() {
     }
     window.addEventListener('cable-suite:apply-preset', onApplyPreset)
     return () => window.removeEventListener('cable-suite:apply-preset', onApplyPreset)
+  }, [])
+
+  useEffect(() => {
+    const onQueuePreset = (event) => {
+      const detail = event.detail || {}
+      if (!detail.section || !detail.params) return
+      const queued = {
+        id: `queued-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        createdAt: new Date().toISOString(),
+        section: detail.section,
+        params: detail.params,
+        label: detail.label || detail.tool || 'Agent proposal',
+        tool: detail.tool || 'agent',
+        preview: detail.preview || null,
+        safetyAudit: detail.safetyAudit || null,
+        machineGuard: detail.machineGuard || null,
+        tolerance: detail.tolerance || null,
+        miQa: detail.miQa || null,
+        measuredTest: detail.measuredTest || null,
+      }
+      setApprovalQueue((current) => [queued, ...current].slice(0, 12))
+    }
+    window.addEventListener('cable-suite:queue-preset', onQueuePreset)
+    return () => window.removeEventListener('cable-suite:queue-preset', onQueuePreset)
   }, [])
 
   const computed = useMemo(() => {
@@ -2719,11 +2883,16 @@ export default function RFStackLab() {
   const safetyAudit = useMemo(() => buildSafetyAuditor(preApplyPreview, machineRuleGuard, toleranceSim, miVisualQa), [preApplyPreview, machineRuleGuard, toleranceSim, miVisualQa])
   const feedbackLearner = useMemo(() => buildFeedbackLearner(goldenHistory, measured, computed), [goldenHistory, measured, computed])
   const suckoutDoctor = useMemo(() => buildSuckoutDoctor(computed, measured), [computed, measured])
+  const agentPlanner = useMemo(() => buildAgentPlanner(computed, ptfeStack, shieldStack, measured, safetyAudit, approvalQueue), [computed, ptfeStack, shieldStack, measured, safetyAudit, approvalQueue])
+  const missingInputs = useMemo(() => buildMissingInputs(computed, ptfeStack, shieldStack, measured, approvalQueue), [computed, ptfeStack, shieldStack, measured, approvalQueue])
+  const agentVariants = useMemo(() => buildAgentVariants(computed, ptfeStack, shieldStack, safetyAudit), [computed, ptfeStack, shieldStack, safetyAudit])
+  const reasonTrace = useMemo(() => buildReasonTrace(computed, ptfeStack, shieldStack), [computed, ptfeStack, shieldStack])
   const selectedGolden = useMemo(() => (
     goldenHistory.find((entry) => entry.id === compareGoldenId) || goldenHistory[0] || null
   ), [compareGoldenId, goldenHistory])
   const goldenDiff = useMemo(() => buildGoldenDiff(selectedGolden, computed, ptfeStack, shieldStack), [selectedGolden, computed, ptfeStack, shieldStack])
   const runSheetRows = useMemo(() => buildFactoryRunSheetRows(ptfeStack, shieldStack, computed), [ptfeStack, shieldStack, computed])
+  const autoTestDiagnosis = useMemo(() => buildAutoTestDiagnosis(measured, correlation, suckoutDoctor, computed), [measured, correlation, suckoutDoctor, computed])
 
   const updateMeasured = (key) => (value) => {
     setMeasured((current) => ({ ...current, [key]: value }))
@@ -2788,6 +2957,54 @@ export default function RFStackLab() {
       writeGoldenHistory(next)
       return next
     })
+  }
+
+  const saveRecipeVersion = (label = '') => {
+    const entry = buildRecipeSnapshot({
+      label: label || measured.cableId || activePreset || `Recipe ${new Date().toLocaleTimeString()}`,
+      source: label ? 'manual' : 'snapshot',
+      params,
+      ptfeStack,
+      shieldStack,
+      measured,
+      computed,
+    })
+    setRecipeVersions((current) => {
+      const next = [entry, ...current].slice(0, 36)
+      writeRecipeVersions(next)
+      return next
+    })
+  }
+
+  const loadRecipeVersion = (entry) => {
+    if (!entry) return
+    setParams(entry.params || PRESETS.phaseStable)
+    setPtfeStack(Array.isArray(entry.ptfeStack) ? entry.ptfeStack : [])
+    setShieldStack(Array.isArray(entry.shieldStack) ? entry.shieldStack : [])
+    setMeasured(entry.measured || EMPTY_MEASURED_TEST)
+    setMeasuredPaste('')
+    setActivePreset('')
+  }
+
+  const deleteRecipeVersion = (id) => {
+    setRecipeVersions((current) => {
+      const next = current.filter((entry) => entry.id !== id)
+      writeRecipeVersions(next)
+      return next
+    })
+  }
+
+  const applyQueuedProposal = (item) => {
+    if (!item) return
+    saveRecipeVersion(`Before ${item.label || item.tool || 'agent apply'}`)
+    window.dispatchEvent(new CustomEvent('cable-suite:apply-preset', {
+      detail: { section: item.section, params: item.params, label: item.label },
+    }))
+    setApprovalQueue((current) => current.filter((entry) => entry.id !== item.id))
+  }
+
+  const rejectQueuedProposal = (id) => {
+    setApprovalQueue((current) => current.filter((entry) => entry.id !== id))
   }
 
   const copyRunSheet = async () => {
@@ -2987,6 +3204,21 @@ export default function RFStackLab() {
         tolerance={toleranceSim}
         miQa={miVisualQa}
         measured={measured}
+      />
+
+      <AgentWorkflowCockpit
+        planner={agentPlanner}
+        missingInputs={missingInputs}
+        variants={agentVariants}
+        approvalQueue={approvalQueue}
+        reasonTrace={reasonTrace}
+        recipeVersions={recipeVersions}
+        autoDiagnosis={autoTestDiagnosis}
+        onApplyQueued={applyQueuedProposal}
+        onRejectQueued={rejectQueuedProposal}
+        onSaveVersion={() => saveRecipeVersion()}
+        onLoadVersion={loadRecipeVersion}
+        onDeleteVersion={deleteRecipeVersion}
       />
 
       <div style={S.notes}>
@@ -3463,6 +3695,224 @@ function ActualTestOcrCard({ measured }) {
   )
 }
 
+function AgentWorkflowCockpit({
+  planner,
+  missingInputs,
+  variants,
+  approvalQueue,
+  reasonTrace,
+  recipeVersions,
+  autoDiagnosis,
+  onApplyQueued,
+  onRejectQueued,
+  onSaveVersion,
+  onLoadVersion,
+  onDeleteVersion,
+}) {
+  const readyCount = planner.filter((item) => !String(item.status).includes('need') && item.status !== 'blocked').length
+  return (
+    <section style={S.workflowShell}>
+      <div style={S.closedLoopHeader}>
+        <div>
+          <div style={S.cardEyebrow}>Agent Workflow Cockpit</div>
+          <h2 style={S.cardTitle}>Plan, check, queue, explain, version, and diagnose before the agent changes the stack.</h2>
+        </div>
+        <div style={{ ...S.liveBadge, color: readyCount >= 4 ? C.teal : C.amber, borderColor: readyCount >= 4 ? `${C.teal}66` : `${C.amber}66` }}>
+          {readyCount}/{planner.length} ready
+        </div>
+      </div>
+      <div style={S.workflowGrid}>
+        <BuildPlannerCard planner={planner} />
+        <MissingInputCard items={missingInputs} />
+        <VariantDesignerCard variants={variants} />
+        <ApprovalQueueCard queue={approvalQueue} onApply={onApplyQueued} onReject={onRejectQueued} />
+        <ReasonTraceCard rows={reasonTrace} />
+        <RecipeVersionHistoryCard versions={recipeVersions} onSave={onSaveVersion} onLoad={onLoadVersion} onDelete={onDeleteVersion} />
+        <AutoTestDiagnosisCard items={autoDiagnosis} />
+      </div>
+    </section>
+  )
+}
+
+function WorkflowDot({ level }) {
+  const color = level === 'block' || level === 'blocked' ? C.red
+    : level === 'warn' || level === 'need approval' ? C.amber
+      : level === 'pass' || level === 'calculated' || level === 'audited' || level === 'clear' ? C.teal
+        : C.sky
+  return <span style={{ ...S.workflowDot, background: color, color }} />
+}
+
+function BuildPlannerCard({ planner }) {
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><ClipboardList size={14} /> 1. Agent Build Planner</div>
+      <div style={S.workflowList}>
+        {planner.map((item) => (
+          <div key={item.step} style={S.workflowRow}>
+            <WorkflowDot level={item.status} />
+            <div>
+              <strong>{item.step}</strong>
+              <small>{item.detail}</small>
+            </div>
+            <b>{item.status}</b>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MissingInputCard({ items }) {
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><Target size={14} /> 2. Missing Input Detector</div>
+      <div style={S.workflowList}>
+        {items.map((item, index) => (
+          <div key={`${item.label}-${index}`} style={S.workflowRow}>
+            <WorkflowDot level={item.level} />
+            <div>
+              <strong>{item.label}</strong>
+              <small>{item.detail}</small>
+            </div>
+            <b>{item.level}</b>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function VariantDesignerCard({ variants }) {
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><GitCompare size={14} /> 3. Variant Designer</div>
+      <div style={S.variantGrid}>
+        {variants.map((variant) => (
+          <div key={variant.id} style={S.variantCard}>
+            <div style={S.variantTop}>
+              <strong>{variant.title}</strong>
+              <b>{variant.score}</b>
+            </div>
+            <small>{variant.focus}</small>
+            <ul style={S.actionList}>
+              {variant.changes.map((change) => <li key={change}>{change}</li>)}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ApprovalQueueCard({ queue, onApply, onReject }) {
+  return (
+    <div style={{ ...S.intelCard, ...S.workflowWideCard }}>
+      <div style={S.intelTitle}><Play size={14} /> 4. Ask-To-Apply Approval Queue</div>
+      {queue.length === 0 ? (
+        <div style={S.emptyState}>Agent proposals queued from Ask will land here first, so you can inspect the calculator preview before applying to the live stack.</div>
+      ) : (
+        <div style={S.queueList}>
+          {queue.map((item) => (
+            <div key={item.id} style={S.queueItem}>
+              <div style={S.queueHead}>
+                <div>
+                  <strong>{item.label}</strong>
+                  <small>{item.tool} · {item.section} · {new Date(item.createdAt).toLocaleTimeString()}</small>
+                </div>
+                <div style={S.queueActions}>
+                  <button type="button" style={S.miniBtn} onClick={() => onApply(item)}>Apply</button>
+                  <button type="button" style={S.dangerMiniBtn} onClick={() => onReject(item.id)}>Drop</button>
+                </div>
+              </div>
+              {item.preview?.rows?.length > 0 && (
+                <div style={S.previewMiniGrid}>
+                  {item.preview.rows.slice(0, 4).map((row) => (
+                    <span key={`${item.id}-${row.label}`}>
+                      <b>{row.label}</b>
+                      {row.value}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {item.safetyAudit && (
+                <div style={S.assumptionLine}>
+                  safety: {item.safetyAudit.status || 'review'} · blocks {item.safetyAudit.blocks?.length || 0} · warnings {item.safetyAudit.warnings?.length || 0}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ReasonTraceCard({ rows }) {
+  return (
+    <div style={{ ...S.intelCard, ...S.workflowWideCard }}>
+      <div style={S.intelTitle}><Brain size={14} /> 5. Reason Trace</div>
+      <div style={S.reasonList}>
+        {rows.slice(0, 8).map((row, index) => (
+          <div key={`${row.label}-${index}`} style={S.reasonRow}>
+            <span>{row.label}</span>
+            <strong>{row.value}</strong>
+            <small>{row.why}</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function RecipeVersionHistoryCard({ versions, onSave, onLoad, onDelete }) {
+  return (
+    <div style={S.intelCard}>
+      <div style={S.runSheetHead}>
+        <div style={S.intelTitle}><RotateCcw size={14} /> 6. Recipe Version History</div>
+        <button type="button" style={S.miniBtn} onClick={onSave}>Save</button>
+      </div>
+      {versions.length === 0 ? (
+        <div style={S.emptyState}>Save before a risky change, or apply from the queue to keep a rollback point.</div>
+      ) : (
+        <div style={S.versionList}>
+          {versions.slice(0, 6).map((entry) => (
+            <div key={entry.id} style={S.versionItem}>
+              <div>
+                <strong>{entry.label}</strong>
+                <small>{new Date(entry.createdAt).toLocaleString()} · Z0 {fmt(entry.summary?.z0, 1)} Ω · VP {fmt((entry.summary?.vp || 0) * 100, 1)}%</small>
+              </div>
+              <div style={S.queueActions}>
+                <button type="button" style={S.miniBtn} onClick={() => onLoad(entry)}>Load</button>
+                <button type="button" style={S.dangerMiniBtn} onClick={() => onDelete(entry.id)}>Del</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AutoTestDiagnosisCard({ items }) {
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><Activity size={14} /> 7. Auto Test Diagnosis From Image</div>
+      <div style={S.workflowList}>
+        {items.slice(0, 5).map((item, index) => (
+          <div key={`${item.title}-${index}`} style={S.workflowRow}>
+            <WorkflowDot level={item.level} />
+            <div>
+              <strong>{item.title}</strong>
+              <small>{item.body}</small>
+            </div>
+            <b>{item.level}</b>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function GuardrailRow({ item }) {
   const color = item.level === 'block' ? C.red : item.level === 'warn' ? C.amber : item.level === 'pass' ? C.teal : C.sky
   return (
@@ -3609,16 +4059,36 @@ const S = {
   loadBtn: { background: '#070b0c', border: `1px solid ${C.teal}66`, color: C.teal, minHeight: 30, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer' },
   closedLoopShell: { border: `1px solid ${C.border}`, background: 'linear-gradient(135deg, rgba(16,22,25,0.98), rgba(9,13,14,0.96))', padding: 14, borderRadius: 3, display: 'grid', gap: 12 },
   guardrailShell: { border: `1px solid ${C.border}`, background: 'linear-gradient(135deg, rgba(11,14,16,0.99), rgba(24,13,7,0.88))', padding: 14, borderRadius: 3, display: 'grid', gap: 12 },
+  workflowShell: { border: `1px solid ${C.border}`, background: 'linear-gradient(135deg, rgba(10,16,18,0.99), rgba(10,8,7,0.96))', padding: 14, borderRadius: 3, display: 'grid', gap: 12 },
   closedLoopHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
   closedLoopGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 10 },
   guardrailGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 10 },
+  workflowGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 310px), 1fr))', gap: 10 },
   intelCard: { border: `1px solid ${C.borderHi}`, background: '#080d0f', padding: 12, display: 'grid', gap: 10, minWidth: 0 },
   runSheetCard: { gridColumn: '1 / -1' },
+  workflowWideCard: { gridColumn: '1 / -1' },
   intelTitle: { display: 'flex', alignItems: 'center', gap: 7, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.7 },
   previewHero: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))', gap: 7, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
   checkList: { display: 'grid', gap: 7 },
   checkRow: { display: 'grid', gridTemplateColumns: '9px minmax(0, 1fr) auto', gap: 8, alignItems: 'center', border: `1px solid rgba(167,176,182,0.12)`, background: '#070b0c', padding: 8, minWidth: 0 },
   checkLight: { width: 7, height: 7, borderRadius: 999, boxShadow: '0 0 12px currentColor' },
+  workflowList: { display: 'grid', gap: 7 },
+  workflowRow: { display: 'grid', gridTemplateColumns: '9px minmax(0, 1fr) auto', gap: 8, alignItems: 'center', border: `1px solid rgba(167,176,182,0.12)`, background: '#070b0c', padding: 8, minWidth: 0, color: C.dim, fontSize: 11 },
+  workflowDot: { width: 7, height: 7, borderRadius: 999, boxShadow: '0 0 12px currentColor' },
+  variantGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 },
+  variantCard: { border: `1px solid rgba(94,234,212,0.16)`, background: '#070b0c', padding: 9, display: 'grid', gap: 7, color: C.dim, minWidth: 0 },
+  variantTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, color: C.text },
+  queueList: { display: 'grid', gap: 8 },
+  queueItem: { border: `1px solid rgba(251,191,36,0.2)`, background: '#070b0c', padding: 9, display: 'grid', gap: 8, minWidth: 0 },
+  queueHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, minWidth: 0 },
+  queueActions: { display: 'flex', gap: 6, alignItems: 'center', flex: '0 0 auto' },
+  miniBtn: { minHeight: 28, padding: '0 9px', background: 'rgba(94,234,212,0.08)', border: `1px solid ${C.teal}66`, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer' },
+  dangerMiniBtn: { minHeight: 28, padding: '0 9px', background: 'rgba(248,113,113,0.06)', border: `1px solid ${C.red}66`, color: C.red, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer' },
+  previewMiniGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 6, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+  reasonList: { display: 'grid', gap: 7 },
+  reasonRow: { display: 'grid', gridTemplateColumns: 'minmax(76px, 0.3fr) minmax(90px, 0.35fr) minmax(0, 1fr)', gap: 8, alignItems: 'start', border: `1px solid rgba(167,176,182,0.12)`, background: '#070b0c', padding: 8, color: C.dim, fontSize: 11 },
+  versionList: { display: 'grid', gap: 7, maxHeight: 330, overflow: 'auto', paddingRight: 2 },
+  versionItem: { display: 'flex', justifyContent: 'space-between', gap: 9, alignItems: 'flex-start', border: `1px solid rgba(167,176,182,0.12)`, background: '#070b0c', padding: 8, color: C.dim, fontSize: 11 },
   biasGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 7 },
   biasChip: { border: `1px solid rgba(167,176,182,0.13)`, background: '#070b0c', padding: 8, display: 'grid', gap: 4, color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, minWidth: 0 },
   intelMiniText: { color: C.muted, fontSize: 11 },

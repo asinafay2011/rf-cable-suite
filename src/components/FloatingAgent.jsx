@@ -2069,6 +2069,7 @@ function ToolGuardrailPanel({ safetyAudit, machineGuard, tolerance, miQa, measur
 function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSection }) {
   const [open, setOpen] = useState(false)
   const [applied, setApplied] = useState(false)
+  const [queued, setQueued] = useState(false)
   const inputSummary = summarizeInput(input)
   let parsedResult = result
   if (typeof result === 'string') {
@@ -2098,6 +2099,25 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
     }))
     setApplied(true)
     setTimeout(() => setApplied(false), 1500)
+  }
+  const queuePreset = () => {
+    if (onJumpToSection) onJumpToSection(presetSection)
+    window.dispatchEvent(new CustomEvent('cable-suite:queue-preset', {
+      detail: {
+        section: presetSection,
+        params: presetData,
+        label: presetLabel,
+        tool: name,
+        preview: applyPreview,
+        safetyAudit,
+        machineGuard,
+        tolerance,
+        miQa,
+        measuredTest,
+      },
+    }))
+    setQueued(true)
+    setTimeout(() => setQueued(false), 1500)
   }
   return (
     <div className="flex justify-start">
@@ -2227,18 +2247,32 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
                 <span className="text-[10px] uppercase tracking-wider text-[#6b7479]">{parsedResult.verdict}</span>
               )}
             </div>
-            <button
-              onClick={applyPreset}
-              disabled={applied}
-              className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider rounded border hover:bg-[#1f1610] transition-colors flex items-center gap-1"
-              style={{
-                color: applied ? '#5eead4' : accent,
-                borderColor: (applied ? '#5eead4' : accent) + '60',
-                background: 'transparent',
-              }}
-            >
-              {applied ? '✓ applied' : `→ Apply${presetLabel ? ` "${presetLabel}"` : ''} to ${applyTargetLabel}`}
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={queuePreset}
+                disabled={queued}
+                className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider rounded border hover:bg-[#101d1a] transition-colors flex items-center gap-1"
+                style={{
+                  color: queued ? '#5eead4' : '#5eead4',
+                  borderColor: '#5eead460',
+                  background: 'transparent',
+                }}
+              >
+                {queued ? '✓ queued' : 'Queue'}
+              </button>
+              <button
+                onClick={applyPreset}
+                disabled={applied}
+                className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider rounded border hover:bg-[#1f1610] transition-colors flex items-center gap-1"
+                style={{
+                  color: applied ? '#5eead4' : accent,
+                  borderColor: (applied ? '#5eead4' : accent) + '60',
+                  background: 'transparent',
+                }}
+              >
+                {applied ? '✓ applied' : `→ Apply${presetLabel ? ` "${presetLabel}"` : ''} to ${applyTargetLabel}`}
+              </button>
+            </div>
           </div>
         )}
         {open && (
