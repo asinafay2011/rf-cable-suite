@@ -901,6 +901,27 @@ export const RF_TOOLS = [
     },
   },
   {
+    name: 'parse_actual_test_report',
+    description:
+      'Normalize actual VNA/MI/test report values into RF Stack Lab measured-test fields. Use this after reading a screenshot/image or pasted OCR text of a test report. Extract Av. Z0, VP, final/outgoing OD, suckout/notch GHz, insertion loss, return loss/S11, VSWR, and capacitance pF/ft; the result exposes an Apply button that fills the Measured Test Correlator.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        raw_text: { type: 'string', description: 'OCR or manually transcribed text from the report/image.' },
+        cable_id: { type: 'string', description: 'MI/cable id if visible, e.g. MI-ST962-032-200.' },
+        measured_z0_ohm: { type: 'number', description: 'Measured average impedance in ohms.' },
+        measured_vp_pct: { type: 'number', description: 'Measured velocity percent, e.g. 78.5.' },
+        suckout_ghz: { type: 'number', description: 'Measured suckout/notch/dip frequency in GHz.' },
+        final_od_in: { type: 'number', description: 'Measured final or outgoing OD in inches.' },
+        insertion_loss_db: { type: 'number', description: 'Measured insertion loss/attenuation at a stated frequency.' },
+        return_loss_db: { type: 'number', description: 'Measured return loss/S11 in dB.' },
+        vswr: { type: 'number', description: 'Measured VSWR.' },
+        capacitance_pf_ft: { type: 'number', description: 'Measured capacitance in pF/ft.' },
+        notes: { type: 'string', description: 'Any visible handwritten notes, operator/date, or uncertainty.' },
+      },
+    },
+  },
+  {
     name: 'design_dielectric_stack',
     description:
       'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Default PTFE wrap is 2/3 to reduce shrink-back; use 1/2 only when the target OD needs the lower single-pass build. WTM taping pitch is OD-based and calibrated from MI-ST962-032-130 / 032-200, then clamped to the 0.0390 in/rev minimum. Returns a complete layer recipe + predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the RF Stack Lab tab + a filled shop MI .xlsx based on MI-ST962-032-130, with tape part numbers, OD after tape, pitch set-point, and tension filled into the Taping (3-Bay) sheets. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
@@ -1595,6 +1616,9 @@ export async function dispatchRfTool(name, input) {
       case 'propose_shop_rule': {
         return proposeShopRule(input || {})
       }
+      case 'parse_actual_test_report': {
+        return parseActualTestReport(input || {})
+      }
       case 'whatif_panel': {
         const { title, sliders, outputs, annotation } = input || {}
         if (!title || !Array.isArray(sliders) || !Array.isArray(outputs)) {
@@ -1791,6 +1815,274 @@ function _makePreflightValidation({ predicted, targetZ0, targetVp, targetOdMm })
     message: allowApply
       ? 'Preflight passed against the RF stack calculator targets; Apply is enabled.'
       : 'Preflight blocked Apply because the calculated stack does not match target Z0/VP/dielectric OD closely enough.',
+  }
+}
+
+function _toolCheck(level, name, actual, target, message) {
+  return { level, name, actual, target, pass: level !== 'block', message }
+}
+
+function _machineRuleGuardForRecipe({ conductorOdMm, layers = [], shieldLayers = [], requireDielectric = false }) {
+  const checks = []
+  const smallCore = Number(conductorOdMm) / 25.4 <= SMALL_CABLE_TAPE_OD_IN + 0.00001
+  if (requireDielectric && !layers.length) {
+    checks.push(_toolCheck('block', 'Dielectric stack', 'missing', 'PTFE recipe', 'Build or validate PTFE layers before Apply/MI.'))
+  }
+  layers.forEach((layer, index) => {
+    const pitchIn = Number(layer.pitch_setpoint_in ?? layer.pitchSetpointIn ?? (layer.pitch_setpoint_mm != null ? Number(layer.pitch_setpoint_mm) / 25.4 : NaN))
+    const widthIn = Number(layer.tape_width_in ?? layer.width_in ?? (layer.tape_width_mm != null ? Number(layer.tape_width_mm) / 25.4 : NaN))
+    const overlapPct = Number(layer.overlap_pct ?? normalizePtfeWrap(layer.overlap).percent)
+    const part = layer.part_number || layer.partNumber || ''
+    checks.push(_toolCheck(
+      Number.isFinite(pitchIn) && pitchIn < WTM_MIN_TAPING_PITCH_IN - 0.0001 ? 'block' : 'pass',
+      `Tape #${index + 1} WTM pitch`,
+      Number.isFinite(pitchIn) ? round(pitchIn, 4) : null,
+      WTM_MIN_TAPING_PITCH_IN,
+      'WTM taping-head pitch must not be below the machine minimum.',
+    ))
+    checks.push(_toolCheck(
+      [50, 66.7, 75].some((v) => Math.abs(v - overlapPct) <= 0.6) ? 'pass' : 'block',
+      `Tape #${index + 1} PTFE wrap`,
+      round(overlapPct, 1),
+      '50 / 66.7 / 75%',
+      'PTFE wrap must be one of the three shop settings.',
+    ))
+    checks.push(_toolCheck(
+      part ? 'pass' : 'block',
+      `Tape #${index + 1} material`,
+      part || 'missing',
+      '962-96000 catalog',
+      'Use a stocked PTFE tape part number instead of loose dimensions.',
+    ))
+    if (smallCore) {
+      checks.push(_toolCheck(
+        Number.isFinite(widthIn) && widthIn >= SMALL_CABLE_MAX_PTFE_WIDTH_IN - 0.00001 ? 'block' : 'pass',
+        `Tape #${index + 1} small-core width`,
+        Number.isFinite(widthIn) ? round(widthIn, 4) : null,
+        `< ${SMALL_CABLE_MAX_PTFE_WIDTH_IN}`,
+        'For OD <= 0.051 in, avoid 0.0375 in PTFE tape width.',
+      ))
+    }
+  })
+  shieldLayers.forEach((layer, index) => {
+    const type = String(layer.type || '').toLowerCase()
+    if (type === 'spiral') {
+      const gap = Number(layer.gap ?? layer.gap_pct ?? layer.actual_gap_pct)
+      const bobbins = Math.round(Number(layer.bobbins) || DEFAULT_SPIRAL_BOBBINS)
+      checks.push(_toolCheck(
+        bobbins === DEFAULT_SPIRAL_BOBBINS ? 'pass' : 'warn',
+        `Shield #${index + 1} spiral bobbins`,
+        bobbins,
+        DEFAULT_SPIRAL_BOBBINS,
+        'Shop SPC spiral width rule is calibrated for 8 bobbins.',
+      ))
+      checks.push(_toolCheck(
+        Number.isFinite(gap) && gap < 1 ? 'block' : Number.isFinite(gap) && (gap < 6 || gap > 18) ? 'warn' : 'pass',
+        `Shield #${index + 1} spiral gap`,
+        Number.isFinite(gap) ? round(gap, 1) : null,
+        'visible ~10%',
+        'Spiral is separate flatwire, not overlap; keep a real between-wire gap.',
+      ))
+    }
+    if (type === 'foil') {
+      const overlap = Number(layer.overlap ?? layer.overlap_pct)
+      checks.push(_toolCheck(
+        Number.isFinite(overlap) && (overlap < 20 || overlap > 75) ? 'warn' : 'pass',
+        `Shield #${index + 1} foil overlap`,
+        Number.isFinite(overlap) ? round(overlap, 1) : null,
+        'MI-confirmed',
+        'Confirm foil 1/2 vs 2/3 wrap against the shop MI.',
+      ))
+    }
+    if (type === 'braid') {
+      const carriers = Number(layer.carriers)
+      const ends = Number(layer.ends ?? layer.ends_per_carrier)
+      const picks = Number(layer.picks ?? layer.picks_per_in)
+      const coverage = Number(layer.coverage ?? layer.coverage_pct)
+      checks.push(_toolCheck(
+        carriers <= 0 || ends <= 0 || picks <= 0 ? 'block' : 'pass',
+        `Shield #${index + 1} braid setup`,
+        `${carriers || '?'}C x ${ends || '?'}E / ${round(picks, 1) || '?'} PPI`,
+        'positive setup',
+        'Carrier, end, and pick counts must be positive manufacturable values.',
+      ))
+      checks.push(_toolCheck(
+        Number.isFinite(coverage) && (coverage < 90 || coverage > 99.5) ? 'warn' : 'pass',
+        `Shield #${index + 1} braid coverage`,
+        Number.isFinite(coverage) ? round(coverage, 1) : null,
+        '90-99.5%',
+        'Coverage outside the normal RF window needs engineer review.',
+      ))
+    }
+  })
+  const blocks = checks.filter((check) => check.level === 'block')
+  const warnings = checks.filter((check) => check.level === 'warn')
+  return { status: blocks.length ? 'blocked' : warnings.length ? 'review' : 'pass', checks, blocks, warnings }
+}
+
+function _toleranceForRecipe({ conductorOdMm, predicted = {} }) {
+  const z0 = Number(predicted.z0_ohm)
+  const vp = Number(predicted.vp)
+  const finalOd = Number(predicted.final_od_mm)
+  const eps = Number(predicted.eps_eff)
+  const rows = []
+  if (Number.isFinite(z0)) {
+    const swing = Math.max(0.8, Math.abs(z0 - 50) * 0.25 + 0.7)
+    rows.push({ label: 'Z0 worst case', min: round(z0 - swing, 2), nom: round(z0, 2), max: round(z0 + swing, 2), unit: 'ohm', level: z0 - swing < 48.5 || z0 + swing > 51.5 ? 'warn' : 'pass' })
+  }
+  if (Number.isFinite(vp)) {
+    const swing = 0.012
+    rows.push({ label: 'VP worst case', min: round((vp - swing) * 100, 2), nom: round(vp * 100, 2), max: round((vp + swing) * 100, 2), unit: '%', level: 'info' })
+  }
+  if (Number.isFinite(finalOd)) {
+    const swing = Math.max(0.0015 * 25.4, finalOd * 0.015)
+    rows.push({ label: 'Dielectric OD worst case', min: round(finalOd - swing, 4), nom: round(finalOd, 4), max: round(finalOd + swing, 4), unit: 'mm', level: 'info' })
+  }
+  if (Number.isFinite(predicted.bragg_notch_1_ghz)) {
+    const notch = Number(predicted.bragg_notch_1_ghz)
+    rows.push({ label: 'First suckout worst case', min: round(notch * 0.97, 2), nom: round(notch, 2), max: round(notch * 1.03, 2), unit: 'GHz', level: 'info' })
+  }
+  return {
+    rows,
+    assumptions: {
+      conductor_tol_in: conductorOdMm ? 0.0003 : null,
+      dielectric_od_tol_pct: 1.5,
+      eps_eff_tol_pct: Number.isFinite(eps) ? 2.5 : null,
+      pitch_tol_pct: 3,
+    },
+  }
+}
+
+function _miQaForRecipe({ miWorkbook = {}, layers = [], shieldLayers = [], requirePtfe = true }) {
+  const checks = []
+  if (requirePtfe) {
+    checks.push(_toolCheck(layers.length ? 'pass' : 'block', 'MI taping rows', layers.length, '>=1', 'The MI must have at least one PTFE taping row.'))
+    checks.push(_toolCheck(layers.length <= 6 ? 'pass' : 'warn', 'MI 3-Bay capacity', `${layers.length}/6`, '6 rows', 'The current shop template has two 3-Bay taping pages.'))
+  } else {
+    checks.push(_toolCheck(shieldLayers.length ? 'pass' : 'warn', 'Shield run sheet rows', shieldLayers.length, '>=1', 'Shield-only apply uses Stack Lab/run-sheet rows rather than PTFE MI pages.'))
+  }
+  const missingMaterial = layers.filter((layer) => !(layer.part_number || layer.partNumber)).length
+  checks.push(_toolCheck(missingMaterial ? 'block' : 'pass', 'MI material cells', missingMaterial ? `${missingMaterial} missing` : 'complete', 'complete', 'Every MI row should use a real material part number.'))
+  const missingPitch = layers.filter((layer) => !(Number(layer.pitch_setpoint_in) > 0 || Number(layer.pitch_setpoint_mm) > 0)).length
+  checks.push(_toolCheck(missingPitch ? 'block' : 'pass', 'MI pitch cells', missingPitch ? `${missingPitch} missing` : 'complete', 'complete', 'Every PTFE row needs a pitch set-point.'))
+  if (miWorkbook.template) {
+    checks.push(_toolCheck(miWorkbook.template === 'MI-ST962-032-130.xlsx' ? 'pass' : 'warn', 'MI template', miWorkbook.template, 'MI-ST962-032-130.xlsx', 'Use the shop MI template as the layout source.'))
+  }
+  if (miWorkbook.warning) {
+    checks.push(_toolCheck('warn', 'MI workbook warning', miWorkbook.warning, 'none', 'Review workbook generation warning before download.'))
+  }
+  if (shieldLayers.length) {
+    checks.push(_toolCheck('pass', 'Shield rows', shieldLayers.length, 'run-sheet backed', 'Shield settings are available in the stack/run-sheet output.'))
+  }
+  const blocks = checks.filter((check) => check.level === 'block')
+  const warnings = checks.filter((check) => check.level === 'warn')
+  return { status: blocks.length ? 'blocked' : warnings.length ? 'review' : 'pass', checks, blocks, warnings }
+}
+
+function _safetyAuditForResult({ preflight, machineGuard, tolerance, miQa }) {
+  const blocks = []
+  const warnings = []
+  if (preflight && preflight.allow_apply === false) {
+    blocks.push(_toolCheck('block', 'Calculator preflight', preflight.status || 'blocked', 'pass', preflight.message || 'Calculator preflight did not pass.'))
+  }
+  ;(machineGuard?.blocks || []).forEach((item) => blocks.push(item))
+  ;(miQa?.blocks || []).forEach((item) => blocks.push(item))
+  ;(machineGuard?.warnings || []).forEach((item) => warnings.push(item))
+  ;(miQa?.warnings || []).forEach((item) => warnings.push(item))
+  ;(tolerance?.rows || []).filter((row) => row.level === 'warn').forEach((row) => warnings.push(_toolCheck('warn', row.label, `${row.min}-${row.max} ${row.unit}`, 'inside tolerance', 'Worst-case tolerance window needs review.')))
+  return {
+    status: blocks.length ? 'blocked' : warnings.length ? 'review' : 'pass',
+    allow_apply: blocks.length === 0,
+    blocks,
+    warnings,
+    message: blocks.length
+      ? 'Safety auditor held Apply until blocking machine/MI/calculator issues are corrected.'
+      : warnings.length
+        ? 'Safety auditor found review items; Apply remains available after engineer review.'
+        : 'Safety auditor passed; no machine-rule or MI blockers found.',
+  }
+}
+
+function _combinePreflightWithAudit(preflight, audit) {
+  const allow = Boolean(preflight?.allow_apply) && Boolean(audit?.allow_apply)
+  return {
+    ...(preflight || { checks: [] }),
+    status: allow ? 'pass' : 'blocked',
+    allow_apply: allow,
+    safety_status: audit?.status || 'unknown',
+    message: allow
+      ? preflight?.message || 'Preflight passed.'
+      : audit?.message || preflight?.message || 'Apply held by safety auditor.',
+  }
+}
+
+function _parseFirstReportNumber(text, patterns) {
+  for (const pattern of patterns) {
+    const match = String(text || '').match(pattern)
+    if (match) {
+      const value = Number(String(match[1]).replace(/,/g, ''))
+      if (Number.isFinite(value)) return value
+    }
+  }
+  return null
+}
+
+function parseActualTestReport(input = {}) {
+  const rawText = String(input.raw_text || input.report_text || input.text || '')
+  const measured = {
+    cableId: input.cable_id || input.mi_number || rawText.match(/\b(?:MI[-\w.]+|ST[-\w.]+|962[-\w.]+)/i)?.[0] || '',
+    measuredZ0: input.measured_z0_ohm ?? input.z0_ohm ?? _parseFirstReportNumber(rawText, [
+      /(?:av\.?\s*)?z(?:0|o)\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)/i,
+      /impedance[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i,
+    ]) ?? '',
+    measuredVp: input.measured_vp_pct ?? input.vp_pct ?? (input.vp != null ? Number(input.vp) * (Number(input.vp) <= 1 ? 100 : 1) : null) ?? _parseFirstReportNumber(rawText, [
+      /v(?:p|elocity)[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*%/i,
+      /velocity[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i,
+    ]) ?? '',
+    measuredSuckoutGHz: input.suckout_ghz ?? input.notch_ghz ?? _parseFirstReportNumber(rawText, [
+      /suck\s*out[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i,
+      /notch[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*(?:g|ghz)/i,
+      /dip[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*(?:g|ghz)/i,
+    ]) ?? '',
+    measuredFinalOdIn: input.final_od_in ?? input.final_od_inch ?? _parseFirstReportNumber(rawText, [
+      /(?:final|outgoing|tu)?\s*o\.?d\.?[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*(?:in|inch|")/i,
+      /(?:final|outgoing|tu)?\s*od[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i,
+    ]) ?? '',
+    measuredIlDb: input.insertion_loss_db ?? input.loss_db ?? _parseFirstReportNumber(rawText, [
+      /(?:insertion\s*loss|s21|attenuation)[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*dB/i,
+    ]) ?? '',
+    measuredRlDb: input.return_loss_db ?? input.rl_db ?? input.s11_db ?? _parseFirstReportNumber(rawText, [
+      /(?:return\s*loss|rl|s11)[^0-9-]*([0-9]+(?:\.[0-9]+)?)\s*dB/i,
+    ]) ?? '',
+    measuredVswr: input.vswr ?? _parseFirstReportNumber(rawText, [/vswr[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i]) ?? '',
+    measuredCapPfFt: input.capacitance_pf_ft ?? input.cap_pf_ft ?? _parseFirstReportNumber(rawText, [
+      /(?:capacitance|cap\.?|pf\/ft)[^0-9-]*([0-9]+(?:\.[0-9]+)?)/i,
+      /([0-9]+(?:\.[0-9]+)?)\s*pF\s*\/\s*ft/i,
+    ]) ?? '',
+    notes: input.notes || rawText.slice(0, 500),
+  }
+  const filled = Object.entries(measured).filter(([, value]) => value !== '' && value != null).length
+  return {
+    ok: filled > 1,
+    measured,
+    raw_text: rawText,
+    label: measured.cableId ? `Actual test ${measured.cableId}` : 'Actual test import',
+    _section: 'stack-measured',
+    _apply_preset: { measured, raw_text: rawText },
+    _measured_test: {
+      fields_detected: filled,
+      z0_ohm: measured.measuredZ0 || null,
+      vp_pct: measured.measuredVp || null,
+      suckout_ghz: measured.measuredSuckoutGHz || null,
+      final_od_in: measured.measuredFinalOdIn || null,
+      message: filled > 1
+        ? 'Click Apply to load these actual test values into RF Stack Lab.'
+        : 'No reliable measured fields were found; ask the agent to read the image again or paste clearer OCR text.',
+    },
+    notes: [
+      'This tool normalizes OCR/text extracted by the vision agent or pasted report text into the Measured Test Correlator fields.',
+      'After Apply, save it as a golden recipe if the reel is a trusted baseline.',
+    ],
   }
 }
 
@@ -2219,6 +2511,8 @@ async function designDielectricStack(input) {
     targetVp: target_vp,
     targetOdMm: D_target,
   })
+  const machineGuard = _machineRuleGuardForRecipe({ conductorOdMm: d, layers: stackOut, requireDielectric: true })
+  const tolerance = _toleranceForRecipe({ conductorOdMm: d, predicted })
   const targetSummary = `${target_z0_ohm ? `${round(target_z0_ohm, 2)} ohm` : ''}${target_vp ? ` ${round(target_vp * 100, 1)}% VP` : ''} conductor ${round(d / 25.4, 4)} in`.trim()
   const miWorkbook = await makePtfeMiWorkbook({
     miNumber: mi_number || 'MI-ST962-AUTO',
@@ -2233,6 +2527,9 @@ async function designDielectricStack(input) {
     lineSpeedFtMin: line_speed_ft_min,
     predicted,
   })
+  const miQa = _miQaForRecipe({ miWorkbook, layers: stackOut })
+  const safetyAudit = _safetyAuditForResult({ preflight, machineGuard, tolerance, miQa })
+  const guardedPreflight = _combinePreflightWithAudit(preflight, safetyAudit)
   const miFilename = `${String(mi_number || 'MI-ST962-AUTO').replace(/[^a-z0-9._-]+/gi, '-')}-${round(d / 25.4, 4)}in-${Math.round((target_vp || VP_actual) * 100)}vp.${miWorkbook.extension || 'xlsx'}`
 
   return {
@@ -2251,10 +2548,14 @@ async function designDielectricStack(input) {
     },
     layers: stackOut,
     predicted,
-    _preflight: preflight,
+    _preflight: guardedPreflight,
+    _machine_guard: machineGuard,
+    _tolerance: tolerance,
+    _mi_qa: miQa,
+    _safety_audit: safetyAudit,
     label: `${target_z0_ohm ? `${target_z0_ohm} Ω` : ''}${target_vp ? ` · ${(target_vp*100).toFixed(0)}% VP` : ''} · d=${d.toFixed(3)} mm`.trim(),
     _section: 'stack',
-    ...(preflight.allow_apply ? { _apply_preset: {
+    ...(guardedPreflight.allow_apply ? { _apply_preset: {
       conductor_od_mm: round(d, 4),
       target_z0: target_z0_ohm,
       layers: stackOut.map((L) => ({
@@ -2276,7 +2577,7 @@ async function designDielectricStack(input) {
         tension_factor: L.tension_factor,
         passes: L.passes,
       })),
-    } } : { _apply_blocked: preflight.message }),
+    } } : { _apply_blocked: guardedPreflight.message }),
     _download: {
       filename: miFilename,
       mime: miWorkbook.mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -2295,7 +2596,7 @@ async function designDielectricStack(input) {
         : null,
       miWorkbook.warning || null,
       `Preflight: target dielectric OD ${D_target.toFixed(3)} mm; dry-run recipe gives ${finalOD.toFixed(3)} mm, ${Z0_actual.toFixed(1)} ohm, ${(VP_actual * 100).toFixed(1)}% VP.`,
-      !preflight.allow_apply
+      !guardedPreflight.allow_apply
         ? 'Apply is held until the recipe matches the RF stack calculator targets closely enough.'
         : null,
       snappedTape
@@ -2501,6 +2802,11 @@ function optimizeDielectricStack(input) {
     predicted: item.predicted,
     preflight_status: item.preflight.status,
   }))
+  const machineGuard = _machineRuleGuardForRecipe({ conductorOdMm: targets.conductorOdMm, layers: best.layers, requireDielectric: true })
+  const tolerance = _toleranceForRecipe({ conductorOdMm: targets.conductorOdMm, predicted: best.predicted })
+  const miQa = _miQaForRecipe({ layers: best.layers })
+  const safetyAudit = _safetyAuditForResult({ preflight: best.preflight, machineGuard, tolerance, miQa })
+  const guardedPreflight = _combinePreflightWithAudit(best.preflight, safetyAudit)
 
   return {
     targets: {
@@ -2522,13 +2828,17 @@ function optimizeDielectricStack(input) {
     candidates: options,
     layers: best.layers,
     predicted: best.predicted,
-    _preflight: best.preflight,
+    _preflight: guardedPreflight,
+    _machine_guard: machineGuard,
+    _tolerance: tolerance,
+    _mi_qa: miQa,
+    _safety_audit: safetyAudit,
     label: `Optimized ${targets.targetZ0 || ''} Ω ${targets.targetVp ? `${round(targets.targetVp * 100, 1)}% VP` : ''}`.trim(),
     _section: 'stack',
-    ...(best.preflight.allow_apply ? { _apply_preset: _stackApplyPreset(targets.conductorOdMm, targets.targetZ0, best.layers) } : { _apply_blocked: best.preflight.message }),
+    ...(guardedPreflight.allow_apply ? { _apply_preset: _stackApplyPreset(targets.conductorOdMm, targets.targetZ0, best.layers) } : { _apply_blocked: guardedPreflight.message }),
     notes: [
       `Optimizer checked ${ranked.length} tape/wrap/tension combinations using stocked 962-96000 PTFE tape.`,
-      best.preflight.allow_apply
+      guardedPreflight.allow_apply
         ? 'Best candidate passed RF Stack Lab preflight; Apply is enabled.'
         : 'Best candidate is still outside tolerance; Apply is held. Consider a different tape thickness, tension target, or measured OD constraint.',
       'For a printable MI, call design_dielectric_stack with the recommended tape/wrap/tension settings after choosing the candidate.',
@@ -2550,6 +2860,11 @@ function validateRecipeAgainstRfStack(input) {
     targetOdMm: targets.targetOdMm,
     useOdAfterOverrides: Boolean(raw.use_od_after_overrides),
   })
+  const machineGuard = _machineRuleGuardForRecipe({ conductorOdMm: targets.conductorOdMm, layers: evaluated.stackOut, requireDielectric: true })
+  const tolerance = _toleranceForRecipe({ conductorOdMm: targets.conductorOdMm, predicted: evaluated.predicted })
+  const miQa = _miQaForRecipe({ layers: evaluated.stackOut })
+  const safetyAudit = _safetyAuditForResult({ preflight: evaluated.preflight, machineGuard, tolerance, miQa })
+  const guardedPreflight = _combinePreflightWithAudit(evaluated.preflight, safetyAudit)
   return {
     targets: {
       conductor_od_mm: round(targets.conductorOdMm, 4),
@@ -2559,12 +2874,16 @@ function validateRecipeAgainstRfStack(input) {
     },
     layers: evaluated.stackOut,
     predicted: evaluated.predicted,
-    _preflight: evaluated.preflight,
+    _preflight: guardedPreflight,
+    _machine_guard: machineGuard,
+    _tolerance: tolerance,
+    _mi_qa: miQa,
+    _safety_audit: safetyAudit,
     label: `Validated ${evaluated.predicted.z0_ohm} Ω · ${(evaluated.predicted.vp * 100).toFixed(1)}% VP`,
     _section: 'stack',
-    ...(evaluated.preflight.allow_apply ? { _apply_preset: _stackApplyPreset(targets.conductorOdMm, targets.targetZ0, evaluated.stackOut) } : { _apply_blocked: evaluated.preflight.message }),
+    ...(guardedPreflight.allow_apply ? { _apply_preset: _stackApplyPreset(targets.conductorOdMm, targets.targetZ0, evaluated.stackOut) } : { _apply_blocked: guardedPreflight.message }),
     notes: [
-      evaluated.preflight.allow_apply
+      guardedPreflight.allow_apply
         ? 'Recipe passed RF Stack Lab validation; Apply is enabled.'
         : 'Recipe failed RF Stack Lab validation; Apply is held until Z0/VP/dielectric OD are corrected.',
       raw.use_od_after_overrides
@@ -2648,6 +2967,23 @@ function designShieldStack(input) {
     spiral_gap_pct: seen.spiral?.step?.actual_gap_pct ?? seen.spiral?.step?.gap_pct ?? 100,
     layer_count: steps.filter((step) => step.type !== 'jacket').length,
   })
+  const machineGuard = _machineRuleGuardForRecipe({ shieldLayers: applyLayers })
+  const tolerance = {
+    rows: [
+      { label: 'Final shield OD worst case', min: round((currentOdMm - Math.max(0.04, currentOdMm * 0.01)), 4), nom: round(currentOdMm, 4), max: round((currentOdMm + Math.max(0.04, currentOdMm * 0.01)), 4), unit: 'mm', level: 'info' },
+      { label: 'Shielding estimate window', min: round((se.se_db || 0) - 4, 1), nom: round(se.se_db || 0, 1), max: round((se.se_db || 0) + 2, 1), unit: 'dB', level: 'info' },
+    ],
+    assumptions: { shield_od_tol_pct: 1, shielding_estimate_db: '-4/+2' },
+  }
+  const miQa = _miQaForRecipe({ layers: [], shieldLayers: applyLayers, requirePtfe: false })
+  const basePreflight = {
+    status: machineGuard.blocks.length ? 'blocked' : 'pass',
+    allow_apply: machineGuard.blocks.length === 0,
+    checks: machineGuard.checks,
+    message: machineGuard.blocks.length ? 'Shield stack has blocking machine-rule issues.' : 'Shield machine-rule guard passed.',
+  }
+  const safetyAudit = _safetyAuditForResult({ preflight: basePreflight, machineGuard, tolerance, miQa })
+  const guardedPreflight = _combinePreflightWithAudit(basePreflight, safetyAudit)
 
   return {
     dielectric_od_mm: round(dielectricOdMm, 4),
@@ -2659,11 +2995,16 @@ function designShieldStack(input) {
     shielding_estimate: se,
     label: `${steps.map((step) => step.type).join(' + ') || 'shield'} OD ${round(currentOdMm / 25.4, 4)} in`,
     _section: 'stack',
-    _apply_preset: {
+    _preflight: guardedPreflight,
+    _machine_guard: machineGuard,
+    _tolerance: tolerance,
+    _mi_qa: miQa,
+    _safety_audit: safetyAudit,
+    ...(guardedPreflight.allow_apply ? { _apply_preset: {
       dielectric_od_mm: round(dielectricOdMm, 4),
       shield_layers: applyLayers,
       jacket_od_mm: applyLayers.find((layer) => layer.type === 'jacket')?.od || null,
-    },
+    } } : { _apply_blocked: guardedPreflight.message }),
     notes: [
       seen.spiral
         ? `SPC spiral rule applied: dielectric OD × pi / ${seen.spiral.step.bobbins} bobbins × ${(100 - seen.spiral.step.gap_pct).toFixed(1)}% coverage. Requested ${seen.spiral.step.gap_pct}% gap; selected ${seen.spiral.step.part_number} gives ${seen.spiral.step.actual_gap_pct}% actual gap.`

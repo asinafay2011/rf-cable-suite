@@ -447,6 +447,172 @@ function buildPreApplyPreview(computed, ptfeStack, shieldStack) {
   }
 }
 
+function guardCheck(level, label, value, note) {
+  return { level, label, value, note }
+}
+
+function buildMachineRuleGuard(computed, ptfeStack, shieldStack) {
+  const checks = []
+  const validWraps = [50, 66.7, 75]
+  const smallCore = computed.conductorOD / MM_PER_IN <= SMALL_CABLE_TAPE_OD_IN + 0.00001
+  ptfeStack.forEach((layer, index) => {
+    const overlap = overlapToPct(layer.overlap)
+    const pitchIn = Number(computed.ptfeNotches?.[index]?.pitch) / MM_PER_IN
+    const widthIn = Number(layer.width) / MM_PER_IN
+    checks.push(guardCheck(
+      Number.isFinite(pitchIn) && pitchIn < 0.0390 - 0.0001 ? 'block' : 'pass',
+      `Tape #${index + 1} WTM pitch`,
+      Number.isFinite(pitchIn) ? `${fmt(pitchIn, 4)} in` : '—',
+      `Minimum WTM taping-head pitch is 0.0390 in/rev.`,
+    ))
+    checks.push(guardCheck(
+      validWraps.some((value) => Math.abs(value - overlap) <= 0.6) ? 'pass' : 'block',
+      `Tape #${index + 1} wrap`,
+      `${fmt(overlap, 1)}%`,
+      'PTFE must be 50%, 66.7%, or 75% wrap.',
+    ))
+    if (smallCore) {
+      checks.push(guardCheck(
+        widthIn >= SMALL_CABLE_MAX_PTFE_WIDTH_IN - 0.00001 ? 'block' : 'pass',
+        `Tape #${index + 1} small-core width`,
+        `${fmt(widthIn, 4)} in`,
+        `OD <= ${SMALL_CABLE_TAPE_OD_IN.toFixed(3)} in should avoid ${SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)} in tape width.`,
+      ))
+    }
+    const partOk = Boolean(layer.partNumber || layer.part_number)
+    checks.push(guardCheck(partOk ? 'pass' : 'warn', `Tape #${index + 1} material`, layer.partNumber || 'missing', 'Use a stocked 962-96000 PTFE tape part number.'))
+  })
+  shieldStack.forEach((layer, index) => {
+    const type = String(layer.type || '').toLowerCase()
+    if (type === 'spiral') {
+      const gap = Number(layer.gap ?? computed.spiralGap)
+      const bobbins = Math.round(Number(layer.bobbins ?? computed.spiralBobbins) || 0)
+      checks.push(guardCheck(
+        bobbins === DEFAULT_SPIRAL_BOBBINS ? 'pass' : 'warn',
+        `Shield #${index + 1} bobbins`,
+        `${bobbins || '—'}`,
+        `Shop spiral width rule assumes ${DEFAULT_SPIRAL_BOBBINS} bobbins.`,
+      ))
+      checks.push(guardCheck(
+        gap < 1 ? 'block' : gap < 6 || gap > 18 ? 'warn' : 'pass',
+        `Shield #${index + 1} spiral gap`,
+        Number.isFinite(gap) ? `${fmt(gap, 1)}%` : '—',
+        'Spiral means no overlap; keep visible between-wire gap, usually around 10%.',
+      ))
+    }
+    if (type === 'foil') {
+      const overlap = Number(layer.overlap ?? computed.foilOverlap)
+      checks.push(guardCheck(
+        overlap < 20 || overlap > 75 ? 'warn' : 'pass',
+        `Shield #${index + 1} foil overlap`,
+        `${fmt(overlap, 1)}%`,
+        'Confirm this against MI: some pages intentionally use 1/2 wrap.',
+      ))
+      if (layer.tension != null) {
+        const tension = Number(layer.tension)
+        checks.push(guardCheck(tension < 3 || tension > 7 ? 'warn' : 'pass', `Shield #${index + 1} foil tension`, `${fmt(tension, 1)} N`, 'Typical foil/tape tension check window is 3-7 N.'))
+      }
+    }
+    if (type === 'braid') {
+      const coverage = Number(layer.coverage ?? computed.braidCoverage)
+      const carriers = Number(layer.carriers ?? computed.braidCarriers)
+      const ends = Number(layer.ends ?? computed.braidEnds)
+      const picks = Number(layer.picks ?? computed.braidPicks)
+      checks.push(guardCheck(coverage < 90 ? 'warn' : coverage > 99.5 ? 'warn' : 'pass', `Shield #${index + 1} braid coverage`, `${fmt(coverage, 1)}%`, 'RF braid coverage should be realistic; 95-97% is usually healthier than an impossible 100%.'))
+      checks.push(guardCheck(carriers <= 0 || ends <= 0 || picks <= 0 ? 'block' : 'pass', `Shield #${index + 1} braid setup`, `${carriers || '—'}C x ${ends || '—'}E · ${fmt(picks, 1)} PPI`, 'Carrier, end, and pick count must be manufacturable positive values.'))
+    }
+  })
+  if (!ptfeStack.length) checks.push(guardCheck('block', 'Dielectric stack', 'missing', 'Build or apply PTFE layers before generating an MI.'))
+  const blocks = checks.filter((check) => check.level === 'block')
+  const warnings = checks.filter((check) => check.level === 'warn')
+  return {
+    status: blocks.length ? 'blocked' : warnings.length ? 'review' : 'pass',
+    blocks,
+    warnings,
+    checks,
+  }
+}
+
+function buildToleranceSimulator(computed) {
+  const conductorTolMm = 0.0003 * MM_PER_IN
+  const dielectricTolMm = Math.max(0.0015 * MM_PER_IN, computed.dielectricOD * 0.015)
+  const epsTol = 0.025
+  const dLow = Math.max(0.01, computed.conductorOD - conductorTolMm)
+  const dHigh = computed.conductorOD + conductorTolMm
+  const DLow = Math.max(dHigh + 0.01, computed.dielectricOD - dielectricTolMm)
+  const DHigh = computed.dielectricOD + dielectricTolMm
+  const epsLow = Math.max(1.001, computed.eps * (1 - epsTol))
+  const epsHigh = computed.eps * (1 + epsTol)
+  const zValues = [
+    z0From(dHigh, DLow, epsHigh),
+    z0From(dLow, DHigh, epsLow),
+    z0From(computed.conductorOD, DLow, computed.eps),
+    z0From(computed.conductorOD, DHigh, computed.eps),
+  ].filter(Number.isFinite)
+  const vpValues = [1 / Math.sqrt(epsHigh), 1 / Math.sqrt(epsLow)].filter(Number.isFinite)
+  const primary = primarySuckoutGHz(computed)
+  const rows = [
+    {
+      label: 'Z0 range',
+      value: `${fmt(Math.min(...zValues), 1)}-${fmt(Math.max(...zValues), 1)} Ω`,
+      level: Math.min(...zValues) < 48.5 || Math.max(...zValues) > 51.5 ? 'warn' : 'pass',
+    },
+    {
+      label: 'VP range',
+      value: `${fmt(Math.min(...vpValues) * 100, 1)}-${fmt(Math.max(...vpValues) * 100, 1)}%`,
+      level: 'info',
+    },
+    {
+      label: 'Dielectric OD',
+      value: `${fmt((DLow) / MM_PER_IN, 4)}-${fmt((DHigh) / MM_PER_IN, 4)} in`,
+      level: 'info',
+    },
+    {
+      label: 'Suckout band',
+      value: primary ? `${fmt(primary * 0.97, 2)}-${fmt(primary * 1.03, 2)} GHz` : '—',
+      level: primary && primary * 0.97 < computed.freqGHz ? 'warn' : 'pass',
+    },
+  ]
+  return {
+    rows,
+    assumptions: ['Conductor +/-0.0003 in', 'Dielectric OD +/-1.5%', 'Effective epsilon +/-2.5%', 'Pitch/suckout +/-3%'],
+  }
+}
+
+function buildMiVisualQa(computed, ptfeStack, shieldStack) {
+  const checks = []
+  checks.push(guardCheck(ptfeStack.length ? 'pass' : 'block', 'Taping pages', `${ptfeStack.length} rows`, 'PTFE rows map into the MI-ST962 3-Bay taping sheets.'))
+  checks.push(guardCheck(ptfeStack.length <= 6 ? 'pass' : 'warn', '3-Bay capacity', `${ptfeStack.length}/6`, 'Current template has two 3-Bay pages; extra passes stay in JSON/run sheet.'))
+  const missingPtfe = ptfeStack.filter((layer) => !(layer.partNumber || layer.part_number)).length
+  checks.push(guardCheck(missingPtfe ? 'block' : 'pass', 'PTFE part numbers', missingPtfe ? `${missingPtfe} missing` : 'complete', 'MI should print real Material Library part numbers.'))
+  const missingPitch = (computed.ptfeBuilds || []).filter((layer) => !Number.isFinite(Number(layer.pitch)) || !Number.isFinite(Number(layer.odAfterMm))).length
+  checks.push(guardCheck(missingPitch ? 'block' : 'pass', 'Pitch / OD cells', missingPitch ? `${missingPitch} missing` : 'complete', 'Each tape row needs pitch set-point and OD after tape.'))
+  const shieldTypes = new Set(shieldStack.map((layer) => layer.type))
+  checks.push(guardCheck(shieldStack.length ? 'pass' : 'warn', 'Shield run sheet', shieldStack.length ? Array.from(shieldTypes).join(' + ') : 'none', 'Spiral/foil/braid settings are carried in the run sheet view.'))
+  if (shieldTypes.has('spiral')) checks.push(guardCheck(computed.spiralGap >= 1 ? 'pass' : 'block', 'Spiral visual gap', `${fmt(computed.spiralGap, 1)}%`, '3D/MI should show no overlap for SPC spiral.'))
+  const blocks = checks.filter((check) => check.level === 'block')
+  const warnings = checks.filter((check) => check.level === 'warn')
+  return { status: blocks.length ? 'blocked' : warnings.length ? 'review' : 'pass', blocks, warnings, checks }
+}
+
+function buildSafetyAuditor(preview, machineGuard, tolerance, miQa) {
+  const checks = [
+    ...preview.checks.map((check) => ({ ...check, group: 'preview' })),
+    ...machineGuard.checks.map((check) => ({ ...check, group: 'machine' })),
+    ...tolerance.rows.map((row) => ({ label: row.label, value: row.value, level: row.level, note: 'Worst-case tolerance window.', group: 'tolerance' })),
+    ...miQa.checks.map((check) => ({ ...check, group: 'mi' })),
+  ]
+  const blocks = checks.filter((check) => check.level === 'block')
+  const warnings = checks.filter((check) => check.level === 'warn')
+  return {
+    status: blocks.length ? 'apply held' : warnings.length ? 'review before apply' : 'apply ready',
+    allowApply: blocks.length === 0,
+    blocks,
+    warnings,
+    checks,
+  }
+}
+
 function measuredSampleFromEntry(entry, fallbackComputed = null) {
   const measured = entry?.measured || {}
   const summary = entry?.summary || {}
@@ -2265,6 +2431,17 @@ export default function RFStackLab() {
   useEffect(() => {
     const onApplyPreset = (event) => {
       const detail = event.detail || {}
+      if (detail.section === 'stack-measured') {
+        const preset = detail.params || {}
+        const nextMeasured = preset.measured || preset
+        setMeasured((current) => ({
+          ...current,
+          ...Object.fromEntries(Object.entries(nextMeasured).filter(([, value]) => value !== '' && value != null)),
+          notes: nextMeasured.notes || current.notes || preset.raw_text || 'Imported from agent OCR/test parser.',
+        }))
+        if (preset.raw_text) setMeasuredPaste(preset.raw_text)
+        return
+      }
       if (detail.section !== 'stack' && detail.section !== 'dielectric') return
       const preset = detail.params || {}
       const layers = Array.isArray(preset.layers) ? preset.layers : []
@@ -2536,6 +2713,10 @@ export default function RFStackLab() {
 
   const correlation = useMemo(() => buildMeasuredCorrelation(measured, computed), [measured, computed])
   const preApplyPreview = useMemo(() => buildPreApplyPreview(computed, ptfeStack, shieldStack), [computed, ptfeStack, shieldStack])
+  const machineRuleGuard = useMemo(() => buildMachineRuleGuard(computed, ptfeStack, shieldStack), [computed, ptfeStack, shieldStack])
+  const toleranceSim = useMemo(() => buildToleranceSimulator(computed), [computed])
+  const miVisualQa = useMemo(() => buildMiVisualQa(computed, ptfeStack, shieldStack), [computed, ptfeStack, shieldStack])
+  const safetyAudit = useMemo(() => buildSafetyAuditor(preApplyPreview, machineRuleGuard, toleranceSim, miVisualQa), [preApplyPreview, machineRuleGuard, toleranceSim, miVisualQa])
   const feedbackLearner = useMemo(() => buildFeedbackLearner(goldenHistory, measured, computed), [goldenHistory, measured, computed])
   const suckoutDoctor = useMemo(() => buildSuckoutDoctor(computed, measured), [computed, measured])
   const selectedGolden = useMemo(() => (
@@ -2798,6 +2979,14 @@ export default function RFStackLab() {
         runSheetCopied={runSheetCopied}
         copyRunSheet={copyRunSheet}
         computed={computed}
+      />
+
+      <AgentGuardrailPack
+        audit={safetyAudit}
+        machineGuard={machineRuleGuard}
+        tolerance={toleranceSim}
+        miQa={miVisualQa}
+        measured={measured}
       />
 
       <div style={S.notes}>
@@ -3163,6 +3352,131 @@ function BiasChip({ label, value, suffix, digits }) {
   )
 }
 
+function AgentGuardrailPack({ audit, machineGuard, tolerance, miQa, measured }) {
+  return (
+    <section style={S.guardrailShell}>
+      <div style={S.closedLoopHeader}>
+        <div>
+          <div style={S.cardEyebrow}>Agent caution pack</div>
+          <h2 style={S.cardTitle}>Safety audit, machine rules, tolerance, MI QA, and actual-test import.</h2>
+        </div>
+        <div style={{ ...S.liveBadge, color: audit.allowApply ? C.teal : C.amber, borderColor: audit.allowApply ? `${C.teal}66` : `${C.amber}66` }}>
+          {audit.status}
+        </div>
+      </div>
+      <div style={S.guardrailGrid}>
+        <SafetyAuditCard audit={audit} />
+        <MachineRuleGuardCard guard={machineGuard} />
+        <ToleranceCard tolerance={tolerance} />
+        <MiVisualQaCard qa={miQa} />
+        <ActualTestOcrCard measured={measured} />
+      </div>
+    </section>
+  )
+}
+
+function SafetyAuditCard({ audit }) {
+  const topItems = [...audit.blocks, ...audit.warnings].slice(0, 5)
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><ShieldCheck size={14} /> Agent Safety Auditor</div>
+      <div style={S.auditHero}>
+        <strong>{audit.allowApply ? 'No blockers' : `${audit.blocks.length} blocker${audit.blocks.length === 1 ? '' : 's'}`}</strong>
+        <span>{audit.warnings.length} warning{audit.warnings.length === 1 ? '' : 's'}</span>
+      </div>
+      <div style={S.checkList}>
+        {topItems.length ? topItems.map((item, index) => <GuardrailRow key={`${item.label}-${index}`} item={item} />) : (
+          <div style={S.learningLine}>All current checks are passing. Agent Apply can proceed after the engineer reviews the recipe.</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MachineRuleGuardCard({ guard }) {
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><ClipboardList size={14} /> Machine Rule Guard</div>
+      <div style={S.guardSummary}>
+        <span>Blocks {guard.blocks.length}</span>
+        <span>Review {guard.warnings.length}</span>
+        <span>Total {guard.checks.length}</span>
+      </div>
+      <div style={S.checkList}>
+        {guard.checks.slice(0, 6).map((item, index) => <GuardrailRow key={`${item.label}-${index}`} item={item} />)}
+      </div>
+    </div>
+  )
+}
+
+function ToleranceCard({ tolerance }) {
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><Target size={14} /> Tolerance / Worst Case</div>
+      <div style={S.diffTable}>
+        {tolerance.rows.map((row) => (
+          <div key={row.label} style={S.diffRow}>
+            <span>{row.label}</span>
+            <strong>{row.value}</strong>
+            <small>{row.level === 'warn' ? 'review' : 'ok'}</small>
+          </div>
+        ))}
+      </div>
+      <div style={S.assumptionLine}>{tolerance.assumptions.join(' · ')}</div>
+    </div>
+  )
+}
+
+function MiVisualQaCard({ qa }) {
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><GitCompare size={14} /> MI Visual QA Before Download</div>
+      <div style={S.guardSummary}>
+        <span>{qa.status}</span>
+        <span>{qa.blocks.length} blocks</span>
+        <span>{qa.warnings.length} review</span>
+      </div>
+      <div style={S.checkList}>
+        {qa.checks.map((item, index) => <GuardrailRow key={`${item.label}-${index}`} item={item} />)}
+      </div>
+    </div>
+  )
+}
+
+function ActualTestOcrCard({ measured }) {
+  const hasMeasured = Boolean(measured.measuredZ0 || measured.measuredVp || measured.measuredSuckoutGHz || measured.measuredFinalOdIn)
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><Brain size={14} /> Actual Test OCR Import</div>
+      <div style={S.ocrPanel}>
+        <strong>{hasMeasured ? measured.cableId || 'Measured values loaded' : 'Ready for test screenshot'}</strong>
+        <span>
+          Attach a VNA/MI/test image in Ask. The agent extracts Z0, VP, OD, suckout, VSWR, cap pF/ft, calls the parser tool, then you click Apply to fill Measured Test Correlator.
+        </span>
+      </div>
+      <div style={S.historyStats}>
+        <span>Z0 {measured.measuredZ0 || '—'}</span>
+        <span>VP {measured.measuredVp || '—'}</span>
+        <span>Notch {measured.measuredSuckoutGHz || '—'}</span>
+      </div>
+    </div>
+  )
+}
+
+function GuardrailRow({ item }) {
+  const color = item.level === 'block' ? C.red : item.level === 'warn' ? C.amber : item.level === 'pass' ? C.teal : C.sky
+  return (
+    <div style={{ ...S.checkRow, borderColor: `${color}44` }}>
+      <span style={{ ...S.checkLight, background: color }} />
+      <div>
+        <strong>{item.label}</strong>
+        <small>{item.note}</small>
+      </div>
+      <b style={{ color }}>{item.value}</b>
+    </div>
+  )
+}
+
 function ChartCard({ title, sub, data, xKey = 'f', yKey, color, xFmt, yFmt, yDomain, domainX, domainY, referenceY }) {
   return (
     <div style={S.chartCard}>
@@ -3294,8 +3608,10 @@ const S = {
   historyDiagnosis: { color: C.dim, borderLeft: `2px solid ${C.amber}`, paddingLeft: 8, fontSize: 11 },
   loadBtn: { background: '#070b0c', border: `1px solid ${C.teal}66`, color: C.teal, minHeight: 30, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer' },
   closedLoopShell: { border: `1px solid ${C.border}`, background: 'linear-gradient(135deg, rgba(16,22,25,0.98), rgba(9,13,14,0.96))', padding: 14, borderRadius: 3, display: 'grid', gap: 12 },
+  guardrailShell: { border: `1px solid ${C.border}`, background: 'linear-gradient(135deg, rgba(11,14,16,0.99), rgba(24,13,7,0.88))', padding: 14, borderRadius: 3, display: 'grid', gap: 12 },
   closedLoopHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
   closedLoopGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 10 },
+  guardrailGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 10 },
   intelCard: { border: `1px solid ${C.borderHi}`, background: '#080d0f', padding: 12, display: 'grid', gap: 10, minWidth: 0 },
   runSheetCard: { gridColumn: '1 / -1' },
   intelTitle: { display: 'flex', alignItems: 'center', gap: 7, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.7 },
@@ -3307,6 +3623,10 @@ const S = {
   biasChip: { border: `1px solid rgba(167,176,182,0.13)`, background: '#070b0c', padding: 8, display: 'grid', gap: 4, color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, minWidth: 0 },
   intelMiniText: { color: C.muted, fontSize: 11 },
   learningLine: { borderLeft: '2px solid', padding: '7px 8px', background: '#070b0c', color: C.dim, fontSize: 11, lineHeight: 1.45 },
+  auditHero: { display: 'flex', justifyContent: 'space-between', gap: 8, border: `1px solid rgba(251,191,36,0.18)`, background: 'rgba(251,191,36,0.045)', padding: 9, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+  guardSummary: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+  assumptionLine: { color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, lineHeight: 1.45 },
+  ocrPanel: { border: `1px solid rgba(94,234,212,0.18)`, background: 'rgba(94,234,212,0.045)', padding: 9, display: 'grid', gap: 5, color: C.dim, fontSize: 11, lineHeight: 1.45 },
   doctorRoot: { border: `1px solid rgba(94,234,212,0.18)`, background: 'rgba(94,234,212,0.045)', padding: 9, display: 'grid', gap: 4, color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
   rankList: { display: 'grid', gap: 5 },
   rankRow: { display: 'flex', justifyContent: 'space-between', gap: 8, border: `1px solid rgba(167,176,182,0.12)`, padding: '6px 8px', background: '#070b0c', color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },

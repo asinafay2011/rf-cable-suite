@@ -2020,6 +2020,52 @@ function buildApplyPreview(result) {
   return rows.length ? { rows, warnings } : null
 }
 
+function ToolGuardrailPanel({ safetyAudit, machineGuard, tolerance, miQa, measuredTest, accent }) {
+  const blockers = (safetyAudit?.blocks?.length || 0) + (machineGuard?.blocks?.length || 0) + (miQa?.blocks?.length || 0)
+  const warnings = (safetyAudit?.warnings?.length || 0) + (machineGuard?.warnings?.length || 0) + (miQa?.warnings?.length || 0)
+  const tone = blockers ? '#f87171' : warnings ? '#fbbf24' : '#5eead4'
+  return (
+    <div className="px-2.5 py-1.5 border-t text-[11px]" style={{ borderColor: '#1a2226', background: '#080d0f' }}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono uppercase tracking-wider" style={{ color: tone }}>
+          {blockers ? 'Safety held' : warnings ? 'Safety review' : 'Safety pass'}
+        </span>
+        <span className="text-[#6b7479]">{blockers} blockers · {warnings} warnings</span>
+      </div>
+      {machineGuard?.checks?.length > 0 && (
+        <div className="mt-1 grid gap-1">
+          {machineGuard.checks.slice(0, 3).map((check) => (
+            <div key={`${check.name}-${check.actual}`} className="flex items-center justify-between gap-2 font-mono text-[10px] border px-2 py-1" style={{ borderColor: '#1f2a2f', background: '#070b0c' }}>
+              <span style={{ color: check.level === 'block' ? '#f87171' : check.level === 'warn' ? '#fbbf24' : '#5eead4' }}>{check.name}</span>
+              <span className="text-[#a7b0b6]">{check.actual ?? '—'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {tolerance?.rows?.length > 0 && (
+        <div className="mt-1 grid grid-cols-2 gap-1">
+          {tolerance.rows.slice(0, 4).map((row) => (
+            <div key={row.label} className="border px-2 py-1 font-mono text-[10px]" style={{ borderColor: '#1f2a2f', background: '#070b0c' }}>
+              <div className="text-[#6b7479] uppercase tracking-wider">{row.label}</div>
+              <div className="text-[#f0ebe2]">{row.min} / {row.nom} / {row.max} {row.unit}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {miQa?.checks?.length > 0 && (
+        <div className="mt-1 text-[10px] font-mono" style={{ color: accent }}>
+          MI QA: {miQa.status} · {miQa.checks.slice(0, 2).map((check) => `${check.name} ${check.actual}`).join(' · ')}
+        </div>
+      )}
+      {measuredTest && (
+        <div className="mt-1 text-[10px] font-mono text-[#a7b0b6]">
+          OCR/test import: {measuredTest.fields_detected} fields · Z0 {measuredTest.z0_ohm || '—'} · VP {measuredTest.vp_pct || '—'} · notch {measuredTest.suckout_ghz || '—'}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSection }) {
   const [open, setOpen] = useState(false)
   const [applied, setApplied] = useState(false)
@@ -2036,9 +2082,15 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
   const downloadSpec = parsedResult?._download
   const preflight = parsedResult?._preflight
   const applyPreview = buildApplyPreview(parsedResult)
+  const safetyAudit = parsedResult?._safety_audit
+  const machineGuard = parsedResult?._machine_guard
+  const tolerance = parsedResult?._tolerance
+  const miQa = parsedResult?._mi_qa
+  const measuredTest = parsedResult?._measured_test
   const applyBlocked = Boolean(parsedResult?._apply_blocked || preflight?.allow_apply === false)
   const canApplyPreset = presetSection && presetData && !applyBlocked && !partial && !parsedResult?.error
   const canDownload = downloadSpec && !partial && !parsedResult?.error
+  const applyTargetLabel = presetSection === 'stack-measured' ? 'measured test' : presetSection
   const applyPreset = () => {
     if (onJumpToSection) onJumpToSection(presetSection)
     window.dispatchEvent(new CustomEvent('cable-suite:apply-preset', {
@@ -2135,6 +2187,17 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
           </div>
         )}
 
+        {!partial && !parsedResult?.error && (safetyAudit || machineGuard || tolerance || miQa || measuredTest) && (
+          <ToolGuardrailPanel
+            safetyAudit={safetyAudit}
+            machineGuard={machineGuard}
+            tolerance={tolerance}
+            miQa={miQa}
+            measuredTest={measuredTest}
+            accent={accent}
+          />
+        )}
+
         {/* Inline Apply button when the tool result carries a preset */}
         {canDownload && (
           <div className="flex items-center justify-between px-2.5 py-1.5 border-t" style={{ borderColor: '#1a2226', background: '#0a0d0f' }}>
@@ -2174,7 +2237,7 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
                 background: 'transparent',
               }}
             >
-              {applied ? '✓ applied' : `→ Apply${presetLabel ? ` "${presetLabel}"` : ''} to ${presetSection}`}
+              {applied ? '✓ applied' : `→ Apply${presetLabel ? ` "${presetLabel}"` : ''} to ${applyTargetLabel}`}
             </button>
           </div>
         )}

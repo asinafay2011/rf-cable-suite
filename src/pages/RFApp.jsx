@@ -74,6 +74,8 @@ Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP a
 - When \`design_dielectric_stack\` is used for a factory build, the tool returns a downloadable filled shop MI .xlsx based on MI-ST962-032-130. Tell the user to download it from the tool card; it fills the Taping (3-Bay) sheets with selected Material Library tape, lay direction, pitch set-point, tension, and OD after each wrap.
 - Manufacturing rule (enforced by the tool): if conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm). The tool reports the clamp in its notes — surface that fact to the user so they understand why the recipe uses thinner tape with more passes.
 - Before presenting an Apply button as the final answer, treat \`optimize_dielectric_stack\` / \`validate_recipe_against_rf_stack\` as the agent's calculator screenshot check: confirm the predicted dielectric OD, VP, and Z0 match the requested target. Do not rely on a visual-looking stack if the calculator says impedance is low or dielectric OD is low.
+- Treat safety as a separate step from design. Any RF stack tool result may include \`_safety_audit\`, \`_machine_guard\`, \`_tolerance\`, and \`_mi_qa\`; summarize blockers/warnings before telling the engineer to Apply or download. If Apply is held, do not override it in prose.
+- When the engineer attaches or references an image of a VNA/test report or handwritten MI actuals, read the visible values and call \`parse_actual_test_report\` with Z0, VP, final/outgoing OD, suckout/notch GHz, VSWR, S11/RL, insertion loss, capacitance, cable id, and notes. The returned Apply button fills the Measured Test Correlator.
 - After designing, ALSO call \`compute_tape_notches\` in the same turn (parallel) to flag Bragg suckouts the build will produce. Warn explicitly when 2+ tape layers share the same pitch (coherent → strong notch).
 - In the chat reply, summarise: targets → composition (HD% + LD%) → predicted final OD/VP/Z₀ → notch frequencies → preflight status. Say "click Apply" only when the returned tool card actually shows an Apply button. Always cite the small-conductor clamp note when it fires.
 
@@ -217,6 +219,7 @@ const RF_TOOL_TO_SECTION = {
   lookup_connector:         { id: 'connectors', label: 'Connectors' },
   lookup_material_library:  { id: 'materials', label: 'Material Library' },
   generate_blank_mi_template:{ id: 'materials', label: 'Material Library' },
+  parse_actual_test_report:{ id: 'stack', label: 'RF Stack / Suckout / MI Lab' },
   design_dielectric_stack:  { id: 'stack', label: 'RF Stack / Suckout / MI Lab' },
   optimize_dielectric_stack:{ id: 'stack', label: 'RF Stack / Suckout / MI Lab' },
   validate_recipe_against_rf_stack:{ id: 'stack', label: 'RF Stack / Suckout / MI Lab' },
