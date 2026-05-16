@@ -1997,6 +1997,29 @@ function ViewItem({ item, accent, jumpTarget, onJumpToSection }) {
   return null
 }
 
+function formatToolNumber(value, digits = 2) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n.toFixed(digits) : null
+}
+
+function buildApplyPreview(result) {
+  if (!result || result.error) return null
+  if (result._apply_preview) return result._apply_preview
+  const rows = []
+  const predicted = result.predicted || {}
+  const targets = result.targets || {}
+  if (predicted.z0_ohm != null) rows.push({ label: 'Z0', value: `${formatToolNumber(predicted.z0_ohm, 1)} Ω`, target: targets.target_z0_ohm != null ? `${targets.target_z0_ohm} Ω` : null })
+  if (predicted.vp != null) rows.push({ label: 'VP', value: `${formatToolNumber(Number(predicted.vp) * 100, 1)}%`, target: targets.target_vp != null ? `${formatToolNumber(Number(targets.target_vp) * 100, 1)}%` : null })
+  if (predicted.final_od_mm != null) rows.push({ label: 'Dielectric OD', value: `${formatToolNumber(predicted.final_od_mm, 3)} mm`, target: targets.dielectric_od_mm || targets.target_dielectric_od_mm ? `${formatToolNumber(targets.dielectric_od_mm || targets.target_dielectric_od_mm, 3)} mm` : null })
+  if (predicted.bragg_notch_1_ghz != null) rows.push({ label: 'First notch', value: `${formatToolNumber(predicted.bragg_notch_1_ghz, 2)} GHz` })
+  if (result.final_shield_od_in != null) rows.push({ label: 'Shield OD', value: `${formatToolNumber(result.final_shield_od_in, 4)} in` })
+  if (result.shielding_estimate?.se_db != null) rows.push({ label: 'Shielding', value: `${formatToolNumber(result.shielding_estimate.se_db, 1)} dB` })
+  const warnings = Array.isArray(result._preflight?.checks)
+    ? result._preflight.checks.filter((check) => !check.pass).map((check) => `${check.name}: ${check.actual} vs ${check.target}`)
+    : []
+  return rows.length ? { rows, warnings } : null
+}
+
 function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSection }) {
   const [open, setOpen] = useState(false)
   const [applied, setApplied] = useState(false)
@@ -2012,6 +2035,7 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
   const presetLabel = parsedResult?.label
   const downloadSpec = parsedResult?._download
   const preflight = parsedResult?._preflight
+  const applyPreview = buildApplyPreview(parsedResult)
   const applyBlocked = Boolean(parsedResult?._apply_blocked || preflight?.allow_apply === false)
   const canApplyPreset = presetSection && presetData && !applyBlocked && !partial && !parsedResult?.error
   const canDownload = downloadSpec && !partial && !parsedResult?.error
@@ -2062,6 +2086,29 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
         {/* Inline what-if panel for results that include _whatif_panel */}
         {!partial && !parsedResult?.error && parsedResult?._whatif_panel && (
           <WhatIfPanel spec={parsedResult._whatif_panel} accent={accent} />
+        )}
+
+        {!partial && !parsedResult?.error && applyPreview && (
+          <div className="px-2.5 py-1.5 border-t text-[11px]" style={{ borderColor: '#1a2226', background: '#090f11' }}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono uppercase tracking-wider" style={{ color: accent }}>Apply preview</span>
+              <span className="text-[#6b7479]">calculator check before the button</span>
+            </div>
+            <div className="mt-1 grid grid-cols-2 gap-1">
+              {applyPreview.rows.map((row) => (
+                <div key={`${row.label}-${row.value}`} className="border px-2 py-1 font-mono text-[10px]" style={{ borderColor: '#1f2a2f', background: '#070b0c' }}>
+                  <div className="text-[#6b7479] uppercase tracking-wider">{row.label}</div>
+                  <div className="text-[#f0ebe2]">{row.value}</div>
+                  {row.target && <div className="text-[#6b7479]">target {row.target}</div>}
+                </div>
+              ))}
+            </div>
+            {Array.isArray(applyPreview.warnings) && applyPreview.warnings.length > 0 && (
+              <div className="mt-1 text-[#fbbf24] font-mono text-[10px]">
+                {applyPreview.warnings.slice(0, 2).join(' · ')}
+              </div>
+            )}
+          </div>
         )}
 
         {!partial && !parsedResult?.error && preflight && (

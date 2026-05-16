@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, Layers, Play, Plus, RotateCcw, ShieldCheck, Trash2, Zap } from 'lucide-react'
+import { Activity, Brain, ClipboardList, GitCompare, Layers, Play, Plus, RotateCcw, ShieldCheck, Target, Trash2, Zap } from 'lucide-react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
   FOIL_TAPE_MATERIALS,
@@ -378,6 +378,310 @@ function writeGoldenHistory(items) {
   try {
     localStorage.setItem(GOLDEN_HISTORY_KEY, JSON.stringify(items.slice(0, 24)))
   } catch {}
+}
+
+function primarySuckoutGHz(computed) {
+  const values = [
+    computed?.tapeNotch,
+    computed?.spiralCoverage ? computed?.spiralNotch : Infinity,
+    computed?.helicalCoverage ? computed?.helicalNotch : Infinity,
+  ].filter((value) => Number.isFinite(value) && value > 0)
+  return values.length ? Math.min(...values) : null
+}
+
+function formatDelta(value, digits = 1, suffix = '') {
+  if (!Number.isFinite(value)) return '—'
+  const sign = value > 0 ? '+' : ''
+  return `${sign}${value.toFixed(digits)}${suffix}`
+}
+
+function buildPreApplyPreview(computed, ptfeStack, shieldStack) {
+  const primary = primarySuckoutGHz(computed)
+  const duplicatedPitchCount = computed.ptfeNotches.reduce((count, notch, index) => {
+    return count + computed.ptfeNotches.slice(index + 1).filter((other) => Math.abs(other.freq - notch.freq) <= notch.freq * 0.05).length
+  }, 0)
+  const checks = [
+    {
+      label: 'PTFE recipe',
+      value: `${ptfeStack.length} tape ${ptfeStack.length === 1 ? 'layer' : 'layers'}`,
+      level: ptfeStack.length ? 'pass' : 'warn',
+      note: ptfeStack.length ? 'stack is defined' : 'add the dielectric build before MI/apply',
+    },
+    {
+      label: 'Z0 target',
+      value: `${fmt(computed.z0, 1)} Ω`,
+      level: Math.abs(computed.z0 - 50) <= 1.5 ? 'pass' : Math.abs(computed.z0 - 50) <= 3 ? 'info' : 'warn',
+      note: `${formatDelta(computed.z0 - 50, 1, ' Ω')} from 50 Ω`,
+    },
+    {
+      label: 'Velocity factor',
+      value: `${fmt(computed.vp * 100, 1)}%`,
+      level: computed.vp > 0.72 && computed.vp < 0.86 ? 'pass' : 'info',
+      note: `εr eff ${fmt(computed.eps, 3)}`,
+    },
+    {
+      label: 'Primary suckout',
+      value: primary ? `${fmt(primary, 2)} GHz` : '—',
+      level: primary && primary < computed.freqGHz * 1.05 ? 'warn' : 'pass',
+      note: primary && primary < computed.freqGHz * 1.05 ? 'inside or near test band' : 'outside active band',
+    },
+    {
+      label: 'Shield stack',
+      value: `${fmt(computed.shieldCoverage, 1)}%`,
+      level: shieldStack.length && computed.shieldCoverage >= 94 ? 'pass' : shieldStack.length ? 'info' : 'warn',
+      note: shieldStack.length ? `${shieldStack.length} shield/mechanical layers` : 'no shield layers yet',
+    },
+    {
+      label: 'Pitch separation',
+      value: duplicatedPitchCount ? `${duplicatedPitchCount} overlap` : 'clear',
+      level: duplicatedPitchCount ? 'warn' : 'pass',
+      note: duplicatedPitchCount ? 'two tape pitches are too close' : 'PTFE pitch notches are staggered',
+    },
+  ]
+  const warningCount = checks.filter((check) => check.level === 'warn').length
+  return {
+    status: warningCount ? 'review' : 'ready',
+    warningCount,
+    primary,
+    checks,
+  }
+}
+
+function measuredSampleFromEntry(entry, fallbackComputed = null) {
+  const measured = entry?.measured || {}
+  const summary = entry?.summary || {}
+  const measuredZ0 = numeric(measured.measuredZ0)
+  const measuredVp = numeric(measured.measuredVp)
+  const measuredOdIn = numeric(measured.measuredFinalOdIn)
+  const predictedZ0 = Number(summary.z0 ?? fallbackComputed?.z0)
+  const predictedVp = Number(summary.vp != null ? summary.vp * 100 : fallbackComputed?.vp ? fallbackComputed.vp * 100 : NaN)
+  const predictedOdIn = Number(summary.jacketOD || summary.dielectricOD
+    ? (summary.jacketOD || summary.dielectricOD) / MM_PER_IN
+    : fallbackComputed
+      ? ((fallbackComputed.jacketInstalled ? fallbackComputed.jacketOD : fallbackComputed.dielectricOD) / MM_PER_IN)
+      : NaN)
+  return {
+    label: entry?.label || measured.cableId || 'Current measured',
+    z0Delta: measuredZ0 != null && Number.isFinite(predictedZ0) ? measuredZ0 - predictedZ0 : null,
+    vpDelta: measuredVp != null && Number.isFinite(predictedVp) ? measuredVp - predictedVp : null,
+    odDeltaIn: measuredOdIn != null && Number.isFinite(predictedOdIn) ? measuredOdIn - predictedOdIn : null,
+  }
+}
+
+function averageDelta(samples, key) {
+  const values = samples.map((sample) => sample[key]).filter((value) => Number.isFinite(value))
+  if (!values.length) return null
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function buildFeedbackLearner(history, measured, computed) {
+  const samples = history.map((entry) => measuredSampleFromEntry(entry)).filter((sample) => (
+    Number.isFinite(sample.z0Delta) || Number.isFinite(sample.vpDelta) || Number.isFinite(sample.odDeltaIn)
+  ))
+  const currentSample = measuredSampleFromEntry({ label: measured.cableId || 'Unsaved test', measured, summary: {} }, computed)
+  if (Number.isFinite(currentSample.z0Delta) || Number.isFinite(currentSample.vpDelta) || Number.isFinite(currentSample.odDeltaIn)) {
+    samples.unshift(currentSample)
+  }
+  const z0Bias = averageDelta(samples, 'z0Delta')
+  const vpBias = averageDelta(samples, 'vpDelta')
+  const odBiasIn = averageDelta(samples, 'odDeltaIn')
+  const recommendations = []
+  if (samples.length < 2) {
+    recommendations.push({ level: 'info', text: 'Save a few tested reels as golden recipes so the learner can separate real process bias from one-off test noise.' })
+  }
+  if (Number.isFinite(z0Bias) && Math.abs(z0Bias) > 1) {
+    recommendations.push({
+      level: 'warn',
+      text: z0Bias < 0
+        ? `Measured Z0 averages ${fmt(Math.abs(z0Bias), 1)} Ω low. Bias next build toward slightly larger dielectric OD, less compression, or lower effective εr.`
+        : `Measured Z0 averages ${fmt(z0Bias, 1)} Ω high. Bias next build toward slightly smaller dielectric OD or denser/tighter PTFE.`,
+    })
+  }
+  if (Number.isFinite(vpBias) && Math.abs(vpBias) > 0.8) {
+    recommendations.push({
+      level: 'warn',
+      text: vpBias < 0
+        ? `Measured VP averages ${fmt(Math.abs(vpBias), 1)} points low. Treat the tape mix as denser than catalog or loosen shrink-back compensation.`
+        : `Measured VP averages ${fmt(vpBias, 1)} points high. Current stack behaves more air-like than the model; reduce LD ratio assumptions or verify OD.`,
+    })
+  }
+  if (Number.isFinite(odBiasIn) && Math.abs(odBiasIn) > 0.0015) {
+    recommendations.push({
+      level: odBiasIn < 0 ? 'warn' : 'info',
+      text: odBiasIn < 0
+        ? `Measured OD averages ${fmt(Math.abs(odBiasIn), 4)} in below model. Add shrink-back correction before issuing the next MI.`
+        : `Measured OD averages ${fmt(odBiasIn, 4)} in above model. Check overlap/tension and jacket drawdown before changing impedance math.`,
+    })
+  }
+  if (!recommendations.length) {
+    recommendations.push({ level: 'pass', text: 'Saved test data tracks the calculator closely; keep this recipe as the current baseline.' })
+  }
+  return {
+    samples,
+    z0Bias,
+    vpBias,
+    odBiasIn,
+    recommendations,
+  }
+}
+
+function buildSuckoutDoctor(computed, measured) {
+  const measuredSuckout = numeric(measured.measuredSuckoutGHz)
+  const primary = primarySuckoutGHz(computed)
+  const target = measuredSuckout || primary || computed.freqGHz
+  const candidates = [
+    ...computed.ptfeNotches.map((item) => ({ ...item, source: 'PTFE tape pitch', kind: 'ptfe' })),
+    computed.spiralCoverage ? { label: 'SPC spiral', freq: computed.spiralNotch, pitch: computed.pitchSpiral, source: 'spiral repeat', kind: 'spiral' } : null,
+    computed.helicalCoverage ? { label: 'SPC helical', freq: computed.helicalNotch, pitch: computed.pitchHelical, source: 'helical repeat', kind: 'helical' } : null,
+    computed.foilInstalled ? { label: 'Foil seam', freq: computed.freqGHz * 0.88, pitch: computed.helicalPitch, source: 'foil seam / overlap', kind: 'foil' } : null,
+  ].filter((item) => item && Number.isFinite(item.freq) && item.freq > 0)
+  const ranked = candidates
+    .map((item) => ({ ...item, error: Math.abs(item.freq - target), errorPct: Math.abs(item.freq - target) / Math.max(0.1, target) * 100 }))
+    .sort((a, b) => a.error - b.error)
+  const root = ranked[0] || null
+  const actions = []
+  if (root?.kind === 'ptfe') {
+    actions.push('Stagger this PTFE pitch from the neighboring tape pass by 8-12%.')
+    actions.push('Keep 2/3 wrap for shrink-back control; use 1/2 only when OD needs to land lower.')
+    actions.push('Alternate Z/S lay direction and avoid repeating the same pitch on adjacent passes.')
+  } else if (root?.kind === 'spiral') {
+    actions.push('Move spiral pitch or 8-bobbin gap enough that the repeat notch leaves the test band.')
+    actions.push('Recheck the flatwire width rule: dielectric OD × π / bobbins minus requested gap.')
+    actions.push('If gap is visually gone, verify width/gap in the 3D stack before saving the MI.')
+  } else if (root?.kind === 'helical') {
+    actions.push('Change helical pitch separately from spiral pitch so both shield repeats do not line up.')
+    actions.push('Use the measured OD after spiral as the base OD before setting the helical/foil layer.')
+  } else if (root?.kind === 'foil') {
+    actions.push('Offset foil seam, confirm 1/2 vs 2/3 wrap from the MI, and keep seam pressure consistent.')
+    actions.push('If return loss is weak but OD/Z0 are good, inspect connector launch and foil-to-braid transition.')
+  } else {
+    actions.push('No pitch match is strong yet; check connector launch, fixture resonance, and shield transition first.')
+  }
+  if (numeric(measured.measuredVswr) > 1.25 || numeric(measured.measuredRlDb) < 18) {
+    actions.push('VSWR/RL points to a localized discontinuity; compare TDR bump with connector and shield transition locations.')
+  }
+  return { target, root, ranked: ranked.slice(0, 5), actions }
+}
+
+function buildGoldenDiff(entry, computed, ptfeStack, shieldStack) {
+  if (!entry) return []
+  const summary = entry.summary || {}
+  const goldenPtfe = Array.isArray(entry.ptfeStack) ? entry.ptfeStack : []
+  const goldenShield = Array.isArray(entry.shieldStack) ? entry.shieldStack : []
+  const currentPrimary = primarySuckoutGHz(computed)
+  const rows = [
+    {
+      label: 'Z0',
+      current: `${fmt(computed.z0, 1)} Ω`,
+      golden: summary.z0 != null ? `${fmt(summary.z0, 1)} Ω` : '—',
+      delta: summary.z0 != null ? formatDelta(computed.z0 - summary.z0, 1, ' Ω') : '—',
+    },
+    {
+      label: 'VP',
+      current: `${fmt(computed.vp * 100, 1)}%`,
+      golden: summary.vp != null ? `${fmt(summary.vp * 100, 1)}%` : '—',
+      delta: summary.vp != null ? formatDelta((computed.vp - summary.vp) * 100, 1, ' pt') : '—',
+    },
+    {
+      label: 'Dielectric OD',
+      current: `${fmt(computed.dielectricOD / MM_PER_IN, 4)} in`,
+      golden: summary.dielectricOD != null ? `${fmt(summary.dielectricOD / MM_PER_IN, 4)} in` : '—',
+      delta: summary.dielectricOD != null ? formatDelta((computed.dielectricOD - summary.dielectricOD) / MM_PER_IN, 4, ' in') : '—',
+    },
+    {
+      label: 'Primary suckout',
+      current: currentPrimary ? `${fmt(currentPrimary, 2)} GHz` : '—',
+      golden: summary.primarySuckout ? `${fmt(summary.primarySuckout, 2)} GHz` : '—',
+      delta: summary.primarySuckout && currentPrimary ? formatDelta(currentPrimary - summary.primarySuckout, 2, ' GHz') : '—',
+    },
+    {
+      label: 'PTFE passes',
+      current: String(ptfeStack.reduce((sum, layer) => sum + Math.max(1, Number(layer.passes) || 1), 0)),
+      golden: String(goldenPtfe.reduce((sum, layer) => sum + Math.max(1, Number(layer.passes) || 1), 0) || '—'),
+      delta: formatDelta(ptfeStack.length - goldenPtfe.length, 0, ' layers'),
+    },
+    {
+      label: 'Shield layers',
+      current: String(shieldStack.length),
+      golden: String(goldenShield.length || '—'),
+      delta: formatDelta(shieldStack.length - goldenShield.length, 0, ' layers'),
+    },
+  ]
+  return rows
+}
+
+function buildFactoryRunSheetRows(ptfeStack, shieldStack, computed) {
+  const rows = []
+  const ptfeBuilds = Array.isArray(computed.ptfeBuilds) ? computed.ptfeBuilds : []
+  ptfeBuilds.forEach((layer, index) => {
+    rows.push({
+      step: `Tape #${index + 1}`,
+      machine: 'WTM 3-Bay',
+      material: layer.partNumber || layer.materialId || 'PTFE tape',
+      lay: `${layer.direction || (index % 2 ? 'S' : 'Z')}-DIRECTION`,
+      pitch: `${fmt(layer.pitch / MM_PER_IN, 4)} in`,
+      wrap: `${ptfeOverlapKey(layer.overlap).toUpperCase()} WRAP`,
+      tension: `${fmt(Number(layer.tensionN ?? layer.tension ?? 4), 1)} N`,
+      targetOd: `${fmt(layer.odAfterMm / MM_PER_IN, 4)} in`,
+      note: `Roller ${index}/${Math.max(6, ptfeBuilds.length + 2)}`,
+    })
+  })
+  let odMm = computed.dielectricOD
+  shieldStack.forEach((layer, index) => {
+    const type = String(layer.type || '').toLowerCase()
+    const explicitOd = Number(layer.ODAfterMm ?? layer.OD_after_mm ?? layer.od_after_mm)
+    if (Number.isFinite(explicitOd) && explicitOd > odMm) {
+      odMm = explicitOd
+    } else if (type === 'spiral') {
+      odMm += 0.18
+    } else if (type === 'foil') {
+      odMm += 0.18
+    } else if (type === 'flatwire') {
+      odMm += 0.14
+    } else if (type === 'braid') {
+      odMm += 0.34
+    } else if (type === 'jacket' && Number(layer.od) > odMm) {
+      odMm = Number(layer.od)
+    }
+    rows.push({
+      step: type === 'spiral' ? 'Spiral shield' : type === 'flatwire' ? 'Flatwire helical' : type === 'foil' ? 'Foil shield' : type === 'braid' ? 'Braid shield' : 'Jacket',
+      machine: type === 'braid' ? 'Niehoff Braider' : type === 'spiral' || type === 'foil' || type === 'flatwire' ? 'WTM 2-Bay' : 'Jacket line',
+      material: layer.partNumber || layer.part_number || layer.label || type,
+      lay: layer.direction ? `${layer.direction}-DIRECTION` : type === 'foil' ? 'FOIL IN' : '-',
+      pitch: layer.pitch ? `${fmt(Number(layer.pitch) / MM_PER_IN, 4)} in` : type === 'braid' ? `${fmt(Number(layer.picks), 1)} picks/in` : '-',
+      wrap: type === 'spiral' ? `${fmt(Number(layer.gap), 1)}% gap` : type === 'foil' ? `${fmt(Number(layer.overlap), 1)}% overlap` : type === 'braid' ? `${layer.carriers || 16}C x ${layer.ends || 4}E` : '-',
+      tension: layer.tension ? `${fmt(Number(layer.tension), 1)} N` : type === 'braid' ? `${fmt(Number(layer.coverage), 1)}% K` : '-',
+      targetOd: `${fmt(odMm / MM_PER_IN, 4)} in`,
+      note: type === 'braid' ? `AWG ${layer.gauge || '-'}` : '',
+    })
+  })
+  rows.push({
+    step: 'Final check',
+    machine: 'VNA / Laser',
+    material: 'Test',
+    lay: '-',
+    pitch: '-',
+    wrap: '-',
+    tension: '-',
+    targetOd: `${fmt((computed.jacketInstalled ? computed.jacketOD : odMm) / MM_PER_IN, 4)} in`,
+    note: `Z0 ${fmt(computed.z0, 1)} Ω · VP ${fmt(computed.vp * 100, 1)}%`,
+  })
+  return rows
+}
+
+function formatRunSheetText(rows) {
+  const header = ['Step', 'Machine', 'Material', 'Lay', 'Pitch', 'Wrap/coverage', 'Tension', 'Target OD', 'Note']
+  return [header.join('\t'), ...rows.map((row) => [
+    row.step,
+    row.machine,
+    row.material,
+    row.lay,
+    row.pitch,
+    row.wrap,
+    row.tension,
+    row.targetOd,
+    row.note,
+  ].join('\t'))].join('\n')
 }
 
 function displayMm(valueMm, unitMode) {
@@ -1854,6 +2158,8 @@ export default function RFStackLab() {
   const [measured, setMeasured] = useState(EMPTY_MEASURED_TEST)
   const [measuredPaste, setMeasuredPaste] = useState('')
   const [goldenHistory, setGoldenHistory] = useState(() => readGoldenHistory())
+  const [compareGoldenId, setCompareGoldenId] = useState('')
+  const [runSheetCopied, setRunSheetCopied] = useState(false)
   const modelConfig = useMemo(() => ({
     ptfeStack,
     shieldStack,
@@ -2099,6 +2405,15 @@ export default function RFStackLab() {
         direction: layer.direction,
       }
     })
+    let buildOdCursor = params.conductorOD
+    const ptfeBuilds = layerBuilds.map((layer, index) => {
+      buildOdCursor += layer.radial * 2
+      return {
+        ...layer,
+        odAfterMm: buildOdCursor,
+        pitch: ptfeNotches[index]?.pitch,
+      }
+    })
     const pitchTape = ptfeNotches[0]?.pitch || (ptfeShopPitchSetpoint({
       cableOdMm: params.conductorOD,
       tapeWidthMm: summary.avgWidth,
@@ -2146,6 +2461,7 @@ export default function RFStackLab() {
       helicalInstalled: Boolean(helicalLayer),
       foilInstalled: Boolean(foilLayer),
       braidInstalled: Boolean(braidLayer),
+      ptfeBuilds,
       ptfeNotches,
       dielectricOD,
       eps,
@@ -2219,6 +2535,14 @@ export default function RFStackLab() {
   }, [computed, params.freqGHz])
 
   const correlation = useMemo(() => buildMeasuredCorrelation(measured, computed), [measured, computed])
+  const preApplyPreview = useMemo(() => buildPreApplyPreview(computed, ptfeStack, shieldStack), [computed, ptfeStack, shieldStack])
+  const feedbackLearner = useMemo(() => buildFeedbackLearner(goldenHistory, measured, computed), [goldenHistory, measured, computed])
+  const suckoutDoctor = useMemo(() => buildSuckoutDoctor(computed, measured), [computed, measured])
+  const selectedGolden = useMemo(() => (
+    goldenHistory.find((entry) => entry.id === compareGoldenId) || goldenHistory[0] || null
+  ), [compareGoldenId, goldenHistory])
+  const goldenDiff = useMemo(() => buildGoldenDiff(selectedGolden, computed, ptfeStack, shieldStack), [selectedGolden, computed, ptfeStack, shieldStack])
+  const runSheetRows = useMemo(() => buildFactoryRunSheetRows(ptfeStack, shieldStack, computed), [ptfeStack, shieldStack, computed])
 
   const updateMeasured = (key) => (value) => {
     setMeasured((current) => ({ ...current, [key]: value }))
@@ -2263,6 +2587,7 @@ export default function RFStackLab() {
       writeGoldenHistory(next)
       return next
     })
+    setCompareGoldenId(id)
   }
 
   const loadGoldenRecipe = (entry) => {
@@ -2273,6 +2598,7 @@ export default function RFStackLab() {
     setMeasured(entry.measured || EMPTY_MEASURED_TEST)
     setMeasuredPaste('')
     setActivePreset('')
+    setCompareGoldenId(entry.id || '')
   }
 
   const deleteGoldenRecipe = (id) => {
@@ -2281,6 +2607,16 @@ export default function RFStackLab() {
       writeGoldenHistory(next)
       return next
     })
+  }
+
+  const copyRunSheet = async () => {
+    try {
+      await navigator.clipboard.writeText(formatRunSheetText(runSheetRows))
+      setRunSheetCopied(true)
+      window.setTimeout(() => setRunSheetCopied(false), 1600)
+    } catch {
+      setRunSheetCopied(false)
+    }
   }
 
   return (
@@ -2448,6 +2784,21 @@ export default function RFStackLab() {
           onDelete={deleteGoldenRecipe}
         />
       </div>
+
+      <ClosedLoopIntelligence
+        preview={preApplyPreview}
+        learner={feedbackLearner}
+        doctor={suckoutDoctor}
+        history={goldenHistory}
+        selectedGolden={selectedGolden}
+        compareGoldenId={compareGoldenId}
+        setCompareGoldenId={setCompareGoldenId}
+        goldenDiff={goldenDiff}
+        runSheetRows={runSheetRows}
+        runSheetCopied={runSheetCopied}
+        copyRunSheet={copyRunSheet}
+        computed={computed}
+      />
 
       <div style={S.notes}>
         <div style={S.noteTitle}><Activity size={13} /> Interpretation</div>
@@ -2617,6 +2968,201 @@ function GoldenRecipeHistory({ history, onLoad, onDelete }) {
   )
 }
 
+function ClosedLoopIntelligence({
+  preview,
+  learner,
+  doctor,
+  history,
+  selectedGolden,
+  compareGoldenId,
+  setCompareGoldenId,
+  goldenDiff,
+  runSheetRows,
+  runSheetCopied,
+  copyRunSheet,
+  computed,
+}) {
+  return (
+    <section style={S.closedLoopShell}>
+      <div style={S.closedLoopHeader}>
+        <div>
+          <div style={S.cardEyebrow}>Closed-loop RF assistant</div>
+          <h2 style={S.cardTitle}>Preview, learn, diagnose, compare, then print.</h2>
+        </div>
+        <div style={{ ...S.liveBadge, color: preview.status === 'ready' ? C.teal : C.amber, borderColor: preview.status === 'ready' ? `${C.teal}66` : `${C.amber}66` }}>
+          {preview.status === 'ready' ? 'apply ready' : `${preview.warningCount} review`}
+        </div>
+      </div>
+      <div style={S.closedLoopGrid}>
+        <PreApplyPreviewCard preview={preview} computed={computed} />
+        <MeasuredFeedbackLearner learner={learner} />
+        <SuckoutDoctorCard doctor={doctor} />
+        <GoldenCompareCard
+          history={history}
+          selectedGolden={selectedGolden}
+          compareGoldenId={compareGoldenId}
+          setCompareGoldenId={setCompareGoldenId}
+          goldenDiff={goldenDiff}
+        />
+        <FactoryRunSheetCard rows={runSheetRows} copied={runSheetCopied} onCopy={copyRunSheet} />
+      </div>
+    </section>
+  )
+}
+
+function PreApplyPreviewCard({ preview, computed }) {
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><Target size={14} /> Preview Before Apply</div>
+      <div style={S.previewHero}>
+        <strong>{fmt(computed.z0, 1)} Ω</strong>
+        <span>{fmt(computed.vp * 100, 1)}% VP</span>
+        <span>OD {fmt((computed.jacketInstalled ? computed.jacketOD : computed.dielectricOD) / MM_PER_IN, 4)} in</span>
+      </div>
+      <div style={S.checkList}>
+        {preview.checks.map((check) => (
+          <CheckRow key={check.label} item={check} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MeasuredFeedbackLearner({ learner }) {
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><Brain size={14} /> Measured Feedback Learner</div>
+      <div style={S.biasGrid}>
+        <BiasChip label="Z0 bias" value={learner.z0Bias} suffix=" Ω" digits={1} />
+        <BiasChip label="VP bias" value={learner.vpBias} suffix=" pt" digits={1} />
+        <BiasChip label="OD bias" value={learner.odBiasIn} suffix=" in" digits={4} />
+      </div>
+      <div style={S.intelMiniText}>{learner.samples.length} measured sample{learner.samples.length === 1 ? '' : 's'} in memory</div>
+      <div style={S.checkList}>
+        {learner.recommendations.map((item, index) => (
+          <div key={index} style={{ ...S.learningLine, borderColor: item.level === 'pass' ? `${C.teal}55` : item.level === 'warn' ? `${C.amber}55` : `${C.sky}55` }}>
+            {item.text}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SuckoutDoctorCard({ doctor }) {
+  const confidence = doctor.root ? (doctor.root.errorPct <= 8 ? 'high match' : doctor.root.errorPct <= 18 ? 'possible match' : 'weak match') : 'no match'
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><Activity size={14} /> Suckout Doctor</div>
+      <div style={S.doctorRoot}>
+        <span>Target {fmt(doctor.target, 2)} GHz</span>
+        <strong>{doctor.root ? doctor.root.label : 'No pitch source'}</strong>
+        <small>{confidence}{doctor.root ? ` · ${fmt(doctor.root.error, 2)} GHz away` : ''}</small>
+      </div>
+      <div style={S.rankList}>
+        {doctor.ranked.slice(0, 3).map((item) => (
+          <div key={`${item.label}-${item.freq}`} style={S.rankRow}>
+            <span>{item.label}</span>
+            <strong>{fmt(item.freq, 2)} GHz</strong>
+          </div>
+        ))}
+      </div>
+      <ul style={S.actionList}>
+        {doctor.actions.slice(0, 3).map((action, index) => (
+          <li key={index}>{action}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function GoldenCompareCard({ history, selectedGolden, compareGoldenId, setCompareGoldenId, goldenDiff }) {
+  return (
+    <div style={S.intelCard}>
+      <div style={S.intelTitle}><GitCompare size={14} /> MI Diff / Golden Compare</div>
+      {history.length ? (
+        <>
+          <select
+            value={compareGoldenId || selectedGolden?.id || ''}
+            onChange={(event) => setCompareGoldenId(event.target.value)}
+            style={S.select}
+          >
+            {history.map((entry) => (
+              <option key={entry.id} value={entry.id}>{entry.label}</option>
+            ))}
+          </select>
+          <div style={S.diffTable}>
+            {goldenDiff.map((row) => (
+              <div key={row.label} style={S.diffRow}>
+                <span>{row.label}</span>
+                <strong>{row.current}</strong>
+                <small>{row.delta}</small>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div style={S.emptyState}>Save one measured golden recipe, then this card will show exactly what changed from the known-good MI.</div>
+      )}
+    </div>
+  )
+}
+
+function FactoryRunSheetCard({ rows, copied, onCopy }) {
+  return (
+    <div style={{ ...S.intelCard, ...S.runSheetCard }}>
+      <div style={S.runSheetHead}>
+        <div style={S.intelTitle}><ClipboardList size={14} /> Factory Run Sheet Mode</div>
+        <button type="button" style={S.saveBtn} onClick={onCopy}>
+          {copied ? 'Copied' : 'Copy sheet'}
+        </button>
+      </div>
+      <div style={S.runSheetTable}>
+        <div style={{ ...S.runSheetRow, ...S.runSheetHeaderRow }}>
+          <span>Step</span>
+          <span>Machine</span>
+          <span>Material</span>
+          <span>Pitch</span>
+          <span>OD</span>
+        </div>
+        {rows.slice(0, 9).map((row, index) => (
+          <div key={`${row.step}-${index}`} style={S.runSheetRow}>
+            <span>{row.step}</span>
+            <span>{row.machine}</span>
+            <span>{row.material}</span>
+            <span>{row.pitch}</span>
+            <span>{row.targetOd}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function CheckRow({ item }) {
+  const color = item.level === 'pass' ? C.teal : item.level === 'warn' ? C.amber : C.sky
+  return (
+    <div style={S.checkRow}>
+      <span style={{ ...S.checkLight, background: color }} />
+      <div>
+        <strong>{item.label}</strong>
+        <small>{item.note}</small>
+      </div>
+      <b style={{ color }}>{item.value}</b>
+    </div>
+  )
+}
+
+function BiasChip({ label, value, suffix, digits }) {
+  const color = !Number.isFinite(value) ? C.muted : Math.abs(value) < (digits >= 4 ? 0.0015 : 0.8) ? C.teal : C.amber
+  return (
+    <div style={S.biasChip}>
+      <span>{label}</span>
+      <strong style={{ color }}>{Number.isFinite(value) ? formatDelta(value, digits, suffix) : '—'}</strong>
+    </div>
+  )
+}
+
 function ChartCard({ title, sub, data, xKey = 'f', yKey, color, xFmt, yFmt, yDomain, domainX, domainY, referenceY }) {
   return (
     <div style={S.chartCard}>
@@ -2747,6 +3293,30 @@ const S = {
   historyStats: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
   historyDiagnosis: { color: C.dim, borderLeft: `2px solid ${C.amber}`, paddingLeft: 8, fontSize: 11 },
   loadBtn: { background: '#070b0c', border: `1px solid ${C.teal}66`, color: C.teal, minHeight: 30, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, cursor: 'pointer' },
+  closedLoopShell: { border: `1px solid ${C.border}`, background: 'linear-gradient(135deg, rgba(16,22,25,0.98), rgba(9,13,14,0.96))', padding: 14, borderRadius: 3, display: 'grid', gap: 12 },
+  closedLoopHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  closedLoopGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 10 },
+  intelCard: { border: `1px solid ${C.borderHi}`, background: '#080d0f', padding: 12, display: 'grid', gap: 10, minWidth: 0 },
+  runSheetCard: { gridColumn: '1 / -1' },
+  intelTitle: { display: 'flex', alignItems: 'center', gap: 7, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.7 },
+  previewHero: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))', gap: 7, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+  checkList: { display: 'grid', gap: 7 },
+  checkRow: { display: 'grid', gridTemplateColumns: '9px minmax(0, 1fr) auto', gap: 8, alignItems: 'center', border: `1px solid rgba(167,176,182,0.12)`, background: '#070b0c', padding: 8, minWidth: 0 },
+  checkLight: { width: 7, height: 7, borderRadius: 999, boxShadow: '0 0 12px currentColor' },
+  biasGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 7 },
+  biasChip: { border: `1px solid rgba(167,176,182,0.13)`, background: '#070b0c', padding: 8, display: 'grid', gap: 4, color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, minWidth: 0 },
+  intelMiniText: { color: C.muted, fontSize: 11 },
+  learningLine: { borderLeft: '2px solid', padding: '7px 8px', background: '#070b0c', color: C.dim, fontSize: 11, lineHeight: 1.45 },
+  doctorRoot: { border: `1px solid rgba(94,234,212,0.18)`, background: 'rgba(94,234,212,0.045)', padding: 9, display: 'grid', gap: 4, color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+  rankList: { display: 'grid', gap: 5 },
+  rankRow: { display: 'flex', justifyContent: 'space-between', gap: 8, border: `1px solid rgba(167,176,182,0.12)`, padding: '6px 8px', background: '#070b0c', color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+  actionList: { margin: 0, paddingLeft: 18, color: C.dim, fontSize: 11, lineHeight: 1.55 },
+  diffTable: { display: 'grid', gap: 6 },
+  diffRow: { display: 'grid', gridTemplateColumns: 'minmax(88px, 1fr) minmax(78px, auto) minmax(70px, auto)', gap: 8, alignItems: 'center', border: `1px solid rgba(167,176,182,0.12)`, background: '#070b0c', padding: '7px 8px', color: C.muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+  runSheetHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
+  runSheetTable: { display: 'grid', border: `1px solid ${C.border}`, overflowX: 'auto' },
+  runSheetRow: { display: 'grid', gridTemplateColumns: '120px 126px minmax(180px, 1fr) 92px 92px', gap: 8, alignItems: 'center', minWidth: 720, padding: '7px 9px', borderTop: `1px solid rgba(167,176,182,0.10)`, color: C.dim, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+  runSheetHeaderRow: { borderTop: 0, color: C.amber, background: 'rgba(251,191,36,0.06)', textTransform: 'uppercase', letterSpacing: 1.3 },
   notes: { border: `1px solid ${C.border}`, background: C.panel, padding: 14, color: C.dim, lineHeight: 1.7, fontSize: 12, borderRadius: 3 },
   noteTitle: { display: 'flex', alignItems: 'center', gap: 8, color: C.teal, fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 2, marginBottom: 6 },
 }
