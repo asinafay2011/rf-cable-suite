@@ -805,9 +805,9 @@ function HomeView({ setSection }) {
   const standardCount = 8;
   const moduleCount = 10;
   const heroMedia = useMediaOverride('highspeed_home_hero', {
-    poster: '/hero/hs-main-hero-mission-poster.jpg',
-    webm: '/hero/hs-main-hero-mission.webm',
-    mp4: '/hero/hs-main-hero-mission.mp4',
+    poster: '/generated/higgsfield/highspeed-home-hero-ai-rack-112g-v3-poster.jpg',
+    webm: '',
+    mp4: '/generated/higgsfield/highspeed-home-hero-ai-rack-112g-v3.mp4',
   });
 
   const tools = [
@@ -10175,7 +10175,7 @@ export default function CableApp() {
       {section !== 'recipe' && <TopNav active={section} onChange={setSection} />}
       {section !== 'recipe' && section !== 'home' && <TabIntro section={section} />}
 
-      <main className={`${section === 'atten' || section === 'si' ? 'max-w-[1780px] px-4 md:px-8' : 'max-w-6xl px-4 md:px-12'} mx-auto py-12`}>
+      <main className={`${section === 'home' ? 'max-w-[1780px] px-3 md:px-8 2xl:px-10' : section === 'atten' || section === 'si' ? 'max-w-[1780px] px-4 md:px-8' : 'max-w-6xl px-4 md:px-12'} mx-auto py-12`}>
         {section === 'recipe' && <BuildRecipePage product={recipeProduct} onBack={closeRecipe} />}
         {section === 'home' && <HomeView setSection={setSection} />}
         {section === 'progression' && <ProgressionView />}
