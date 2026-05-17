@@ -2198,9 +2198,9 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
   const cableCount = Object.keys(CABLES).length;
   const connectorCount = Object.keys(CONNECTORS).length;
   const heroMedia = useMediaOverride('rf_home_hero', {
-    poster: '/hero/rf-main-hero-mission-poster.jpg',
-    webm: '/hero/rf-main-hero-mission.webm',
-    mp4: '/hero/rf-main-hero-mission.mp4',
+    poster: '/generated/higgsfield/rf-home-hero-aerospace-radar-v2-poster.jpg',
+    webm: '',
+    mp4: '/generated/higgsfield/rf-home-hero-aerospace-radar-v2.mp4',
   });
 
   // Hero quick-action cards — link to the heavy-lifting tools.
