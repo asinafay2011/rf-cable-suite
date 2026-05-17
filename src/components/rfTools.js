@@ -30,6 +30,7 @@ import {
   WTM_MIN_TAPING_PITCH_MM,
 } from '../data/materialLibrary.js'
 import { buildPtfeMiEntries, makeBlankMiWorkbook, makePtfeMiWorkbook } from '../data/miTemplate.js'
+import { HIGGSFIELD_TOOLS, dispatchHiggsfieldTool, isHiggsfieldTool } from './higgsfieldTools.js'
 
 const RF_CALIBRATION_MEMORY_KEY = 'rf-stack-calibration-memory-v1'
 
@@ -417,6 +418,7 @@ function interpAtten(table, freq_mhz) {
 
 // ── tool list ──────────────────────────────────────────
 export const RF_TOOLS = [
+  ...HIGGSFIELD_TOOLS,
   {
     name: 'lookup_rf_cable',
     description:
@@ -1182,6 +1184,7 @@ export const RF_TOOLS = [
 // ── dispatcher ─────────────────────────────────────────
 export async function dispatchRfTool(name, input) {
   try {
+    if (isHiggsfieldTool(name)) return await dispatchHiggsfieldTool(name, input)
     switch (name) {
       case 'lookup_rf_cable': {
         const custom = getCustomRfCables()

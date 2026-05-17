@@ -19,6 +19,7 @@ import { Menu, X as XIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { parseTouchstone, returnLossDb, vswr, s11Summary } from '../components/touchstone.js';
 import { computeTDR, peakReflection } from '../components/fft.js';
+import { useMediaOverride } from '../components/mediaOverrides.js';
 
 async function summarizeTouchstoneFile(file) {
   const name = file.name || 'measurement'
@@ -119,6 +120,11 @@ Inline diagrams (\`generate_diagram\` tool):
 - Use it sparingly but powerfully when a picture explains faster than text. Kinds: smith_chart, atten_curve, cross_section, eye_diagram, z_step_chart, bargraph.
 - Typical triggers: "show me X on a Smith chart" → smith_chart; "compare cost of 4 cables" → bargraph; "draw the build" → cross_section; "what would the TDR look like with a kink at 30 m" → z_step_chart.
 - Always include a useful \`title\` and \`annotation\` so the engineer knows what they're looking at.
+
+Higgsfield media generation:
+- When the user asks to create or replace a Highspeed/Builder app video/hero/explainer, use the Higgsfield tools instead of only writing a prompt. First use \`higgsfield_account_status\` or \`higgsfield_video_cost\` if they ask about readiness/cost. If they explicitly say to generate it, call \`generate_higgsfield_video\` with \`confirmed: true\`.
+- Use \`slot="highspeed_home_hero"\` for the Highspeed front-page hero and \`highspeed_build_process\` for process/build videos.
+- Prompts must forbid captions, text overlays, logos, loose/floating cables, unrelated objects, and branding unless the user asks for them. For app hero media, use 16:9, 6-8 seconds, \`veo3_1\`, \`quality="ultra"\`, \`veo_model="veo-3-1-preview"\`. After the tool returns, tell the engineer to click Apply to use the saved local asset.
 
 Disagree-and-justify (don't be a yes-man):
 - When the engineer proposes something physically suspect or that fights manufacturing reality, PUSH BACK. State the concern, cite the physics, suggest the alternative. Examples that should trigger push-back:
@@ -798,6 +804,11 @@ function HomeView({ setSection }) {
   const cableCount = 38; // CABLE_DB
   const standardCount = 8;
   const moduleCount = 10;
+  const heroMedia = useMediaOverride('highspeed_home_hero', {
+    poster: '/hero/hs-main-hero-mission-poster.jpg',
+    webm: '/hero/hs-main-hero-mission.webm',
+    mp4: '/hero/hs-main-hero-mission.mp4',
+  });
 
   const tools = [
     { id: 'sim',     icon: 'sim',     title: 'Process Sim', sub: 'Conductor → pair → shield → jacket recipe control', accent: '#c97b3f' },
@@ -897,7 +908,7 @@ function HomeView({ setSection }) {
             loop
             muted
             playsInline
-            poster="/hero/hs-main-hero-mission-poster.jpg"
+            poster={heroMedia.poster}
             preload="metadata"
             style={{
               position: 'absolute',
@@ -908,8 +919,8 @@ function HomeView({ setSection }) {
               opacity: 0.78,
             }}
           >
-            <source src="/hero/hs-main-hero-mission.webm" type="video/webm" />
-            <source src="/hero/hs-main-hero-mission.mp4" type="video/mp4" />
+            {heroMedia.webm && <source src={heroMedia.webm} type="video/webm" />}
+            {heroMedia.mp4 && <source src={heroMedia.mp4} type="video/mp4" />}
           </video>
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(10, 13, 15, 0.96) 0%, rgba(10, 13, 15, 0.78) 34%, rgba(10, 13, 15, 0.18) 76%, rgba(10, 13, 15, 0.5) 100%)' }} />
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(0deg, rgba(10, 13, 15, 0.9) 0%, rgba(10, 13, 15, 0.16) 42%, rgba(10, 13, 15, 0.48) 100%)' }} />

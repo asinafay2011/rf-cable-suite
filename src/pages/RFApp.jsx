@@ -9,6 +9,7 @@ import CompanyDefaultsPanel from "../components/CompanyDefaultsPanel.jsx";
 import ShopMemoryPanel from "../components/ShopMemoryPanel.jsx";
 import RFStackLab from "../components/RFStackLab.jsx";
 import MaterialLibrary from "../components/MaterialLibrary.jsx";
+import { useMediaOverride } from "../components/mediaOverrides.js";
 import { useIsMobile } from "../components/useIsMobile.js";
 import { formatActiveShopRulesForPrompt, useShopMemory } from "../components/shopMemory.js";
 import {
@@ -88,6 +89,11 @@ Inline diagrams (\`generate_diagram\` tool):
 - "Compare cable A vs B vs C attenuation" → bargraph or atten_curve with both tables overlaid.
 - "What does a TDR with a kink at 30 m look like" → z_step_chart with synthesised z_trace.
 - Always include \`title\` and short \`annotation\` so the engineer knows what they're looking at.
+
+Higgsfield media generation:
+- When the user asks to create or replace an RF app video/hero/explainer, use the Higgsfield tools instead of only writing a prompt. First use \`higgsfield_account_status\` or \`higgsfield_video_cost\` if they are asking about readiness/cost. If they explicitly say to generate it, call \`generate_higgsfield_video\` with \`confirmed: true\`.
+- Use \`slot="rf_home_hero"\` for the RF front-page hero, \`rf_launch_explainer\` for Connector Launch Lab, \`rf_shielding_explainer\` for Shielding Lab, and \`rf_build_process\` for RF build/stack process videos.
+- Prompts must forbid captions, text overlays, logos, stray hoses/tubes, hands, unrelated objects, and branding unless the user asks for them. For app hero media, use 16:9, 6-8 seconds, \`veo3_1\`, \`quality="ultra"\`, \`veo_model="veo-3-1-preview"\`. After the tool returns, tell the engineer to click Apply to use the saved local asset.
 
 Disagree-and-justify (don't be a yes-man):
 - When the engineer proposes something physically suspect, PUSH BACK with the physics reason. Examples: VSWR target < 1.05 across multi-octave (impossible without active match), cable rated 3 GHz used at 6 GHz, phase-stable claim for a flexible cable not actually phase-stable, link budget where antenna gain > 30 dBi for an omni.
@@ -2191,6 +2197,11 @@ Use the database tools where helpful. Keep under 200 words.`;
 function HomeView({ setTab, setActiveCable, comparedCables }) {
   const cableCount = Object.keys(CABLES).length;
   const connectorCount = Object.keys(CONNECTORS).length;
+  const heroMedia = useMediaOverride('rf_home_hero', {
+    poster: '/hero/rf-main-hero-mission-poster.jpg',
+    webm: '/hero/rf-main-hero-mission.webm',
+    mp4: '/hero/rf-main-hero-mission.mp4',
+  });
 
   // Hero quick-action cards — link to the heavy-lifting tools.
   const tools = [
@@ -2267,12 +2278,12 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
             loop
             muted
             playsInline
-            poster="/hero/rf-main-hero-mission-poster.jpg"
+            poster={heroMedia.poster}
             preload="metadata"
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: 'saturate(1.08) contrast(1.08)' }}
           >
-            <source src="/hero/rf-main-hero-mission.webm" type="video/webm" />
-            <source src="/hero/rf-main-hero-mission.mp4" type="video/mp4" />
+            {heroMedia.webm && <source src={heroMedia.webm} type="video/webm" />}
+            {heroMedia.mp4 && <source src={heroMedia.mp4} type="video/mp4" />}
           </video>
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(5,7,8,0.95) 0%, rgba(5,7,8,0.78) 36%, rgba(5,7,8,0.28) 72%, rgba(5,7,8,0.42) 100%)' }} />
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.34))' }} />
@@ -3301,6 +3312,11 @@ function makeConnectorLaunchS11({ preset, band, launch }) {
 }
 
 function ConnectorLaunchExplainerVideo() {
+  const media = useMediaOverride('rf_launch_explainer', {
+    poster: '/launch/connector-launch-explainer-poster.jpg',
+    webm: '/launch/connector-launch-explainer.webm',
+    mp4: '/launch/connector-launch-explainer.mp4',
+  });
   return (
     <div style={{ position: "relative", minHeight: 220, aspectRatio: "16 / 9", border: "1px solid #26343a", borderRadius: 4, overflow: "hidden", background: "#05090a" }}>
       <video
@@ -3309,12 +3325,12 @@ function ConnectorLaunchExplainerVideo() {
         loop
         muted
         playsInline
-        poster="/launch/connector-launch-explainer-poster.jpg"
+        poster={media.poster}
         preload="metadata"
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scale(1.02)", transformOrigin: "center center" }}
       >
-        <source src="/launch/connector-launch-explainer.webm" type="video/webm" />
-        <source src="/launch/connector-launch-explainer.mp4" type="video/mp4" />
+        {media.webm && <source src={media.webm} type="video/webm" />}
+        {media.mp4 && <source src={media.mp4} type="video/mp4" />}
       </video>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(180deg, rgba(0,0,0,0.02), rgba(0,0,0,0.28))" }} />
     </div>
@@ -3813,6 +3829,11 @@ function makeShieldingTrace({ preset, coveragePct, foilOverlapPct, seamGapMm, tr
 
 function ShieldingEffectivenessLab() {
   const [presetId, setPresetId] = useState("foilBraid");
+  const media = useMediaOverride('rf_shielding_explainer', {
+    poster: '/shielding/rf-shielding-explainer-poster.jpg',
+    webm: '/shielding/rf-shielding-explainer-veo31.webm',
+    mp4: '/shielding/rf-shielding-explainer-veo31.mp4',
+  });
   const activePreset = RF_SHIELD_PRESETS.find((preset) => preset.id === presetId) || RF_SHIELD_PRESETS[4];
   const [freqMHz, setFreqMHz] = useState(activePreset.id === "foilBraid" ? 2400 : 900);
   const [coveragePct, setCoveragePct] = useState(activePreset.coverage);
@@ -3873,7 +3894,7 @@ function ShieldingEffectivenessLab() {
               style={{
                 position: "absolute",
                 inset: 0,
-                backgroundImage: "url(/shielding/rf-shielding-explainer-poster.jpg)",
+                backgroundImage: `url(${media.poster})`,
                 backgroundSize: "cover",
                 backgroundPosition: "center",
                 opacity: 0,
@@ -3886,12 +3907,12 @@ function ShieldingEffectivenessLab() {
               loop
               playsInline
               preload="metadata"
-              poster="/shielding/rf-shielding-explainer-poster.jpg"
+              poster={media.poster}
               aria-label={`${activePreset.label} RF shielding effectiveness explainer`}
               style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", opacity: 0.96 }}
             >
-              <source src="/shielding/rf-shielding-explainer-veo31.webm" type="video/webm" />
-              <source src="/shielding/rf-shielding-explainer-veo31.mp4" type="video/mp4" />
+              {media.webm && <source src={media.webm} type="video/webm" />}
+              {media.mp4 && <source src={media.mp4} type="video/mp4" />}
             </video>
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.04), rgba(0,0,0,0.48))" }} />
             <div style={{ position: "absolute", top: 16, left: 16, ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>RF shielding explainer</div>

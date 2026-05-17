@@ -2,6 +2,7 @@
 import { getCustomCableCables, addCustomCableCable, deleteCustomCableCable } from './customCableStore.js'
 import { getCompanyDefaults, setCompanyDefaults, resetCompanyDefaults } from './companyDefaults.js'
 import { addDefectEntry, getDefectLog } from './defectLog.js'
+import { HIGGSFIELD_TOOLS, dispatchHiggsfieldTool, isHiggsfieldTool } from './higgsfieldTools.js'
 
 // ── Compact cable database (key high-speed / RF coax + datacable specs) ────
 // Sources: Belden / Times Microwave / CommScope datasheets, Glenair Series 963.
@@ -176,6 +177,7 @@ export function lookupCableDB(query) {
 }
 
 export const CABLE_TOOLS = [
+  ...HIGGSFIELD_TOOLS,
   {
     name: 'calc_z0_coax',
     description:
@@ -680,8 +682,9 @@ export const CABLE_TOOLS = [
 const num = (v, digits = 2) => (typeof v === 'number' && isFinite(v) ? Number(v.toFixed(digits)) : v);
 
 // ── dispatcher ──────────────────────────────────────────
-export function dispatchCableTool(name, input) {
+export async function dispatchCableTool(name, input) {
   try {
+    if (isHiggsfieldTool(name)) return await dispatchHiggsfieldTool(name, input)
     switch (name) {
       case 'calc_z0_coax': {
         const { D, d, er } = input;

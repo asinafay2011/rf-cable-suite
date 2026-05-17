@@ -2291,9 +2291,10 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
   const applyBlocked = Boolean(parsedResult?._apply_blocked || preflight?.allow_apply === false)
   const canApplyPreset = presetSection && presetData && !applyBlocked && !partial && !parsedResult?.error
   const canDownload = downloadSpec && !partial && !parsedResult?.error
-  const applyTargetLabel = presetSection === 'stack-measured' ? 'measured test' : presetSection
+  const applyTargetLabel = presetSection === 'stack-measured' ? 'measured test' : presetSection === 'media-asset' ? 'media slot' : presetSection
+  const shouldJumpOnApply = presetSection && presetSection !== 'media-asset'
   const applyPreset = () => {
-    if (onJumpToSection) onJumpToSection(presetSection)
+    if (shouldJumpOnApply && onJumpToSection) onJumpToSection(presetSection)
     window.dispatchEvent(new CustomEvent('cable-suite:apply-preset', {
       detail: { section: presetSection, params: presetData, label: presetLabel },
     }))
@@ -2301,7 +2302,7 @@ function ToolPill({ name, input, result, accent, partial, jumpTarget, onJumpToSe
     setTimeout(() => setApplied(false), 1500)
   }
   const queuePreset = () => {
-    if (onJumpToSection) onJumpToSection(presetSection)
+    if (shouldJumpOnApply && onJumpToSection) onJumpToSection(presetSection)
     window.dispatchEvent(new CustomEvent('cable-suite:queue-preset', {
       detail: {
         section: presetSection,

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Cable, Download, Film, Radio } from 'lucide-react'
+import { useMediaOverride } from './mediaOverrides.js'
 
 const C = {
   bg: '#0a0d0f',
@@ -123,6 +124,10 @@ export default function Cable3D() {
     [activeId],
   )
   const defectHotspots = activeBuild.id === 'highspeed' ? HIGHSPEED_DEFECT_HOTSPOTS : []
+  const activeMedia = useMediaOverride(activeBuild.id === 'coax' ? 'rf_build_process' : 'highspeed_build_process', {
+    mp4: activeBuild.video,
+    poster: activeBuild.poster,
+  })
   const [activeHotspotId, setActiveHotspotId] = useState('')
   const activeHotspot = defectHotspots.find((hotspot) => hotspot.id === activeHotspotId) || defectHotspots[0] || null
   const Icon = activeBuild.icon
@@ -175,8 +180,8 @@ export default function Cable3D() {
             <video
               key={activeBuild.id}
               className="w-full h-full object-cover"
-              src={activeBuild.video}
-              poster={activeBuild.poster}
+              src={activeMedia.mp4 || activeBuild.video}
+              poster={activeMedia.poster || activeBuild.poster}
               controls
               autoPlay
               muted
@@ -242,7 +247,7 @@ export default function Cable3D() {
 
           <div className="grid grid-cols-3 gap-2 pt-1">
             <AssetLink href={activeBuild.glb} label="GLB" />
-            <AssetLink href={activeBuild.video} label="MP4" />
+            <AssetLink href={activeMedia.mp4 || activeBuild.video} label="MP4" />
             <AssetLink href={activeBuild.blend} label="BLEND" />
           </div>
 

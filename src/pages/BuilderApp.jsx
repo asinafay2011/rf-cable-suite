@@ -23,7 +23,9 @@ Stage-aware help:
 - Outer braid: 24 carriers × 14 picks/inch = ~85% K coverage typical.
 - Jacket: LSZH for safety, FEP for plenum, TPU for drag-chain.
 
-Tools available: \`calc_z0_coax\` (verify impedance), \`calc_braid_coverage\` (compute K), \`pair_lay_skew\` (predict skew), \`propose_*_preset\` family (one-click apply suggestions).
+Tools available: \`calc_z0_coax\` (verify impedance), \`calc_braid_coverage\` (compute K), \`pair_lay_skew\` (predict skew), \`propose_*_preset\` family (one-click apply suggestions), and Higgsfield media tools for generating build/hero videos after explicit user confirmation.
+
+Higgsfield video: if the user asks to generate a Builder or Highspeed build video and confirms spending credits, call \`generate_higgsfield_video\` with \`confirmed: true\` and \`slot="highspeed_build_process"\`. Use 16:9, no captions/text/logos, and precise cable-manufacturing camera directions.
 
 Cite physics: [WADELL] for Z₀ formula, [SCTE51] for braid K, [TIA568] for Cat-class limits.`
 
