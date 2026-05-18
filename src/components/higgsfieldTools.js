@@ -1,10 +1,12 @@
 const MEDIA_SLOT_OPTIONS = [
+  'suite_home_hero',
   'rf_home_hero',
   'rf_launch_explainer',
   'rf_shielding_explainer',
   'rf_build_process',
   'highspeed_home_hero',
   'highspeed_build_process',
+  'highspeed_eye_tdr_explainer',
   'generic',
 ]
 
@@ -88,12 +90,14 @@ async function readJsonResponse(response) {
 
 function slotLabel(slot) {
   return {
+    suite_home_hero: 'Suite homepage hero',
     rf_home_hero: 'RF home hero',
     rf_launch_explainer: 'RF connector launch explainer',
     rf_shielding_explainer: 'RF shielding explainer',
     rf_build_process: 'RF build process',
     highspeed_home_hero: 'Highspeed home hero',
     highspeed_build_process: 'Highspeed build process',
+    highspeed_eye_tdr_explainer: 'Highspeed Eye + TDR explainer',
     generic: 'generated media folder',
   }[slot] || slot || 'generated media'
 }

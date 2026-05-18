@@ -22,6 +22,7 @@ import {
   SMALL_CABLE_MAX_PTFE_WIDTH_IN,
   SMALL_CABLE_TAPE_OD_IN,
 } from '../data/materialLibrary.js'
+import { useMediaOverride } from './mediaOverrides.js'
 
 const C = {
   bg: '#090d0e',
@@ -2747,6 +2748,11 @@ export default function RFStackLab() {
     previewStage: activePreset ? PRESETS[activePreset]?.previewStage : '',
   }), [activePreset, ptfeStack, shieldStack])
   const { mountRef, status } = useRfStackModel(modelConfig)
+  const buildPreviewMedia = useMediaOverride('rf_build_process', {
+    poster: '/generated/higgsfield/rf-stack-build-process-higgsfield-v1-poster.jpg',
+    webm: '',
+    mp4: '/generated/higgsfield/rf-stack-build-process-higgsfield-v1.mp4',
+  })
 
   const setParam = (key) => (value) => {
     setParams((current) => ({ ...current, [key]: value }))
@@ -3324,13 +3330,44 @@ export default function RFStackLab() {
   return (
     <section style={S.root} data-testid="rf-stack-lab">
       <header style={S.hero}>
-        <div style={S.heroIcon}><Layers size={20} /></div>
-        <div>
-          <div style={S.eyebrow}>RF Stack Lab</div>
-          <h1 style={S.title}>Build the cable, then validate the RF symptoms.</h1>
-          <p style={S.copy}>
-            One workspace for PTFE tape build-up, SPC flatwire shields, foil/braid coverage, Bragg suckout, impedance, return loss, VSWR, insertion loss, and TDR.
-          </p>
+        <div style={S.heroLead}>
+          <div style={S.heroIcon}><Layers size={20} /></div>
+          <div style={S.heroText}>
+            <div style={S.eyebrow}>RF Stack Lab</div>
+            <h1 style={S.title}>Build the cable, then validate the RF symptoms.</h1>
+            <p style={S.copy}>
+              One workspace for PTFE tape build-up, SPC flatwire shields, foil/braid coverage, Bragg suckout, impedance, return loss, VSWR, insertion loss, and TDR.
+            </p>
+          </div>
+        </div>
+
+        <div style={S.heroVideoPanel}>
+          <video
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="metadata"
+            poster={buildPreviewMedia.poster}
+            aria-label="RF cable build process preview"
+            style={S.heroVideo}
+          >
+            {buildPreviewMedia.webm && <source src={buildPreviewMedia.webm} type="video/webm" />}
+            {buildPreviewMedia.mp4 && <source src={buildPreviewMedia.mp4} type="video/mp4" />}
+          </video>
+          <div style={S.heroVideoShade} />
+          <div style={S.heroVideoTop}>
+            <span style={S.heroVideoEyebrow}>Build process preview</span>
+            <span style={S.heroVideoBadge}><Play size={10} /> Loop</span>
+          </div>
+          <div style={S.heroVideoBottom}>
+            {['Conductor', 'PTFE', 'Spiral', 'Foil', 'Braid', 'Jacket'].map((step, index) => (
+              <span key={step} style={S.heroStep}>
+                <span style={S.heroStepNum}>{String(index + 1).padStart(2, '0')}</span>
+                {step}
+              </span>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -4409,11 +4446,22 @@ function ChartCard({ title, sub, data, xKey = 'f', yKey, color, xFmt, yFmt, yDom
 
 const S = {
   root: { display: 'flex', flexDirection: 'column', gap: 16 },
-  hero: { border: `1px solid ${C.border}`, background: 'linear-gradient(135deg, rgba(15,22,24,0.98), rgba(22,11,6,0.78))', padding: 18, borderRadius: 3, display: 'flex', gap: 14, alignItems: 'flex-start' },
+  hero: { border: `1px solid ${C.border}`, background: 'linear-gradient(135deg, rgba(15,22,24,0.98), rgba(22,11,6,0.78))', padding: 18, borderRadius: 3, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 18, alignItems: 'stretch' },
+  heroLead: { display: 'flex', gap: 14, alignItems: 'flex-start', minWidth: 0 },
   heroIcon: { width: 42, height: 42, border: `1px solid ${C.borderHi}`, display: 'grid', placeItems: 'center', color: C.amber, flex: '0 0 auto' },
+  heroText: { minWidth: 0, alignSelf: 'center' },
   eyebrow: { fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 4, color: C.copperHi, marginBottom: 6 },
   title: { fontFamily: 'Fraunces, serif', fontSize: 'clamp(26px, 4vw, 44px)', fontWeight: 400, lineHeight: 1.02, margin: 0, color: C.text },
   copy: { maxWidth: 780, color: C.dim, fontSize: 13, lineHeight: 1.7, margin: '10px 0 0' },
+  heroVideoPanel: { position: 'relative', overflow: 'hidden', minHeight: 178, aspectRatio: '16 / 7', border: `1px solid ${C.borderHi}`, background: '#05090a', borderRadius: 3, boxShadow: '0 18px 50px rgba(0,0,0,0.34)' },
+  heroVideo: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
+  heroVideoShade: { position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(5,9,10,0.68), rgba(5,9,10,0.08) 48%, rgba(5,9,10,0.68)), linear-gradient(0deg, rgba(5,9,10,0.72), transparent 48%, rgba(5,9,10,0.3))' },
+  heroVideoTop: { position: 'absolute', top: 12, left: 12, right: 12, display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' },
+  heroVideoEyebrow: { fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 2.5, textTransform: 'uppercase', color: C.teal, textShadow: '0 2px 14px rgba(0,0,0,0.8)' },
+  heroVideoBadge: { display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${C.teal}77`, color: C.teal, background: 'rgba(5,9,10,0.72)', padding: '5px 8px', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.4 },
+  heroVideoBottom: { position: 'absolute', left: 12, right: 12, bottom: 12, display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 5 },
+  heroStep: { minWidth: 0, border: `1px solid rgba(251,191,36,0.24)`, background: 'rgba(5,9,10,0.72)', color: C.text, padding: '6px 7px', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  heroStepNum: { color: C.copperHi, marginRight: 5 },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 16 },
   viewerCard: { border: `1px solid ${C.border}`, background: C.panel, borderRadius: 3, overflow: 'hidden' },
   controlsCard: { border: `1px solid ${C.border}`, background: C.panel, borderRadius: 3, padding: 14 },

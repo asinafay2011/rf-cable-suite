@@ -2837,6 +2837,11 @@ function RFFailureTheater() {
   const [activeId, setActiveId] = useState("foil-gap");
   const [severity, setSeverity] = useState(72);
   const [bandId, setBandId] = useState("mid");
+  const failureMedia = useMediaOverride("rf_failure_explainer", {
+    poster: "/generated/higgsfield/rf-failure-theater-higgsfield-v2-poster.jpg",
+    webm: "",
+    mp4: "/generated/higgsfield/rf-failure-theater-higgsfield-v2.mp4",
+  });
 
   const activeFailure = RF_FAILURE_CASES.find((item) => item.id === activeId) || RF_FAILURE_CASES[0];
   const activeBand = RF_FAILURE_BANDS.find((item) => item.id === bandId) || RF_FAILURE_BANDS[0];
@@ -2845,20 +2850,52 @@ function RFFailureTheater() {
   const worstReturnLoss = Math.abs(Math.max(...rlTrace.map((point) => point.rl)));
   const peakVswr = rfFailureVswrFromReturnLoss(worstReturnLoss);
   const tdrPeak = Math.max(...tdrTrace.map((point) => Math.abs(point.ohms - 50)));
+  const hasFailureVideo = Boolean(failureMedia?.mp4 || failureMedia?.webm);
 
   return (
     <div style={S.viewInner} data-testid="rf-failure-theater">
-      <div style={{ ...S.viewIntro, display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 16, alignItems: "center" }}>
-        <div style={{ width: 48, height: 48, border: "1px solid #324047", borderRadius: 4, display: "grid", placeItems: "center", color: "#fb923c" }}>
-          <Sparkles size={22} />
-        </div>
-        <div>
-          <div style={RF_FAILURE_UI.eyebrow}>RF Failure Theater</div>
-          <div style={{ ...S.viewIntroStrong, marginTop: 6 }}>Physical defect {"->"} RF symptom</div>
-          <div style={{ color: "#cbd5e1", lineHeight: 1.7, maxWidth: 820 }}>
-            Coax-focused failure scenes connect a visible build defect to TDR impedance, return loss, VSWR, and the manufacturing fix.
+      <div style={{ ...S.viewIntro, display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(340px, 520px)", gap: 18, alignItems: "stretch" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 16, alignItems: "center" }}>
+          <div style={{ width: 48, height: 48, border: "1px solid #324047", borderRadius: 4, display: "grid", placeItems: "center", color: "#fb923c" }}>
+            <Sparkles size={22} />
+          </div>
+          <div>
+            <div style={RF_FAILURE_UI.eyebrow}>RF Failure Theater</div>
+            <div style={{ ...S.viewIntroStrong, marginTop: 6 }}>Physical defect {"->"} RF symptom</div>
+            <div style={{ color: "#cbd5e1", lineHeight: 1.7, maxWidth: 820 }}>
+              Coax-focused failure scenes connect a visible build defect to TDR impedance, return loss, VSWR, and the manufacturing fix.
+            </div>
           </div>
         </div>
+
+        {hasFailureVideo && (
+          <div style={{ position: "relative", minHeight: 132, border: "1px solid #26343a", borderRadius: 4, overflow: "hidden", background: "#05090a", boxShadow: "0 16px 42px rgba(0,0,0,0.32)" }}>
+            <video
+              key={`${failureMedia.mp4 || ""}-${failureMedia.webm || ""}`}
+              autoPlay
+              muted
+              loop
+              playsInline
+              poster={failureMedia.poster}
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block", opacity: 0.94 }}
+            >
+              {failureMedia.webm && <source src={failureMedia.webm} type="video/webm" />}
+              {failureMedia.mp4 && <source src={failureMedia.mp4} type="video/mp4" />}
+            </video>
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, rgba(5,9,10,0.72), rgba(5,9,10,0.08) 52%, rgba(5,9,10,0.52)), linear-gradient(0deg, rgba(5,9,10,0.55), transparent)" }} />
+            <div style={{ position: "absolute", left: 12, top: 12, ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>Higgsfield Failure Preview</div>
+            <div style={{ position: "absolute", right: 12, top: 12, border: "1px solid rgba(94,234,212,0.55)", color: "#5eead4", background: "rgba(5,9,10,0.72)", padding: "5px 8px", borderRadius: 3, fontFamily: '"JetBrains Mono", monospace', fontSize: 10, fontWeight: 900, letterSpacing: 1.2, textTransform: "uppercase" }}>
+              Loop
+            </div>
+            <div style={{ position: "absolute", left: 12, right: 12, bottom: 10, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
+              {["damage", "TDR echo", "S11 ripple", "fix"].map((label, index) => (
+                <span key={label} style={{ border: "1px solid rgba(94,234,212,0.22)", background: "rgba(5,9,10,0.68)", padding: "7px 8px", color: index === 0 ? "#fb923c" : "#cbd5e1", fontFamily: '"JetBrains Mono", monospace', fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {String(index + 1).padStart(2, "0")} {label}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, marginTop: 22 }}>
@@ -3829,11 +3866,6 @@ function makeShieldingTrace({ preset, coveragePct, foilOverlapPct, seamGapMm, tr
 
 function ShieldingEffectivenessLab() {
   const [presetId, setPresetId] = useState("foilBraid");
-  const media = useMediaOverride('rf_shielding_explainer', {
-    poster: '/shielding/rf-shielding-explainer-poster.jpg',
-    webm: '/shielding/rf-shielding-explainer-veo31.webm',
-    mp4: '/shielding/rf-shielding-explainer-veo31.mp4',
-  });
   const activePreset = RF_SHIELD_PRESETS.find((preset) => preset.id === presetId) || RF_SHIELD_PRESETS[4];
   const [freqMHz, setFreqMHz] = useState(activePreset.id === "foilBraid" ? 2400 : 900);
   const [coveragePct, setCoveragePct] = useState(activePreset.coverage);
@@ -3882,46 +3914,17 @@ function ShieldingEffectivenessLab() {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))", gap: 18, marginTop: 22, alignItems: "stretch" }}>
         <section style={{ ...RF_FAILURE_UI.panel, overflow: "hidden", minWidth: 0 }}>
-          <div style={{ position: "relative", height: "clamp(390px, 34vw, 560px)", background: "radial-gradient(circle at 24% 18%, #142327, #050808 62%)" }}>
-            <style>{`
-              @media (prefers-reduced-motion: reduce) {
-                .shielding-explainer-video { display: none; }
-                .shielding-explainer-poster { opacity: 1 !important; }
-              }
-            `}</style>
-            <div
-              className="shielding-explainer-poster"
-              style={{
-                position: "absolute",
-                inset: 0,
-                backgroundImage: `url(${media.poster})`,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-                opacity: 0,
-              }}
-            />
-            <video
-              className="shielding-explainer-video"
-              autoPlay
-              muted
-              loop
-              playsInline
-              preload="metadata"
-              poster={media.poster}
-              aria-label={`${activePreset.label} RF shielding effectiveness explainer`}
-              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", opacity: 0.96 }}
-            >
-              {media.webm && <source src={media.webm} type="video/webm" />}
-              {media.mp4 && <source src={media.mp4} type="video/mp4" />}
-            </video>
-            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.04), rgba(0,0,0,0.48))" }} />
-            <div style={{ position: "absolute", top: 16, left: 16, ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>RF shielding explainer</div>
-            <div style={{ position: "absolute", right: 16, top: 16, padding: "9px 11px", border: `1px solid ${result.gradeColor}`, borderRadius: 4, background: "rgba(5,9,11,0.78)", color: result.gradeColor, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>
-              {result.grade}
-            </div>
-            <ShieldingFieldBadge left="8%" top="24%" color="#fbbf24" label="incident EMI" value={`${freqMHz >= 1000 ? `${(freqMHz / 1000).toFixed(1)} GHz` : `${freqMHz.toFixed(0)} MHz`}`} />
-            <ShieldingFieldBadge left="73%" top="54%" color={result.gradeColor} label="coupled field" value={`${result.coupledDbuv.toFixed(1)} dBuV/m`} />
-          </div>
+          <ShieldingCutawayScene
+            preset={activePreset}
+            result={result}
+            freqMHz={freqMHz}
+            coveragePct={coveragePct}
+            foilOverlapPct={foilOverlapPct}
+            seamGapMm={seamGapMm}
+            transferMilliOhm={transferMilliOhm}
+            bondPct={bondPct}
+            leakLabel={leakLabel}
+          />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, padding: 12 }}>
             <RfFailureChip label="Stack" value={activePreset.label} accent={activePreset.accent} />
             <RfFailureChip label="Dominant leak" value={result.dominant} accent="#67e8f9" />
@@ -4032,6 +4035,241 @@ function ShieldingEffectivenessLab() {
         <ShieldingConstructionCard preset={activePreset} result={result} />
         <ShieldingFactoryCard result={result} preset={activePreset} />
       </div>
+    </div>
+  );
+}
+
+function ShieldingCutawayScene({ preset, result, freqMHz, coveragePct, foilOverlapPct, seamGapMm, transferMilliOhm, bondPct, leakLabel }) {
+  const hasBraid = coveragePct > 1;
+  const hasFoil = preset.hasFoil;
+  const isQuad = preset.id === "quad";
+  const braidCount = Math.max(6, Math.min(28, Math.round(coveragePct / 4) + (isQuad ? 4 : 0)));
+  const braidLines = Array.from({ length: braidCount }, (_, index) => index);
+  const leakStrength = rfLaunchClamp((78 - result.seDb) / 72, 0.04, 0.95);
+  const seamStrength = hasFoil ? rfLaunchClamp(seamGapMm / 0.7, 0.02, 1) : 0.18;
+  const apertureStrength = hasBraid ? rfLaunchClamp((100 - coveragePct) / 55, 0.04, 0.9) : 0.95;
+  const bondStrength = rfLaunchClamp((100 - bondPct) / 75, 0.04, 0.85);
+  const reflectedStrength = rfLaunchClamp(result.seDb / 105, 0.08, 0.95);
+  const frequencyLabel = freqMHz >= 1000 ? `${(freqMHz / 1000).toFixed(2)} GHz` : `${freqMHz.toFixed(0)} MHz`;
+  const slotLabel = hasFoil ? `${seamGapMm.toFixed(2)} mm seam` : `${Math.max(0, 100 - coveragePct).toFixed(0)}% aperture`;
+  const conductorHot = result.seDb < 40 ? "#fb7185" : result.seDb < 70 ? "#fbbf24" : "#5eead4";
+
+  return (
+    <div style={{ position: "relative", height: "clamp(430px, 35vw, 610px)", overflow: "hidden", background: "radial-gradient(circle at 24% 18%, rgba(34,211,238,0.16), transparent 34%), linear-gradient(145deg, #071012 0%, #05080a 58%, #0d1417 100%)" }}>
+      <style>{`
+        @keyframes shield-wave-flow { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -96; } }
+        @keyframes shield-leak-pulse { 0%, 100% { opacity: 0.28; transform: scale(0.98); } 50% { opacity: 1; transform: scale(1.02); } }
+        @keyframes shield-current { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -72; } }
+        @keyframes shield-scan { from { transform: translateX(-18%); } to { transform: translateX(18%); } }
+        .shield-wave-flow { animation: shield-wave-flow 2.7s linear infinite; }
+        .shield-current-flow { animation: shield-current 2.2s linear infinite; }
+        .shield-leak-pulse { animation: shield-leak-pulse 2.1s ease-in-out infinite; transform-origin: center; }
+        .shield-scan-line { animation: shield-scan 5s ease-in-out infinite alternate; }
+        @media (prefers-reduced-motion: reduce) {
+          .shield-wave-flow, .shield-current-flow, .shield-leak-pulse, .shield-scan-line { animation: none; }
+        }
+      `}</style>
+
+      <svg viewBox="0 0 920 520" preserveAspectRatio="xMidYMid slice" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} role="img" aria-label={`${preset.label} live shield leakage cutaway`}>
+        <defs>
+          <linearGradient id="shield-bg-grid" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#122025" stopOpacity="0.9" />
+            <stop offset="100%" stopColor="#050809" stopOpacity="0.98" />
+          </linearGradient>
+          <linearGradient id="shield-jacket" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#111820" />
+            <stop offset="54%" stopColor="#050608" />
+            <stop offset="100%" stopColor="#20272d" />
+          </linearGradient>
+          <linearGradient id="shield-dielectric" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#f7f2dd" />
+            <stop offset="48%" stopColor="#cfc7b4" />
+            <stop offset="100%" stopColor="#fff7dd" />
+          </linearGradient>
+          <linearGradient id="shield-foil" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#cfd3d5" />
+            <stop offset="38%" stopColor="#68737b" />
+            <stop offset="68%" stopColor="#f4f7f7" />
+            <stop offset="100%" stopColor="#7e878d" />
+          </linearGradient>
+          <linearGradient id="shield-copper" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#8b3a0f" />
+            <stop offset="48%" stopColor="#ffb35b" />
+            <stop offset="100%" stopColor="#7c2d12" />
+          </linearGradient>
+          <filter id="shield-soft-glow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <clipPath id={`shield-cutaway-${preset.id}`}>
+            <rect x="178" y="188" width="476" height="174" rx="84" />
+          </clipPath>
+          <clipPath id={`shield-braid-${preset.id}`}>
+            <rect x="252" y="204" width="382" height="142" rx="64" />
+          </clipPath>
+        </defs>
+
+        <rect width="920" height="520" fill="url(#shield-bg-grid)" />
+        <g opacity="0.14">
+          {Array.from({ length: 18 }, (_, index) => (
+            <path key={`grid-h-${index}`} d={`M0 ${index * 32 + 8} H920`} stroke="#5eead4" strokeWidth="0.6" />
+          ))}
+          {Array.from({ length: 24 }, (_, index) => (
+            <path key={`grid-v-${index}`} d={`M${index * 42 + 4} 0 V520`} stroke="#5eead4" strokeWidth="0.45" />
+          ))}
+        </g>
+
+        <g className="shield-scan-line" opacity="0.28">
+          <path d="M70 118 C135 72 198 83 251 128 C320 187 383 167 450 112" fill="none" stroke="#22d3ee" strokeWidth="2" strokeDasharray="8 12" />
+          <path d="M46 394 C145 335 228 354 315 405 C395 451 496 426 582 366" fill="none" stroke="#fb923c" strokeWidth="1.4" strokeDasharray="5 13" />
+        </g>
+
+        <g filter="url(#shield-soft-glow)" opacity={0.36 + reflectedStrength * 0.42}>
+          <path className="shield-wave-flow" d="M-20 250 C28 164 58 164 104 250 C151 337 183 337 226 250 C267 167 304 167 342 250" fill="none" stroke="#22d3ee" strokeWidth="4" strokeDasharray="18 18" />
+          <path className="shield-wave-flow" d="M-10 304 C38 248 92 244 142 302 C190 358 238 356 286 302" fill="none" stroke="#38bdf8" strokeWidth="2" strokeDasharray="10 18" opacity="0.78" />
+        </g>
+
+        <g opacity={reflectedStrength}>
+          <path className="shield-current-flow" d="M218 186 C292 126 452 127 592 184" fill="none" stroke="#5eead4" strokeWidth="2.4" strokeDasharray="11 11" />
+          <path className="shield-current-flow" d="M222 364 C312 414 456 409 592 356" fill="none" stroke="#5eead4" strokeWidth="2.1" strokeDasharray="9 12" />
+        </g>
+
+        <ellipse cx="525" cy="385" rx="330" ry="34" fill="#000" opacity="0.38" />
+
+        <g>
+          <rect x="68" y="221" width="166" height="112" rx="56" fill="url(#shield-jacket)" stroke="#26343a" strokeWidth="2" />
+          <rect x="634" y="221" width="300" height="112" rx="56" fill="url(#shield-jacket)" stroke="#26343a" strokeWidth="2" />
+          <rect x="150" y="244" width="660" height="64" rx="32" fill="url(#shield-dielectric)" opacity="0.96" />
+          <rect x="48" y="268" width="824" height="15" rx="7.5" fill="url(#shield-copper)" />
+          <rect x="48" y="270" width="824" height="4" rx="2" fill="#ffd18b" opacity="0.72" />
+
+          {hasFoil && (
+            <g>
+              <rect x="210" y="226" width="420" height="104" rx="52" fill="url(#shield-foil)" opacity="0.86" />
+              <rect x="210" y="248" width="420" height="58" rx="28" fill="url(#shield-dielectric)" opacity="0.92" />
+              <rect x="210" y="226" width="420" height="104" rx="52" fill="none" stroke="#e5e7eb" strokeWidth="2" opacity="0.6" />
+              <path d={`M388 222 C410 ${222 - seamStrength * 18} 438 ${222 - seamStrength * 14} 462 222`} fill="none" stroke="#fb923c" strokeWidth={3 + seamStrength * 5} strokeLinecap="round" strokeDasharray="10 7" opacity={0.32 + seamStrength * 0.66} />
+              <path d={`M420 226 L420 ${205 + seamStrength * 33}`} stroke="#fb923c" strokeWidth="2" strokeDasharray="5 6" opacity={0.6 + seamStrength * 0.3} />
+            </g>
+          )}
+
+          {hasBraid && (
+            <g clipPath={`url(#shield-braid-${preset.id})`} opacity="0.92">
+              {braidLines.map((line) => {
+                const offset = -240 + line * (760 / braidCount);
+                return (
+                  <path key={`braid-a-${line}`} d={`M${offset} 364 L${offset + 386} 190`} stroke={line % 2 ? "#cbd5e1" : "#87949b"} strokeWidth={isQuad ? 3.2 : 2.6} opacity={0.48 + coveragePct / 190} />
+                );
+              })}
+              {braidLines.map((line) => {
+                const offset = 154 + line * (760 / braidCount);
+                return (
+                  <path key={`braid-b-${line}`} d={`M${offset} 190 L${offset - 386} 364`} stroke={line % 2 ? "#f8fafc" : "#9aa6ad"} strokeWidth={isQuad ? 3.2 : 2.6} opacity={0.43 + coveragePct / 210} />
+                );
+              })}
+              {isQuad && (
+                <rect x="238" y="216" width="410" height="126" rx="62" fill="none" stroke="#a78bfa" strokeWidth="3" strokeDasharray="13 8" opacity="0.82" />
+              )}
+            </g>
+          )}
+
+          {!hasFoil && !hasBraid && (
+            <g opacity="0.9">
+              <rect x="206" y="230" width="404" height="96" rx="48" fill="#f7f2dd" opacity="0.26" />
+              <path d="M218 236 C344 262 454 200 600 232" stroke="#fb7185" strokeWidth="2" strokeDasharray="9 8" fill="none" />
+              <path d="M218 326 C348 294 456 356 600 322" stroke="#fb7185" strokeWidth="2" strokeDasharray="9 8" fill="none" />
+            </g>
+          )}
+
+          <g clipPath={`url(#shield-cutaway-${preset.id})`}>
+            <rect x="160" y="244" width="484" height="64" rx="32" fill="url(#shield-dielectric)" opacity="0.76" />
+            <rect x="48" y="268" width="824" height="15" rx="7.5" fill="url(#shield-copper)" opacity="0.96" />
+            <rect x="48" y="270" width="824" height="4" rx="2" fill="#ffd18b" opacity="0.75" />
+          </g>
+
+          <ellipse cx="228" cy="276" rx="74" ry="74" fill="none" stroke="#1f2933" strokeWidth="18" opacity="0.9" />
+          {hasFoil && <ellipse cx="228" cy="276" rx="62" ry="62" fill="none" stroke="#cfd3d5" strokeWidth="8" opacity="0.92" />}
+          {hasBraid && <ellipse cx="228" cy="276" rx="70" ry="70" fill="none" stroke={preset.accent} strokeWidth="4" strokeDasharray={coveragePct > 90 ? "9 3" : "7 9"} opacity={0.68} />}
+          <ellipse cx="228" cy="276" rx="43" ry="43" fill="#f7f2dd" opacity="0.9" />
+          <ellipse cx="228" cy="276" rx="14" ry="14" fill="url(#shield-copper)" stroke="#ffd18b" strokeWidth="2" />
+
+          <g opacity={0.3 + bondStrength * 0.55}>
+            <rect x="830" y="198" width="58" height="156" rx="12" fill="#192027" stroke={bondStrength > 0.4 ? "#fb923c" : "#5eead4"} strokeWidth="2" />
+            <path d="M826 214 H890 M826 338 H890" stroke={bondStrength > 0.4 ? "#fb923c" : "#5eead4"} strokeWidth="3" strokeDasharray="8 5" />
+          </g>
+        </g>
+
+        <g className="shield-leak-pulse" filter="url(#shield-soft-glow)" opacity={leakStrength}>
+          <path d="M430 214 C454 162 502 135 574 122" fill="none" stroke="#fb923c" strokeWidth={2 + seamStrength * 5} strokeLinecap="round" strokeDasharray="14 12" opacity={0.2 + seamStrength * 0.8} />
+          <path d="M614 244 C682 196 739 176 820 161" fill="none" stroke={result.gradeColor} strokeWidth={2 + leakStrength * 5} strokeLinecap="round" strokeDasharray="12 10" opacity={0.15 + leakStrength * 0.78} />
+          <path d="M610 324 C690 374 747 392 835 412" fill="none" stroke="#38bdf8" strokeWidth={1.5 + apertureStrength * 4} strokeLinecap="round" strokeDasharray="10 13" opacity={0.12 + apertureStrength * 0.62} />
+          <path d="M870 206 C890 154 910 132 938 118" fill="none" stroke="#fb7185" strokeWidth={1 + bondStrength * 4} strokeLinecap="round" strokeDasharray="8 10" opacity={0.1 + bondStrength * 0.74} />
+        </g>
+
+        <g>
+          <path d="M108 160 L190 226" stroke="#fbbf24" strokeWidth="1.4" strokeDasharray="4 6" />
+          <path d="M462 170 L430 222" stroke="#fb923c" strokeWidth="1.4" strokeDasharray="4 6" opacity={hasFoil ? 1 : 0.45} />
+          <path d="M764 164 L615 244" stroke={result.gradeColor} strokeWidth="1.4" strokeDasharray="4 6" />
+          <path d="M836 392 L856 338" stroke={bondStrength > 0.35 ? "#fb923c" : "#5eead4"} strokeWidth="1.4" strokeDasharray="4 6" />
+        </g>
+      </svg>
+
+      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, rgba(5,8,10,0.58) 0%, rgba(5,8,10,0.08) 43%, rgba(5,8,10,0.42) 100%)", pointerEvents: "none" }} />
+
+      <div style={{ position: "absolute", top: 16, left: 16, right: 16, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+        <div>
+          <div style={{ ...RF_FAILURE_UI.eyebrow, color: "#5eead4" }}>Live shield leakage cutaway</div>
+          <div style={{ marginTop: 8, color: "#f8fafc", fontFamily: '"Bricolage Grotesque", sans-serif', fontSize: "clamp(22px, 2.2vw, 34px)", lineHeight: 1.04 }}>
+            {preset.label} at {frequencyLabel}
+          </div>
+        </div>
+        <div style={{ padding: "9px 11px", border: `1px solid ${result.gradeColor}`, borderRadius: 4, background: "rgba(5,9,11,0.82)", color: result.gradeColor, fontFamily: '"JetBrains Mono", monospace', fontWeight: 900, fontSize: 12 }}>
+          {result.grade}
+        </div>
+      </div>
+
+      <div style={{ position: "absolute", left: 18, top: "38%", display: "grid", gap: 8 }}>
+        <ShieldingSceneTag color="#fbbf24" label="incident EMI" value={frequencyLabel} />
+        <ShieldingSceneTag color="#5eead4" label="shield current" value={`${Math.round(reflectedStrength * 100)}% return`} />
+      </div>
+
+      <div style={{ position: "absolute", right: 18, top: "39%", display: "grid", gap: 8, maxWidth: 210 }}>
+        <ShieldingSceneTag color={result.gradeColor} label="coupled field" value={`${result.coupledDbuv.toFixed(1)} dBuV/m`} />
+        <ShieldingSceneTag color="#fb923c" label={hasFoil ? "seam slot" : "braid aperture"} value={slotLabel} />
+      </div>
+
+      <div style={{ position: "absolute", left: 16, right: 16, bottom: 16, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+        <ShieldingSceneMini label="SE" value={`${result.seDb.toFixed(1)} dB`} accent={result.gradeColor} />
+        <ShieldingSceneMini label="Field leak" value={leakLabel} accent="#fbbf24" />
+        <ShieldingSceneMini label="Overlap" value={hasFoil ? `${foilOverlapPct.toFixed(0)}%` : "none"} accent="#5eead4" />
+        <ShieldingSceneMini label="Bond" value={`${bondPct.toFixed(0)}%`} accent={bondStrength > 0.35 ? "#fb923c" : "#67e8f9"} />
+      </div>
+    </div>
+  );
+}
+
+function ShieldingSceneTag({ color, label, value }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", gap: 8, alignItems: "center", padding: "8px 10px", border: `1px solid ${color}66`, background: "rgba(5,9,11,0.78)", borderRadius: 4, boxShadow: `0 0 24px ${color}22` }}>
+      <span style={{ width: 20, height: 20, borderRadius: "50%", border: `1px solid ${color}`, display: "grid", placeItems: "center" }}>
+        <span style={{ width: 5, height: 5, borderRadius: "50%", background: color }} />
+      </span>
+      <span>
+        <span style={{ display: "block", color, fontFamily: '"JetBrains Mono", monospace', fontSize: 9, textTransform: "uppercase", letterSpacing: 1.5, fontWeight: 900 }}>{label}</span>
+        <span style={{ display: "block", color: "#dbeafe", fontSize: 11, marginTop: 2 }}>{value}</span>
+      </span>
+    </div>
+  );
+}
+
+function ShieldingSceneMini({ label, value, accent }) {
+  return (
+    <div style={{ minWidth: 0, padding: "9px 10px", border: "1px solid rgba(148,163,184,0.2)", background: "rgba(5,9,11,0.78)", borderRadius: 4 }}>
+      <div style={{ color: "#8b9aa3", fontFamily: '"JetBrains Mono", monospace', fontSize: 9, textTransform: "uppercase", letterSpacing: 1.4 }}>{label}</div>
+      <div style={{ color: accent, fontFamily: '"JetBrains Mono", monospace', fontSize: 12, fontWeight: 900, marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Radio, Cable, FlaskConical, BookOpen, ArrowRight, Sparkles, Check, GitBranch } from 'lucide-react'
+import { useMediaOverride } from '../components/mediaOverrides.js'
 
 const C = {
   bg: '#0a0d0f',
@@ -26,6 +27,11 @@ export default function LandingPage() {
       else if (localStorage.getItem('rf-chat-history')) setLastApp('rf')
     } catch {}
   }, [])
+  const heroMedia = useMediaOverride('suite_home_hero', {
+    poster: '/generated/higgsfield/suite-home-hero-rf-highspeed-v2-poster.jpg',
+    webm: '',
+    mp4: '/generated/higgsfield/suite-home-hero-rf-highspeed-v2.mp4',
+  })
 
   return (
     <div className="min-h-screen bg-[#0a0d0f] text-[#f0ebe2] relative overflow-hidden" style={{ fontFamily: 'Manrope, system-ui, sans-serif' }}>
@@ -86,9 +92,10 @@ export default function LandingPage() {
       <section className="relative z-10 overflow-hidden border-y border-[#252e33]" style={{ minHeight: 'min(760px, calc(100svh - 96px))' }}>
         <div
           className="hero-poster-bg absolute inset-0 bg-cover bg-center transition-opacity duration-300"
-          style={{ backgroundImage: 'url(/hero/rf-main-hero-poster.jpg)' }}
+          style={{ backgroundImage: `url(${heroMedia.poster})` }}
         />
         <video
+          data-testid="suite-home-hero-video"
           className="hero-motion-video absolute inset-0 h-full w-full object-cover opacity-75"
           style={{ objectPosition: '64% center' }}
           autoPlay
@@ -96,11 +103,11 @@ export default function LandingPage() {
           loop
           playsInline
           preload="metadata"
-          poster="/hero/rf-main-hero-poster.jpg"
+          poster={heroMedia.poster}
           aria-hidden="true"
         >
-          <source src="/hero/rf-main-hero-higgsfield.webm" type="video/webm" />
-          <source src="/hero/rf-main-hero-higgsfield-noaudio.mp4" type="video/mp4" />
+          {heroMedia.webm && <source src={heroMedia.webm} type="video/webm" />}
+          {heroMedia.mp4 && <source src={heroMedia.mp4} type="video/mp4" />}
         </video>
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(10,13,15,0.97)_0%,rgba(10,13,15,0.86)_34%,rgba(10,13,15,0.42)_68%,rgba(10,13,15,0.82)_100%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,13,15,0.75)_0%,rgba(10,13,15,0.06)_42%,rgba(10,13,15,0.82)_100%)]" />

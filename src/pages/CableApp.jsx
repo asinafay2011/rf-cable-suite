@@ -123,7 +123,7 @@ Inline diagrams (\`generate_diagram\` tool):
 
 Higgsfield media generation:
 - When the user asks to create or replace a Highspeed/Builder app video/hero/explainer, use the Higgsfield tools instead of only writing a prompt. First use \`higgsfield_account_status\` or \`higgsfield_video_cost\` if they ask about readiness/cost. If they explicitly say to generate it, call \`generate_higgsfield_video\` with \`confirmed: true\`.
-- Use \`slot="highspeed_home_hero"\` for the Highspeed front-page hero and \`highspeed_build_process\` for process/build videos.
+- Use \`slot="highspeed_home_hero"\` for the Highspeed front-page hero, \`highspeed_build_process\` for process/build videos, and \`highspeed_eye_tdr_explainer\` for Eye/TDR defect explainer loops.
 - Prompts must forbid captions, text overlays, logos, loose/floating cables, unrelated objects, and branding unless the user asks for them. For app hero media, use 16:9, 6-8 seconds, \`veo3_1\`, \`quality="ultra"\`, \`veo_model="veo-3-1-preview"\`. After the tool returns, tell the engineer to click Apply to use the saved local asset.
 
 Disagree-and-justify (don't be a yes-man):
@@ -7027,6 +7027,11 @@ function EyeTdrCorrelationLab() {
   const [bitRateGbps, setBitRateGbps] = useState(10);
   const [lengthM, setLengthM] = useState(30);
   const [equalizationDb, setEqualizationDb] = useState(3);
+  const eyeTdrMedia = useMediaOverride('highspeed_eye_tdr_explainer', {
+    poster: '/generated/higgsfield/highspeed-eye-tdr-higgsfield-v1-poster.jpg',
+    webm: '',
+    mp4: '/generated/higgsfield/highspeed-eye-tdr-higgsfield-v1.mp4',
+  });
 
   useEffect(() => {
     const onApply = (event) => {
@@ -7072,6 +7077,58 @@ function EyeTdrCorrelationLab() {
         subtitle="A single manufacturing defect rarely shows up in only one instrument. This lab shows the whole measurement story at once."
         icon={Activity}
       />
+
+      <div className="grid xl:grid-cols-[minmax(0,0.85fr)_minmax(480px,1.15fr)] gap-5 border border-[#252e33] bg-[#101619] mb-6 overflow-hidden rounded-sm">
+        <div className="p-5 lg:p-6 flex flex-col justify-between gap-6">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-[#5eead4] mb-3">
+              High-speed defect loop
+            </div>
+            <h3 className="text-2xl md:text-3xl font-light text-[#f0ebe2] leading-tight" style={{ fontFamily: 'Bricolage Grotesque, sans-serif' }}>
+              Pair skew and impedance bumps show up twice.
+            </h3>
+            <p className="mt-3 text-sm text-[#a7b0b6] leading-relaxed max-w-xl">
+              The same build defect that makes a TDR bump can also close the eye after the channel and equalizer do their work.
+            </p>
+          </div>
+          <div className="grid sm:grid-cols-4 gap-2">
+            {[
+              ['01', 'launch'],
+              ['02', 'defect'],
+              ['03', 'echo'],
+              ['04', 'eye close'],
+            ].map(([num, label]) => (
+              <div key={num} className="border border-[#252e33] bg-[#0a0d0f] p-3 min-h-[68px]">
+                <div className="font-mono text-[10px] text-[#fb923c]">{num}</div>
+                <div className="font-mono text-[10px] uppercase tracking-wider text-[#c9d2d8] mt-2">{label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="relative min-h-[260px] bg-[#050708] border-t xl:border-t-0 xl:border-l border-[#252e33] overflow-hidden">
+          <video
+            data-testid="highspeed-eye-tdr-video"
+            className="absolute inset-0 w-full h-full object-cover"
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="metadata"
+            poster={eyeTdrMedia.poster}
+          >
+            {eyeTdrMedia.webm && <source src={eyeTdrMedia.webm} type="video/webm" />}
+            {eyeTdrMedia.mp4 && <source src={eyeTdrMedia.mp4} type="video/mp4" />}
+          </video>
+          <div className="absolute inset-0 bg-gradient-to-r from-[#050708]/25 via-transparent to-[#050708]/20 pointer-events-none" />
+          <div className="absolute left-4 top-4 border border-[#5eead4]/70 bg-[#07100f]/80 px-3 py-2">
+            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#5eead4]">Higgsfield SI preview</div>
+          </div>
+          <div className="absolute right-4 bottom-4 border border-[#252e33] bg-[#07100f]/85 px-3 py-2 text-right">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-[#6b7479]">visual story</div>
+            <div className="font-mono text-[12px] text-[#f0ebe2] mt-1">defect → TDR → eye</div>
+          </div>
+        </div>
+      </div>
 
       <div className="grid xl:grid-cols-[minmax(0,1fr)_370px] gap-6 mb-6">
         <EyeTdrBlenderPanel defect={activeDefect} result={result} bitRateGbps={bitRateGbps} />
