@@ -464,7 +464,7 @@ function cellXml(ref, previousXml, value, type = 'auto') {
 }
 
 function writeExistingCell(xml, ref, value, type = 'auto') {
-  const pattern = new RegExp(`<c\\b(?=[^>]*\\br="${ref}")[\\s\\S]*?<\\/c>|<c\\b(?=[^>]*\\br="${ref}")[^>]*/>`)
+  const pattern = new RegExp(`<c\\b(?=[^>]*\\br="${ref}")[^>]*/>|<c\\b(?=[^>]*\\br="${ref}")[^>]*>[\\s\\S]*?<\\/c>`)
   return xml.replace(pattern, (previous) => cellXml(ref, previous, value, type))
 }
 
@@ -490,6 +490,79 @@ function xlsxNominalTriplet(nominalIn) {
   const v = Number(nominalIn)
   if (!Number.isFinite(v) || v <= 0) return blankTriplet()
   return ['-', Number(v.toFixed(4)), '-']
+}
+
+function mmToIn(value) {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? n / INCH_TO_MM : Number.NaN
+}
+
+function finiteNumber(value, fallback = Number.NaN) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function firstFinite(...values) {
+  for (const value of values) {
+    const n = Number(value)
+    if (Number.isFinite(n)) return n
+  }
+  return Number.NaN
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    const text = String(value ?? '').trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function percentCell(value, fallback) {
+  const n = Number(value)
+  const raw = Number.isFinite(n) ? n : Number(fallback)
+  if (!Number.isFinite(raw)) return ''
+  return Number((raw > 1 ? raw / 100 : raw).toFixed(4))
+}
+
+function directionText(value, fallback = 'Z', suffix = '') {
+  const text = String(value || fallback || '').trim().toUpperCase()
+  const dir = text.startsWith('S') ? 'S' : 'Z'
+  return `${dir}-DIRECTION${suffix}`
+}
+
+function shieldLayerByType(layers, type) {
+  return (layers || []).find((layer) => String(layer?.type || '').toLowerCase() === type) || null
+}
+
+function readLayerText(step, apply, ...keys) {
+  for (const key of keys) {
+    const text = String(step?.[key] ?? apply?.[key] ?? '').trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function shieldWrapText(value, fallbackPct = 50) {
+  const text = String(value ?? '').trim()
+  if (text.includes('/')) return overlapText(text)
+  const n = Number(text)
+  const pct = Number.isFinite(n) ? (n > 1 ? n : n * 100) : fallbackPct
+  if (Math.abs(pct - 50) < 3) return '1/2 WRAP'
+  if (Math.abs(pct - 66.7) < 4) return '2/3 WRAP'
+  if (Math.abs(pct - 75) < 4) return '3/4 WRAP'
+  return `${Number(pct.toFixed(1))}% OVERLAP`
+}
+
+function braidPartNumberFromSetup(setup = {}, fallback = '') {
+  const explicit = firstText(setup.part_number, setup.partNumber, fallback)
+  if (explicit) return explicit
+  const awg = Math.round(Number(setup.wire_awg ?? setup.gauge))
+  const ends = Math.round(Number(setup.ends_per_carrier ?? setup.ends))
+  if (Number.isFinite(awg) && Number.isFinite(ends) && awg > 0 && ends > 0) {
+    return `961-96207-SCC-${awg}-${ends}`
+  }
+  return ''
 }
 
 function excelDateSerial(value) {
@@ -565,6 +638,114 @@ async function patchTapingSheet(zip, path, sheetEntries, options) {
   zip.file(path, xml)
 }
 
+async function patchSpiralShieldSheet(zip, path, options = {}) {
+  if (!path || !zip.file(path)) return { filled: false }
+  const shieldLayers = Array.isArray(options.shieldLayers) ? options.shieldLayers : []
+  const applyLayers = Array.isArray(options.applyLayers) ? options.applyLayers : []
+  const spiralStep = shieldLayerByType(shieldLayers, 'spiral')
+  const spiralApply = shieldLayerByType(applyLayers, 'spiral')
+  const foilStep = shieldLayerByType(shieldLayers, 'foil') || shieldLayerByType(shieldLayers, 'flatwire')
+  const foilApply = shieldLayerByType(applyLayers, 'foil') || shieldLayerByType(applyLayers, 'flatwire')
+  const incomingOdIn = firstFinite(options.incomingOdIn, mmToIn(options.incomingOdMm), mmToIn(spiralStep?.od_before_mm), mmToIn(foilStep?.od_before_mm))
+  const spiralOdAfterIn = firstFinite(options.spiralOdAfterIn, mmToIn(options.spiralOdAfterMm), mmToIn(spiralStep?.od_after_mm), mmToIn(spiralApply?.ODAfterMm))
+  const foilOdAfterIn = firstFinite(options.foilOdAfterIn, mmToIn(options.foilOdAfterMm), mmToIn(foilStep?.od_after_mm), mmToIn(foilApply?.ODAfterMm))
+  const finalOdIn = firstFinite(foilOdAfterIn, spiralOdAfterIn, incomingOdIn)
+  const spiralPitch = firstFinite(options.spiralPitchSetpoint, options.spiralPitch, spiralStep?.mi_pitch_setpoint, spiralStep?.pitch_setpoint, spiralStep?.pitch_mm, spiralApply?.pitch)
+  const foilPitchIn = firstFinite(options.foilPitchSetpointIn, options.foilPitchIn, foilStep?.pitch_in, foilApply?.pitch_in, mmToIn(options.foilPitchSetpointMm), mmToIn(options.foilPitchMm), mmToIn(foilStep?.pitch_mm), mmToIn(foilApply?.pitch))
+  const foilOverlap = firstText(options.foilWrap, options.foilOverlap, foilStep?.wrap, foilStep?.overlap_text, foilStep?.overlap_pct, foilApply?.overlap)
+  const hasSpiral = Boolean(spiralStep || spiralApply)
+  const hasFoil = Boolean(foilStep || foilApply)
+  let xml = await zip.file(path).async('string')
+
+  xml = writeExistingCell(xml, 'D6', hasSpiral ? readLayerText(spiralStep, spiralApply, 'part_number', 'partNumber') || '-' : '-')
+  xml = writeExistingCell(xml, 'D7', hasFoil ? readLayerText(foilStep, foilApply, 'part_number', 'partNumber') || '-' : '-')
+  xml = writeExistingCell(xml, 'D8', options.takeUpSpool || options.take_up_spool || 'AT12679 (24"x14")')
+  xml = writeTriplet(xml, 10, xlsxToleranceTriplet(incomingOdIn))
+  xml = writeTriplet(xml, 12, ['-', finiteNumber(options.caterpillarGap, 1.03), '-'])
+  xml = writeTriplet(xml, 13, ['-', percentCell(options.payOffTorquePct, 30), '-'])
+  xml = writeTriplet(xml, 14, ['-', percentCell(options.takeUpTorquePct, 30), '-'])
+
+  if (hasSpiral) {
+    const spiralDieSize = firstFinite(options.spiralDieSizeIn, spiralStep?.die_size_in, spiralApply?.dieSizeIn, spiralOdAfterIn)
+    xml = writeExistingCell(xml, 'D16', directionText(readLayerText(spiralStep, spiralApply, 'direction'), 'S'))
+    xml = writeExistingCell(xml, 'D17', firstFinite(options.spiralBobbins, spiralStep?.bobbins, spiralApply?.bobbins, 8), 'number')
+    xml = writeTriplet(xml, 18, ['-', Number.isFinite(spiralPitch) ? Number(spiralPitch.toFixed(4)) : '', '-'])
+    xml = writeExistingCell(xml, 'D19', Number.isFinite(spiralDieSize) ? Number(spiralDieSize.toFixed(3)) : '-')
+    xml = writeTriplet(xml, 21, xlsxToleranceTriplet(spiralOdAfterIn))
+  } else {
+    xml = writeExistingCell(xml, 'D16', '-')
+    xml = writeExistingCell(xml, 'D17', '-')
+    xml = writeTriplet(xml, 18, blankTriplet())
+    xml = writeExistingCell(xml, 'D19', '-')
+    xml = writeTriplet(xml, 21, blankTriplet())
+  }
+
+  if (hasFoil) {
+    const foilType = String(foilStep?.type || foilApply?.type || '').toLowerCase()
+    const isMetalFoil = foilType !== 'flatwire'
+    xml = writeExistingCell(xml, 'D23', directionText(readLayerText(foilStep, foilApply, 'direction'), 'Z', isMetalFoil ? ' / FOIL IN' : ''))
+    xml = writeTriplet(xml, 24, ['-', Number.isFinite(foilPitchIn) ? Number(foilPitchIn.toFixed(4)) : '', '-'])
+    xml = writeExistingCell(xml, 'D25', shieldWrapText(foilOverlap, firstFinite(foilStep?.overlap_pct, foilApply?.overlap, 50)))
+    xml = writeTriplet(xml, 26, ['-', firstFinite(options.foilTensionN, options.tapeTensionN, foilStep?.tension_n, foilApply?.tension, 5), '-'])
+    xml = writeExistingCell(xml, 'D27', firstText(options.foilRoller1Position, foilStep?.roller_1_position, foilApply?.roller1, '1'))
+    xml = writeExistingCell(xml, 'D28', firstText(options.foilRoller2Position, foilStep?.roller_2_position, foilApply?.roller2, '1'))
+    xml = writeTriplet(xml, 30, xlsxToleranceTriplet(foilOdAfterIn))
+  } else {
+    xml = writeExistingCell(xml, 'D23', '-')
+    xml = writeTriplet(xml, 24, blankTriplet())
+    xml = writeExistingCell(xml, 'D25', '-')
+    xml = writeTriplet(xml, 26, blankTriplet())
+    xml = writeExistingCell(xml, 'D27', '-')
+    xml = writeExistingCell(xml, 'D28', '-')
+    xml = writeTriplet(xml, 30, blankTriplet())
+  }
+
+  xml = writeTriplet(xml, 32, ['-', finiteNumber(options.lineSpeedFtMin, 7), '-'])
+  xml = writeTriplet(xml, 34, xlsxToleranceTriplet(finalOdIn))
+  zip.file(path, xml)
+  return { filled: hasSpiral || hasFoil, filledSpiral: hasSpiral, filledFoil: hasFoil }
+}
+
+async function patchBraidingSheet(zip, path, options = {}) {
+  if (!path || !zip.file(path)) return { filled: false }
+  const shieldLayers = Array.isArray(options.shieldLayers) ? options.shieldLayers : []
+  const applyLayers = Array.isArray(options.applyLayers) ? options.applyLayers : []
+  const braidStep = shieldLayerByType(shieldLayers, 'braid')
+  const braidApply = shieldLayerByType(applyLayers, 'braid')
+  if (!braidStep && !braidApply) return { filled: false }
+
+  const setup = braidStep?.braid_setup || braidApply || {}
+  const incomingOdIn = firstFinite(options.braidIncomingOdIn, mmToIn(options.braidIncomingOdMm), mmToIn(braidStep?.od_before_mm))
+  const outgoingOdIn = firstFinite(options.braidOutgoingOdIn, mmToIn(options.braidOutgoingOdMm), mmToIn(braidStep?.od_after_mm))
+  const carriers = firstFinite(options.braidCarriers, setup.carriers, braidApply?.carriers)
+  const ends = firstFinite(options.braidEndsPerCarrier, setup.ends_per_carrier, braidApply?.ends)
+  const picks = firstFinite(options.braidPicksPerIn, setup.picks_per_in, braidApply?.picks)
+  const awg = firstFinite(setup.wire_awg, braidApply?.gauge)
+  const coverage = firstFinite(options.braidCoveragePct, setup.coverage_pct, braidApply?.coverage)
+  const angle = firstFinite(options.braidAngleDeg, setup.braid_angle_deg, 38.07)
+  const rpm = firstFinite(options.braidRpm, picks > 0 && picks <= 15 ? 100 : 30)
+  const dieSizeIn = firstFinite(options.braidDieSizeIn, incomingOdIn > 0 ? Math.max(incomingOdIn + 0.03, incomingOdIn * 1.3) : Number.NaN)
+  let xml = await zip.file(path).async('string')
+
+  xml = writeExistingCell(xml, 'D6', braidPartNumberFromSetup({ ...setup, wire_awg: awg, ends_per_carrier: ends }, options.braidPartNumber || options.braid_part_number))
+  xml = writeExistingCell(xml, 'D7', options.takeUpSpool || options.take_up_spool || 'AT12679 (24" x 14")')
+  xml = writeTriplet(xml, 9, [0.9, percentCell(coverage, 95), 1])
+  xml = writeTriplet(xml, 10, [35, Number.isFinite(angle) ? Number(angle.toFixed(2)) : 38.07, 45])
+  xml = writeTriplet(xml, 12, xlsxToleranceTriplet(incomingOdIn))
+  xml = writeExistingCell(xml, 'D13', Number.isFinite(carriers) ? Math.round(carriers) : '-')
+  xml = writeTriplet(xml, 14, ['-', Number.isFinite(ends) ? Math.round(ends) : '', '-'])
+  xml = writeTriplet(xml, 15, ['-', Number.isFinite(picks) ? Number(picks.toFixed(1)) : '', '-'])
+  xml = writeTriplet(xml, 16, ['-', Number.isFinite(rpm) ? Number(rpm.toFixed(1)) : '', '-'])
+  xml = writeTriplet(xml, 18, ['-', Number.isFinite(dieSizeIn) ? Number(dieSizeIn.toFixed(3)) : '', '-'])
+  xml = writeExistingCell(xml, 'D19', firstText(options.braidTensionSpringColor, options.tensionSpringColor, 'Blue'))
+  xml = writeExistingCell(xml, 'D21', 'OFF')
+  xml = writeTriplet(xml, 26, ['-', firstFinite(options.braidTakeUpTraverse, options.takeUpTraverse, 1.8), '-'])
+  xml = writeTriplet(xml, 27, ['-', firstFinite(options.braidTakeUpTension, options.takeUpTension, 1.8), '-'])
+  xml = writeTriplet(xml, 29, xlsxToleranceTriplet(outgoingOdIn, 0.002))
+  zip.file(path, xml)
+  return { filled: true, braidPartNumber: braidPartNumberFromSetup({ ...setup, wire_awg: awg, ends_per_carrier: ends }, options.braidPartNumber || options.braid_part_number) }
+}
+
 async function patchHeaderCells(zip, paths, options) {
   const by = options.by || ''
   const dateSerial = excelDateSerial(options.date || new Date())
@@ -610,6 +791,25 @@ async function makeShopMiXlsx(options = {}, entries = [], conductorOdIn = Number
     template: SHOP_MI_TEMPLATE_NAME,
     filledTapingEntries: Math.min(entries.length, 6),
     omittedTapingEntries: Math.max(0, entries.length - 6),
+  }
+}
+
+export async function makeShieldMiWorkbook(options = {}) {
+  const zip = await loadShopMiZip()
+  const paths = await sheetPathMap(zip)
+  await patchHeaderCells(zip, paths, options)
+  const spiral = await patchSpiralShieldSheet(zip, paths['Spiral Shield'], options)
+  const braid = await patchBraidingSheet(zip, paths.Braiding, options)
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })
+  return {
+    base64: uint8ToBase64(bytes),
+    mime: SHOP_MI_XLSX_MIME,
+    extension: 'xlsx',
+    template: SHOP_MI_TEMPLATE_NAME,
+    filledShieldSheets: [spiral.filled ? 'Spiral Shield' : null, braid.filled ? 'Braiding' : null].filter(Boolean),
+    filledSpiralShield: Boolean(spiral.filled),
+    filledBraid: Boolean(braid.filled),
+    braidPartNumber: braid.braidPartNumber || '',
   }
 }
 

@@ -29,7 +29,7 @@ import {
   WTM_MIN_TAPING_PITCH_IN,
   WTM_MIN_TAPING_PITCH_MM,
 } from '../data/materialLibrary.js'
-import { buildPtfeMiEntries, makeBlankMiWorkbook, makePtfeMiWorkbook } from '../data/miTemplate.js'
+import { buildPtfeMiEntries, makeBlankMiWorkbook, makePtfeMiWorkbook, makeShieldMiWorkbook } from '../data/miTemplate.js'
 import { HIGGSFIELD_TOOLS, dispatchHiggsfieldTool, isHiggsfieldTool } from './higgsfieldTools.js'
 
 const RF_CALIBRATION_MEMORY_KEY = 'rf-stack-calibration-memory-v1'
@@ -1003,7 +1003,7 @@ export const RF_TOOLS = [
   {
     name: 'design_shield_stack',
     description:
-      'Design the RF shield stack after the dielectric OD is known. Use when the engineer says to add shields such as "first shield SPC spiral with 10% gap, second shield foil or flatwire helical, then braid". Calculates SPC spiral width from dielectric OD × pi / 8 bobbins minus the requested gap, snaps spiral/foil/helical materials to the Material Library, estimates OD after each shield, and proposes braid carriers/ends/picks/gauge/coverage. Returns a one-click apply preset that fills the RF Stack Lab shield layers.',
+      'Design the RF shield stack after the dielectric OD is known. Use when the engineer says to add shields such as "first shield SPC spiral with 10% gap, second shield foil or flatwire helical, then braid". Calculates SPC spiral width from dielectric OD × pi / 8 bobbins minus the requested gap, snaps spiral/foil/helical materials to the Material Library, estimates OD after each shield, proposes braid carriers/ends/picks/gauge/coverage, and returns a filled shop MI workbook for the Spiral Shield/Braiding sheets plus a one-click apply preset.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1031,6 +1031,21 @@ export const RF_TOOLS = [
         braid_angle_deg: { type: 'number', description: 'Nominal braid angle from cable axis. Default 45 degrees.' },
         freq_mhz: { type: 'number', description: 'Frequency used for rough shielding effectiveness estimate. Default 1000 MHz.' },
         jacket_od_mm: { type: 'number', description: 'Optional jacket OD. If provided, a jacket layer is included.' },
+        mi_number: { type: 'string', description: 'Optional MI number for the filled shield MI workbook.' },
+        finished_part_number: { type: 'string', description: 'Optional finished cable part number for MI naming.' },
+        prepared_by: { type: 'string', description: 'Optional By field for the MI workbook.' },
+        mi_date: { type: 'string', description: 'Optional date for the MI workbook.' },
+        line_speed_ft_min: { type: 'number', description: 'Line speed for Spiral Shield MI. Default 7 ft/min.' },
+        take_up_spool: { type: 'string', description: 'Take-up spool for Spiral Shield/Braiding MI. Default AT12679.' },
+        spiral_pitch_setpoint: { type: 'number', description: 'Optional flat wire pitch set-point to write on the Spiral Shield MI sheet.' },
+        spiral_die_size_in: { type: 'number', description: 'Optional Head #1 die size in inches for the Spiral Shield MI sheet.' },
+        foil_pitch_setpoint_in: { type: 'number', description: 'Optional foil tape pitch set-point in inches for the Spiral Shield MI sheet.' },
+        foil_pitch_setpoint_mm: { type: 'number', description: 'Optional foil tape pitch set-point in millimetres; converted to inches on the MI sheet.' },
+        foil_wrap: { type: 'string', description: 'Optional foil wrap text such as 1/2, 2/3, or 3/4.' },
+        foil_tension_n: { type: 'number', description: 'Optional foil/tape head tension in newtons.' },
+        braid_part_number: { type: 'string', description: 'Optional braid material part number. If omitted, inferred from AWG and ends.' },
+        braid_die_size_in: { type: 'number', description: 'Optional braider die size in inches.' },
+        braid_rpm: { type: 'number', description: 'Optional braider RPM setting.' },
       },
       required: [],
     },
@@ -1664,7 +1679,7 @@ export async function dispatchRfTool(name, input) {
         return validateRecipeAgainstRfStack(input)
       }
       case 'design_shield_stack': {
-        return designShieldStack(input)
+        return await designShieldStack(input)
       }
       case 'compute_tape_notches': {
         const result = computeTapeNotches(input)
@@ -1964,7 +1979,11 @@ function _miQaForRecipe({ miWorkbook = {}, layers = [], shieldLayers = [], requi
     checks.push(_toolCheck(layers.length ? 'pass' : 'block', 'MI taping rows', layers.length, '>=1', 'The MI must have at least one PTFE taping row.'))
     checks.push(_toolCheck(layers.length <= 6 ? 'pass' : 'warn', 'MI 3-Bay capacity', `${layers.length}/6`, '6 rows', 'The current shop template has two 3-Bay taping pages.'))
   } else {
-    checks.push(_toolCheck(shieldLayers.length ? 'pass' : 'warn', 'Shield run sheet rows', shieldLayers.length, '>=1', 'Shield-only apply uses Stack Lab/run-sheet rows rather than PTFE MI pages.'))
+    checks.push(_toolCheck(shieldLayers.length ? 'pass' : 'warn', 'Shield run sheet rows', shieldLayers.length, '>=1', 'The shield tool should produce Spiral Shield/Braiding MI rows.'))
+    if (miWorkbook.template) {
+      const filledSheets = miWorkbook.filledShieldSheets || []
+      checks.push(_toolCheck(filledSheets.length ? 'pass' : 'warn', 'Shield MI sheets', filledSheets.join(' + ') || 'blank', 'Spiral Shield/Braiding', 'Shield MI download should be filled from the shop template.'))
+    }
   }
   const missingMaterial = layers.filter((layer) => !(layer.part_number || layer.partNumber)).length
   checks.push(_toolCheck(missingMaterial ? 'block' : 'pass', 'MI material cells', missingMaterial ? `${missingMaterial} missing` : 'complete', 'complete', 'Every MI row should use a real material part number.'))
@@ -3091,7 +3110,7 @@ function validateRecipeAgainstRfStack(input) {
   }
 }
 
-function designShieldStack(input) {
+async function designShieldStack(input) {
   const raw = input || {}
   const dielectricOdMm = _finiteNumber(raw.dielectric_od_mm ?? raw.dielectricOdMm, (
     raw.dielectric_od_inch != null ? _finiteNumber(raw.dielectric_od_inch) * 25.4
@@ -3173,7 +3192,36 @@ function designShieldStack(input) {
     ],
     assumptions: { shield_od_tol_pct: 1, shielding_estimate_db: '-4/+2' },
   }
-  const miQa = _miQaForRecipe({ layers: [], shieldLayers: applyLayers, requirePtfe: false })
+  const miNumber = raw.mi_number || raw.miNumber || 'MI-ST962-AUTO'
+  const miWorkbook = await makeShieldMiWorkbook({
+    miNumber,
+    partNumber: raw.finished_part_number || raw.part_number || raw.partNumber || '',
+    by: raw.prepared_by || raw.by || '',
+    date: raw.mi_date || raw.date || new Date().toLocaleDateString('en-US'),
+    incomingOdMm: dielectricOdMm,
+    shieldLayers: steps,
+    applyLayers,
+    lineSpeedFtMin: _finiteNumber(raw.line_speed_ft_min ?? raw.lineSpeedFtMin, 7),
+    takeUpSpool: raw.take_up_spool || raw.takeUpSpool,
+    caterpillarGap: raw.caterpillar_gap ?? raw.caterpillarGap,
+    payOffTorquePct: raw.pay_off_torque_pct ?? raw.payOffTorquePct,
+    takeUpTorquePct: raw.take_up_torque_pct ?? raw.takeUpTorquePct,
+    spiralPitchSetpoint: raw.spiral_pitch_setpoint ?? raw.spiralPitchSetpoint ?? raw.spiral_pitch,
+    spiralDieSizeIn: raw.spiral_die_size_in ?? raw.spiralDieSizeIn,
+    foilPitchSetpointIn: raw.foil_pitch_setpoint_in ?? raw.foilPitchSetpointIn ?? raw.foil_pitch_in,
+    foilPitchSetpointMm: raw.foil_pitch_setpoint_mm ?? raw.foilPitchSetpointMm ?? raw.foil_pitch_mm,
+    foilWrap: raw.foil_wrap ?? raw.foilWrap,
+    foilTensionN: raw.foil_tension_n ?? raw.foilTensionN,
+    foilRoller1Position: raw.foil_roller_1_position ?? raw.foilRoller1Position,
+    foilRoller2Position: raw.foil_roller_2_position ?? raw.foilRoller2Position,
+    braidPartNumber: raw.braid_part_number ?? raw.braidPartNumber,
+    braidDieSizeIn: raw.braid_die_size_in ?? raw.braidDieSizeIn,
+    braidRpm: raw.braid_rpm ?? raw.braidRpm,
+    braidTakeUpTraverse: raw.braid_take_up_traverse ?? raw.braidTakeUpTraverse,
+    braidTakeUpTension: raw.braid_take_up_tension ?? raw.braidTakeUpTension,
+    braidTensionSpringColor: raw.braid_tension_spring_color ?? raw.braidTensionSpringColor,
+  })
+  const miQa = _miQaForRecipe({ miWorkbook, layers: [], shieldLayers: applyLayers, requirePtfe: false })
   const basePreflight = {
     status: machineGuard.blocks.length ? 'blocked' : 'pass',
     allow_apply: machineGuard.blocks.length === 0,
@@ -3182,6 +3230,7 @@ function designShieldStack(input) {
   }
   const safetyAudit = _safetyAuditForResult({ preflight: basePreflight, machineGuard, tolerance, miQa })
   const guardedPreflight = _combinePreflightWithAudit(basePreflight, safetyAudit)
+  const miFilename = `${String(miNumber).replace(/[^a-z0-9._-]+/gi, '-')}-shield-stack.${miWorkbook.extension || 'xlsx'}`
 
   return {
     dielectric_od_mm: round(dielectricOdMm, 4),
@@ -3198,6 +3247,12 @@ function designShieldStack(input) {
     _tolerance: tolerance,
     _mi_qa: miQa,
     _safety_audit: safetyAudit,
+    _download: {
+      filename: miFilename,
+      mime: miWorkbook.mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ...(miWorkbook.base64 ? { base64: miWorkbook.base64 } : { text: miWorkbook.text || '' }),
+      label: 'Download filled shield MI Excel',
+    },
     ...(guardedPreflight.allow_apply ? { _apply_preset: {
       dielectric_od_mm: round(dielectricOdMm, 4),
       shield_layers: applyLayers,
@@ -3210,6 +3265,9 @@ function designShieldStack(input) {
       seen.braid
         ? `Braid setup is estimated from SCTE-style coverage math K=(2F-F^2)×100 using ${seen.braid.step.braid_setup.carriers} carriers, ${seen.braid.step.braid_setup.ends_per_carrier} ends/carrier, AWG ${seen.braid.step.braid_setup.wire_awg}, and ${seen.braid.step.braid_setup.picks_per_in} picks/in.`
         : null,
+      miWorkbook.filledShieldSheets?.length
+        ? `MI workbook uses shop template ${miWorkbook.template}; filled ${miWorkbook.filledShieldSheets.join(' + ')} with shield material, pitch/tension, OD after shield, and braid setup.`
+        : 'MI workbook stayed blank because no spiral/foil/braid shield layer was requested.',
       'Click Apply to fill these shield layers into RF Stack Lab. Use measured OD feedback from the line to fine-tune braid compression and final jacket OD.',
     ].filter(Boolean),
   }
@@ -3293,7 +3351,9 @@ function _designSpiralShield(req, raw, odBeforeMm) {
   const actualGapPct = _clamp(100 - coveragePct, 0, 100)
   const radialBuildMm = selectedThicknessMm
   const odAfterMm = odBeforeMm + 2 * radialBuildMm
-  const pitchMm = _spiralPitchFromGap(gapPct, selectedWidthMm)
+  const explicitPitch = _finiteNumber(req.pitch_setpoint ?? req.pitch ?? raw.spiral_pitch_setpoint ?? raw.spiralPitchSetpoint ?? raw.spiral_pitch)
+  const pitchMm = Number.isFinite(explicitPitch) && explicitPitch > 0 ? explicitPitch : _spiralPitchFromGap(gapPct, selectedWidthMm)
+  const dieSizeIn = _finiteNumber(req.die_size_in ?? req.dieSizeIn ?? raw.spiral_die_size_in ?? raw.spiralDieSizeIn)
   const step = {
     layer: 0,
     type: 'spiral',
@@ -3310,6 +3370,8 @@ function _designSpiralShield(req, raw, odBeforeMm) {
     selected_width_in: round(selectedWidthMm / 25.4, 5),
     thickness_mil: material?.thicknessMil ?? round(selectedThicknessMm / 0.0254, 2),
     pitch_mm: round(pitchMm, 3),
+    mi_pitch_setpoint: round(pitchMm, 4),
+    die_size_in: Number.isFinite(dieSizeIn) ? round(dieSizeIn, 4) : null,
     direction: String(req.direction || raw.spiral_direction || 'Z').toUpperCase().startsWith('S') ? 'S' : 'Z',
   }
   const apply = spcFlatwireToToolLayer(material, {
@@ -3326,7 +3388,7 @@ function _designSpiralShield(req, raw, odBeforeMm) {
 }
 
 function _designFoilShield(req, raw, odBeforeMm) {
-  const overlapPct = _clamp(_finiteNumber(req.overlap_pct ?? req.overlap ?? raw.foil_overlap_pct, 25), 0, 80)
+  const overlapPct = _clamp(_finiteNumber(req.overlap_pct ?? req.overlap ?? raw.foil_overlap_pct ?? _wrapPercent(req.wrap ?? raw.foil_wrap), 25), 0, 80)
   const widthIn = _finiteNumber(req.width_in ?? raw.foil_width_in)
   const widthMm = _finiteNumber(req.width_mm ?? raw.foil_width_mm, Number.isFinite(widthIn) && widthIn > 0 ? widthIn * 25.4 : _defaultFoilWidthIn(odBeforeMm) * 25.4)
   const material = findNearestFoilTape({
@@ -3338,6 +3400,12 @@ function _designFoilShield(req, raw, odBeforeMm) {
   const selectedThicknessMm = _finiteNumber(material?.thicknessMm ?? req.thickness_mm, 1.4 * 0.0254)
   const radialBuildMm = selectedThicknessMm * (1 + overlapPct / 100 * 0.25)
   const odAfterMm = odBeforeMm + 2 * radialBuildMm
+  const pitchMm = _finiteNumber(
+    req.pitch_mm ?? req.pitch ?? raw.foil_pitch_setpoint_mm ?? raw.foilPitchSetpointMm ?? raw.foil_pitch_mm,
+    _finiteNumber(req.pitch_in ?? raw.foil_pitch_setpoint_in ?? raw.foilPitchSetpointIn ?? raw.foil_pitch_in) * 25.4,
+  )
+  const resolvedPitchMm = Number.isFinite(pitchMm) && pitchMm > 0 ? pitchMm : _defaultFoilPitchMm(odBeforeMm)
+  const tensionN = _finiteNumber(req.tension_n ?? req.tension ?? raw.foil_tension_n ?? raw.foilTensionN, 5)
   const step = {
     layer: 0,
     type: 'foil',
@@ -3349,12 +3417,18 @@ function _designFoilShield(req, raw, odBeforeMm) {
     width_in: round(selectedWidthMm / 25.4, 5),
     thickness_mil: material?.thicknessMil ?? round(selectedThicknessMm / 0.0254, 2),
     thickness_mm: round(selectedThicknessMm, 4),
+    pitch_mm: round(resolvedPitchMm, 4),
+    pitch_in: round(resolvedPitchMm / 25.4, 4),
+    tension_n: round(tensionN, 2),
+    wrap: req.wrap || raw.foil_wrap || null,
   }
   const apply = foilTapeToToolLayer(material, {
     type: 'foil',
     label: 'Foil shield',
     length: _finiteNumber(req.length_mm ?? raw.foil_length_mm, 152),
     overlap: overlapPct,
+    pitch: resolvedPitchMm,
+    tension: tensionN,
   })
   return { step, apply, od_after_mm: odAfterMm }
 }
@@ -3484,10 +3558,23 @@ function _defaultFoilWidthIn(odMm) {
   return 0.1250
 }
 
+function _defaultFoilPitchMm(odMm) {
+  return odMm >= 3.4 ? 3.9624 : 3.556
+}
+
 function _defaultHelicalWidthIn(odMm) {
   if (odMm <= 1.8) return 0.0300
   if (odMm <= 3.5) return 0.0600
   return 0.0750
+}
+
+function _wrapPercent(value) {
+  const text = String(value ?? '').trim()
+  if (!text) return Number.NaN
+  if (text.includes('/')) return normalizePtfeWrap(text).percent
+  const n = Number(text)
+  if (!Number.isFinite(n)) return Number.NaN
+  return n > 1 ? n : n * 100
 }
 
 function _spiralPitchFromGap(gapPct, widthMm) {

@@ -73,6 +73,7 @@ Cable-build requests ("can you build this cable…" / "tape stack to hit X% VP a
 - For shield materials, use real catalog families: 962-96001 for SPC spiral bobbin stock, 962-96004 for helical flatwire stock, 962-96003 for ALK foil. For braid, report total carriers, ends per carrier, picks/in, AWG, and predicted optical coverage.
 - If the user asks for a blank manufacturing instruction / MI template, call \`generate_blank_mi_template\`; it returns the shop MI-ST962-032-130 .xlsx template as a downloadable Excel workbook.
 - When \`design_dielectric_stack\` is used for a factory build, the tool returns a downloadable filled shop MI .xlsx based on MI-ST962-032-130. Tell the user to download it from the tool card; it fills the Taping (3-Bay) sheets with selected Material Library tape, lay direction, pitch set-point, tension, and OD after each wrap.
+- When \`design_shield_stack\` is used for a factory shield build, the tool returns a downloadable filled shop MI .xlsx based on MI-ST962-032-130. Use that download for Spiral Shield/Braiding sheets; do not call \`generate_blank_mi_template\` for shield MI unless the engineer explicitly asks for a blank template.
 - Manufacturing rule (enforced by the tool): if conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm). The tool reports the clamp in its notes — surface that fact to the user so they understand why the recipe uses thinner tape with more passes.
 - Before presenting an Apply button as the final answer, treat \`optimize_dielectric_stack\` / \`validate_recipe_against_rf_stack\` as the agent's calculator screenshot check: confirm the predicted dielectric OD, VP, and Z0 match the requested target. Do not rely on a visual-looking stack if the calculator says impedance is low or dielectric OD is low.
 - Treat safety as a separate step from design. Any RF stack tool result may include \`_safety_audit\`, \`_machine_guard\`, \`_tolerance\`, \`_mi_qa\`, and \`_mi_render_qa\`; summarize blockers/warnings before telling the engineer to Apply or download. If Apply is held, do not override it in prose.
@@ -114,6 +115,7 @@ const RF_STARTERS = [
 
 const RF_SECTION_LABELS = {
   home: 'Home (RF workbench overview)',
+  mission: 'Mission Profile Lab',
   design: 'Design',
   library: 'Library',
   connectors: 'Connectors',
@@ -138,6 +140,12 @@ const RF_SECTION_STARTERS = {
     'Recommend a cable for a 2.4 GHz link, 80 m run',
     'Walk me through building a link budget',
     'Compare LMR-400 vs RG-213 at 900 MHz',
+  ],
+  mission: [
+    'Build a cable for an aerospace radar bay',
+    'Pick a coax for a satellite ground-station feed',
+    'What cable profile fits an EMI near-field scanner?',
+    'Design a production VNA test lead with stable phase',
   ],
   link: [
     'Build link budget: 30 dBm @ 2.4 GHz, 100 m, RX -85 dBm, 10 ft LMR-400 each side',
@@ -1225,6 +1233,7 @@ Pending Shop Memory rules: ${pendingCount}. Pending rules are not active; tell t
   // The compare count is injected dynamically into its label.
   const NAV_TREE = useMemo(() => ([
     { id: "home", label: "Home" },
+    { id: "mission", label: "Mission" },
     { id: "design", label: "Design" },
     {
       group: "lib", label: "Library",
@@ -1600,6 +1609,7 @@ Pending Shop Memory rules: ${pendingCount}. Pending rules are not active; tell t
 
         <main style={S.main}>
           {tab === "home" && <HomeView setTab={setTab} setActiveCable={setActiveCable} comparedCables={comparedCables} />}
+          {tab === "mission" && <MissionProfileLab setTab={setTab} />}
           {tab === "design" && <DesignView activeCable={activeCable} clearCable={() => setActiveCable(null)} openLibrary={() => setTab("library")} />}
           {tab === "library" && (
             <>
@@ -2205,6 +2215,7 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
 
   // Hero quick-action cards — link to the heavy-lifting tools.
   const tools = [
+    { id: 'mission', icon: 'radar', title: 'Mission Profile Lab', sub: 'Radar · satcom · EMI · production test → cable targets', accent: '#5eead4' },
     { id: 'library', icon: 'cable', title: 'Cable Library', sub: `${cableCount} presets · RG / LMR / Heliax / phase-stable`, accent: '#c97b3f' },
     { id: 'connectors', icon: 'plug', title: 'Connector Library', sub: `${connectorCount} types · N / SMA / TNC / 7-16 DIN`, accent: '#fbbf24' },
     { id: 'design', icon: 'layers', title: 'Design / Clone Workbench', sub: 'Compose chains · clone library cable · share', accent: '#5eead4' },
@@ -2303,6 +2314,7 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 24 }}>
                 <PrimaryCTA onClick={() => setTab('design')} label="Design cable" />
+                <SecondaryCTA onClick={() => setTab('mission')} label="Mission profile" />
                 <SecondaryCTA onClick={() => setTab('stack')} label="Build RF stack" />
                 <SecondaryCTA onClick={() => setTab('launch')} label="Launch lab" />
                 <SecondaryCTA onClick={() => setTab('shielding')} label="Shielding lab" />
@@ -2320,6 +2332,7 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
 
         {/* STATS BAR */}
         <section className="rf-fade" style={{ animationDelay: '120ms', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 18 }}>
+          <CommandCard label="Mission profile" sub="Start from aircraft, satcom, EMI, or lab use." accent="#5eead4" onClick={() => setTab('mission')} />
           <CommandCard label="Design workbench" sub="Compose a cable chain and test margin." accent="#5eead4" onClick={() => setTab('design')} />
           <CommandCard label="Build + MI flow" sub="Agent preflight, apply stack, then fill MI." accent="#fbbf24" onClick={() => setTab('stack')} />
           <CommandCard label="Connector launch" sub="Pin plane, strip length, ferrule step." accent="#38bdf8" onClick={() => setTab('launch')} />
@@ -2450,6 +2463,380 @@ function HomeView({ setTab, setActiveCable, comparedCables }) {
   );
 }
 
+const RF_MISSION_PROFILES = [
+  {
+    id: 'aerospace',
+    label: 'Aerospace radar bay',
+    tag: 'airborne radar',
+    accent: '#5eead4',
+    media: {
+      poster: '/generated/higgsfield/mission-profile-aerospace-radar-v1-poster.jpg',
+      mp4: '/generated/higgsfield/mission-profile-aerospace-radar-v1.mp4',
+    },
+    headline: 'Phase-stable RF harness for sweep, vibration, and shield continuity.',
+    copy: 'Use this profile when the cable lives near radar hardware, avionics bays, vibration, thermal cycling, or connector-dense RF modules.',
+    readouts: [
+      { label: 'Target Z0', value: '50 Ω', color: '#5eead4' },
+      { label: 'Band focus', value: 'L-Ka', color: '#fbbf24' },
+      { label: 'Critical symptom', value: 'phase drift', color: '#fb923c' },
+    ],
+    targets: ['low return loss through launch', 'stable phase vs flex and temperature', 'foil/braid termination all around the shell', 'bend radius controlled before final VNA'],
+    stack: ['SPC or silver-plated Cu center', 'PTFE / low-loss dielectric', 'foil + dense braid shield', 'FEP or rugged low-smoke jacket'],
+    risks: ['pin-depth resonance', 'shield bond interruption', 'kink near clamp', 'thermal shrink-back at tape layers'],
+    tools: [
+      { label: 'Build RF stack', tab: 'stack' },
+      { label: 'Launch Lab', tab: 'launch' },
+      { label: 'Failure Theater', tab: 'failure' },
+    ],
+  },
+  {
+    id: 'satcom',
+    label: 'Satellite ground station',
+    tag: 'dish / LNA feed',
+    accent: '#7dd3fc',
+    media: {
+      poster: '/generated/higgsfield/mission-profile-satcom-ground-station-v1-poster.jpg',
+      mp4: '/generated/higgsfield/mission-profile-satcom-ground-station-v1.mp4',
+    },
+    headline: 'Low-loss feed line with weather margin and clean receive noise figure.',
+    copy: 'Use this profile for outdoor dish runs, LNA feed cables, tower routing, and long coax where attenuation and sealing dominate the link.',
+    readouts: [
+      { label: 'Target Z0', value: '50/75 Ω', color: '#7dd3fc' },
+      { label: 'Loss focus', value: 'dB/100ft', color: '#fbbf24' },
+      { label: 'Risk', value: 'moisture', color: '#fb923c' },
+    ],
+    targets: ['lowest practical attenuation at band', 'outdoor jacket and UV rating', 'connector weather seal stack', 'link margin with cable loss included'],
+    stack: ['foam PE or air dielectric trunk', 'corrugated or foil/braid shield', 'UV outdoor jacket', 'sealed N / F / DIN connector launch'],
+    risks: ['water ingress', 'unmodeled connector loss', 'bend deformation', 'using indoor cable outdoors'],
+    tools: [
+      { label: 'Link Budget', tab: 'link' },
+      { label: 'Cable Library', tab: 'library' },
+      { label: 'Shielding Lab', tab: 'shielding' },
+    ],
+  },
+  {
+    id: 'emi',
+    label: 'EMI scanner / chamber',
+    tag: 'near-field debug',
+    accent: '#f472b6',
+    media: {
+      poster: '/generated/higgsfield/mission-profile-emi-scanner-chamber-v1-poster.jpg',
+      mp4: '/generated/higgsfield/mission-profile-emi-scanner-chamber-v1.mp4',
+    },
+    headline: 'Cable path that keeps the measurement from becoming the antenna.',
+    copy: 'Use this profile for near-field probes, chamber leads, scanner pigtails, and debug benches where shield leakage can hide the real source.',
+    readouts: [
+      { label: 'Priority', value: 'SE dB', color: '#f472b6' },
+      { label: 'Band focus', value: '30M-18G', color: '#5eead4' },
+      { label: 'Leak mode', value: 'aperture', color: '#fbbf24' },
+    ],
+    targets: ['high optical braid coverage', 'foil seam kept closed through bends', 'connector shell bond verified', 'probe cable routed away from DUT hotspots'],
+    stack: ['continuous foil barrier', 'dense braid or double braid', 'flex jacket with low triboelectric noise', 'fully bonded connector backshell'],
+    risks: ['braid window leakage', 'foil seam tear', 'poor connector shell contact', 'probe cable reradiation'],
+    tools: [
+      { label: 'EMI Scan', tab: 'scanner' },
+      { label: 'Shielding Lab', tab: 'shielding' },
+      { label: 'Failure Theater', tab: 'failure' },
+    ],
+  },
+  {
+    id: 'production',
+    label: 'Production VNA test lead',
+    tag: 'factory test',
+    accent: '#fbbf24',
+    media: {
+      poster: '/generated/higgsfield/mission-profile-production-vna-test-lead-v1-poster.jpg',
+      mp4: '/generated/higgsfield/mission-profile-production-vna-test-lead-v1.mp4',
+    },
+    headline: 'Repeatable test cable with launch control, TDR sanity, and known loss.',
+    copy: 'Use this profile for production benches, qualification fixtures, and repeatable VNA leads where the cable cannot move the pass/fail line.',
+    readouts: [
+      { label: 'Target', value: 'repeatable', color: '#fbbf24' },
+      { label: 'QC view', value: 'TDR + S11', color: '#5eead4' },
+      { label: 'Build', value: 'MI-backed', color: '#fb923c' },
+    ],
+    targets: ['stable connector launch', 'known insertion loss by length', 'TDR baseline saved', 'bend and strain relief repeatable'],
+    stack: ['phase-stable or semi-rigid core', 'controlled shield stack', 'rugged strain relief', 'connector launch coupon or first-article trace'],
+    risks: ['fixture launch drift', 'uncontrolled bend memory', 'dirty connector plane', 'using cable after crush or kink'],
+    tools: [
+      { label: 'Launch Lab', tab: 'launch' },
+      { label: 'Build RF stack', tab: 'stack' },
+      { label: 'Tools', tab: 'tools' },
+    ],
+  },
+  {
+    id: 'manufacturing',
+    label: 'Manufacturing RF build',
+    tag: 'MI / process',
+    accent: '#fb923c',
+    media: {
+      poster: '/generated/higgsfield/mission-profile-manufacturing-rf-build-v1-poster.jpg',
+      mp4: '/generated/higgsfield/mission-profile-manufacturing-rf-build-v1.mp4',
+    },
+    headline: 'Turn electrical targets into tape, spiral, foil, braid, jacket, and MI.',
+    copy: 'Use this profile when the question starts with a target cable and ends with a printable shop recipe for production.',
+    readouts: [
+      { label: 'Output', value: 'recipe', color: '#fb923c' },
+      { label: 'Guard', value: 'OD/Z0/VP', color: '#5eead4' },
+      { label: 'MI', value: 'filled', color: '#fbbf24' },
+    ],
+    targets: ['PTFE wrap selected from Material Library', 'pitch and tension set from shop rules', 'spiral gap and braid picks calculated', 'downloadable MI has visible filled cells'],
+    stack: ['center conductor', 'PTFE tape build', 'SPC spiral with visible gap', 'foil tape / braid shield', 'jacket and final RF validation'],
+    risks: ['calculator OD below target', 'pitch below machine minimum', 'same-pitch Bragg suckout', 'blank or misaligned MI download'],
+    tools: [
+      { label: 'Build RF stack', tab: 'stack' },
+      { label: 'Materials / MI', tab: 'materials' },
+      { label: 'Cable Selector', tab: 'wizard' },
+    ],
+  },
+];
+
+function MissionProfileLab({ setTab }) {
+  const [activeId, setActiveId] = useState(RF_MISSION_PROFILES[0].id);
+  const active = RF_MISSION_PROFILES.find((profile) => profile.id === activeId) || RF_MISSION_PROFILES[0];
+  const media = active.media || {};
+
+  return (
+    <div style={{ position: 'relative', minHeight: '100%' }}>
+      <style>{`
+        @keyframes missionSweep { 0% { transform: rotate(-18deg); opacity: 0; } 12%, 78% { opacity: 0.9; } 100% { transform: rotate(72deg); opacity: 0; } }
+        @keyframes missionFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+        @keyframes missionTrace { from { stroke-dashoffset: 280; } to { stroke-dashoffset: 0; } }
+        .mission-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.92fr); gap: 16px; align-items: stretch; }
+        .mission-profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        .mission-card { transition: border-color 0.18s ease, transform 0.18s ease, background 0.18s ease; }
+        .mission-card:hover { transform: translateY(-1px); }
+        .mission-action:hover { border-color: rgba(94,234,212,0.75) !important; color: #f8efe0 !important; }
+        @media (max-width: 980px) {
+          .mission-grid { grid-template-columns: 1fr; }
+          .mission-profile-grid { grid-template-columns: 1fr; }
+        }
+      `}</style>
+
+      <div style={{ ...S.viewIntro, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: 16, alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ width: 52, height: 52, border: '1px solid #334247', display: 'grid', placeItems: 'center', color: active.accent, background: 'rgba(5,12,14,0.72)' }}>
+          <Radio size={24} />
+        </div>
+        <div>
+          <div style={{ ...RF_FAILURE_UI.eyebrow, color: active.accent }}>Mission Profile Lab</div>
+          <div style={{ ...S.viewIntroStrong, marginTop: 6, fontFamily: 'Fraunces, serif', fontSize: 'clamp(30px, 4vw, 52px)', lineHeight: 1.03, color: '#f8efe0', letterSpacing: 0 }}>
+            Start from the job, then choose the RF cable.
+          </div>
+          <div style={{ color: '#a7b0b6', fontSize: 13, lineHeight: 1.6, maxWidth: 900, marginTop: 8 }}>
+            Aerospace radar, satcom, EMI debug, production VNA, or factory MI build: each profile maps the use-case to the cable stack, RF symptoms, and the lab tab that should own the next step.
+          </div>
+        </div>
+      </div>
+
+      <div className="mission-grid">
+        <section style={{ ...RF_FAILURE_UI.panel, overflow: 'hidden', position: 'relative', minHeight: 470 }}>
+          <div style={{ position: 'relative', minHeight: 470, background: '#05090a' }}>
+            {media.mp4 || media.webm ? (
+              <video
+                key={active.id}
+                aria-label={`${active.label} mission profile video`}
+                autoPlay
+                loop
+                muted
+                playsInline
+                poster={media.poster}
+                preload="metadata"
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: 'saturate(1.08) contrast(1.06)' }}
+              >
+                {media.webm && <source src={media.webm} type="video/webm" />}
+                {media.mp4 && <source src={media.mp4} type="video/mp4" />}
+              </video>
+            ) : (
+              <img src={media.poster} alt={`${active.label} visual`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+            )}
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(5,9,10,0.88), rgba(5,9,10,0.25) 48%, rgba(5,9,10,0.78)), linear-gradient(0deg, rgba(5,9,10,0.88), rgba(5,9,10,0.08) 58%, rgba(5,9,10,0.42))' }} />
+            <MissionRadarOverlay color={active.accent} />
+            <div style={{ position: 'absolute', inset: 18, display: 'grid', gridTemplateRows: 'auto 1fr auto', gap: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ ...RF_FAILURE_UI.eyebrow, color: active.accent }}>Mission feed</div>
+                  <h2 style={{ fontFamily: 'Fraunces, serif', color: '#f8efe0', fontSize: 'clamp(32px, 4vw, 58px)', lineHeight: 0.98, fontWeight: 400, margin: '10px 0 0', maxWidth: 760 }}>
+                    {active.headline}
+                  </h2>
+                </div>
+                <span style={{ border: `1px solid ${active.accent}99`, color: active.accent, background: 'rgba(5,9,10,0.72)', padding: '7px 10px', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: 1.8, textTransform: 'uppercase' }}>
+                  {active.tag}
+                </span>
+              </div>
+              <div style={{ alignSelf: 'end', maxWidth: 660, color: '#d6dee2', fontSize: 15, lineHeight: 1.55 }}>
+                {active.copy}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 8 }}>
+                {active.readouts.map((item) => (
+                  <MissionReadout key={item.label} {...item} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside style={{ ...RF_FAILURE_UI.panel, padding: 18, minWidth: 0 }}>
+          <div style={{ ...RF_FAILURE_UI.eyebrow }}>Mission director</div>
+          <div style={{ marginTop: 8, color: '#f8efe0', fontSize: 18, lineHeight: 1.4 }}>
+            Pick the field use-case and let the target cable constraints fall out naturally.
+          </div>
+          <div className="mission-profile-grid" style={{ marginTop: 16 }}>
+            {RF_MISSION_PROFILES.map((profile) => {
+              const selected = profile.id === active.id;
+              return (
+                <button
+                  key={profile.id}
+                  type="button"
+                  className="mission-card"
+                  onClick={() => setActiveId(profile.id)}
+                  style={{
+                    minHeight: 92,
+                    border: `1px solid ${selected ? profile.accent : '#26343a'}`,
+                    background: selected ? `linear-gradient(135deg, ${profile.accent}18, rgba(8,13,15,0.96))` : 'rgba(7,12,14,0.72)',
+                    color: '#f0ebe2',
+                    textAlign: 'left',
+                    borderRadius: 4,
+                    padding: 12,
+                    cursor: 'pointer',
+                    boxShadow: selected ? `0 0 0 1px ${profile.accent}22, 0 18px 40px rgba(0,0,0,0.28)` : 'none',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ fontWeight: 800, fontSize: 13, color: selected ? profile.accent : '#e7e2dc' }}>{profile.label}</div>
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: profile.accent, boxShadow: selected ? `0 0 14px ${profile.accent}` : 'none' }} />
+                  </div>
+                  <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#8aa0a8', marginTop: 8, textTransform: 'uppercase', letterSpacing: 1.3 }}>
+                    {profile.tag}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+            {active.tools.map((tool) => (
+              <button
+                key={tool.label}
+                type="button"
+                className="mission-action"
+                onClick={() => setTab(tool.tab)}
+                style={{
+                  minHeight: 44,
+                  border: '1px solid #314148',
+                  borderRadius: 3,
+                  background: 'rgba(5,9,10,0.62)',
+                  color: active.accent,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: 10,
+                  textTransform: 'uppercase',
+                  letterSpacing: 1.5,
+                  cursor: 'pointer',
+                }}
+              >
+                {tool.label} →
+              </button>
+            ))}
+          </div>
+
+          <MissionTrace color={active.accent} />
+        </aside>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginTop: 16 }}>
+        <MissionListPanel title="Electrical targets" accent={active.accent} items={active.targets} />
+        <MissionListPanel title="Cable stack bias" accent="#fbbf24" items={active.stack} />
+        <MissionListPanel title="Failure modes to guard" accent="#fb923c" items={active.risks} />
+      </div>
+
+      <section style={{ ...RF_FAILURE_UI.panel, padding: 16, marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 14 }}>
+        <div>
+          <div style={{ ...RF_FAILURE_UI.eyebrow, color: active.accent }}>Agent handoff</div>
+          <div style={{ color: '#f8efe0', fontFamily: 'Fraunces, serif', fontSize: 24, lineHeight: 1.15, marginTop: 8 }}>
+            The better prompt starts with the mission, not the part number.
+          </div>
+          <div style={{ color: '#9fb0b7', fontSize: 13, lineHeight: 1.55, marginTop: 8 }}>
+            Example: build a cable for {active.label.toLowerCase()} with the electrical target, environment, allowable OD, shield expectation, and test frequency. The agent can then choose Library cable, RF Stack Lab, Link Budget, Launch Lab, or Shielding Lab as needed.
+          </div>
+        </div>
+        <div style={{ border: '1px dashed #314148', borderRadius: 4, padding: 12, background: 'rgba(5,9,10,0.46)' }}>
+          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#7f9098', textTransform: 'uppercase', letterSpacing: 2 }}>Prompt pattern</div>
+          <div style={{ color: '#d6dee2', fontSize: 12, lineHeight: 1.55, marginTop: 8 }}>
+            Build an RF cable for <span style={{ color: active.accent }}>{active.label}</span>; target impedance, VP, loss, shielding, bend/routing, connector, and test limit must be solved together.
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MissionRadarOverlay({ color }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 900 470" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', opacity: 0.78 }}>
+      <defs>
+        <radialGradient id="mission-radar-glow" cx="72%" cy="42%" r="38%">
+          <stop offset="0%" stopColor={color} stopOpacity="0.18" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <rect width="900" height="470" fill="url(#mission-radar-glow)" />
+      <g transform="translate(660 220)" stroke={color} strokeWidth="1.2" fill="none" opacity="0.62">
+        <circle r="36" />
+        <circle r="76" opacity="0.5" />
+        <circle r="122" opacity="0.25" />
+        <line x1="0" y1="0" x2="132" y2="-28" style={{ transformOrigin: '0 0', animation: 'missionSweep 4.6s ease-in-out infinite' }} />
+        <circle r="4" fill={color} stroke="none" />
+      </g>
+      <path d="M34 364 C160 318 250 402 386 342 S650 295 842 348" stroke={color} strokeOpacity="0.55" strokeWidth="2" fill="none" />
+      <path d="M34 374 C160 328 250 412 386 352 S650 305 842 358" stroke="#fbbf24" strokeOpacity="0.22" strokeWidth="1" fill="none" />
+    </svg>
+  );
+}
+
+function MissionReadout({ label, value, color }) {
+  return (
+    <div style={{ background: 'rgba(5,9,10,0.72)', border: '1px solid rgba(167,176,182,0.22)', borderRadius: 4, padding: 12, minHeight: 78 }}>
+      <div style={{ fontFamily: 'Fraunces, serif', color, fontSize: 28, lineHeight: 1, fontWeight: 600 }}>{value}</div>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#d6dee2', textTransform: 'uppercase', letterSpacing: 1.6, marginTop: 9 }}>{label}</div>
+    </div>
+  );
+}
+
+function MissionTrace({ color }) {
+  return (
+    <svg viewBox="0 0 520 150" preserveAspectRatio="none" style={{ width: '100%', height: 150, marginTop: 18, border: '1px solid #26343a', borderRadius: 4, background: 'rgba(5,9,10,0.52)' }}>
+      <defs>
+        <linearGradient id="mission-trace-fill" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor={color} stopOpacity="0.1" />
+          <stop offset="65%" stopColor="#fbbf24" stopOpacity="0.16" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.04" />
+        </linearGradient>
+      </defs>
+      <rect width="520" height="150" fill="url(#mission-trace-fill)" />
+      {[34, 70, 106].map((y) => <line key={y} x1="20" x2="500" y1={y} y2={y} stroke="#1e2b31" strokeWidth="1" strokeDasharray="4 6" />)}
+      <path d="M22 98 C74 100 91 82 132 84 C169 86 182 52 221 56 C265 60 282 96 322 90 C360 84 378 44 420 48 C456 52 470 82 500 72" fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeDasharray="280" style={{ animation: 'missionTrace 2.8s ease-out both' }} />
+      <line x1="20" x2="500" y1="114" y2="114" stroke="#fbbf24" strokeWidth="1" strokeDasharray="2 5" opacity="0.7" />
+      <text x="24" y="26" fill="#7f9098" fontFamily="JetBrains Mono, monospace" fontSize="10" letterSpacing="2">MISSION SIGNAL MARGIN</text>
+      <text x="412" y="132" fill={color} fontFamily="JetBrains Mono, monospace" fontSize="10" letterSpacing="2">TARGET WINDOW</text>
+    </svg>
+  );
+}
+
+function MissionListPanel({ title, accent, items }) {
+  return (
+    <section style={{ ...RF_FAILURE_UI.panel, padding: 16, minWidth: 0 }}>
+      <div style={{ ...RF_FAILURE_UI.eyebrow, color: accent }}>{title}</div>
+      <div style={{ display: 'grid', gap: 9, marginTop: 14 }}>
+        {items.map((item, index) => (
+          <div key={item} style={{ display: 'grid', gridTemplateColumns: '30px minmax(0, 1fr)', gap: 10, alignItems: 'start' }}>
+            <span style={{ display: 'grid', placeItems: 'center', width: 24, height: 24, border: `1px solid ${accent}77`, color: accent, borderRadius: 999, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 }}>{index + 1}</span>
+            <span style={{ color: '#d6dee2', fontSize: 13, lineHeight: 1.5 }}>{item}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PrimaryCTA({ onClick, label }) {
   return (
     <button
@@ -2548,6 +2935,16 @@ function Stat({ label, value, accent }) {
 }
 function ToolGlyph({ kind, color }) {
   const size = 22;
+  if (kind === 'radar') return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="2.2" fill={color} stroke="none" />
+      <path d="M12 12l7-7" />
+      <path d="M4.5 19.5a10.6 10.6 0 0 1 0-15" opacity="0.35" />
+      <path d="M7.4 16.6a6.5 6.5 0 0 1 0-9.2" opacity="0.55" />
+      <path d="M16.6 7.4a6.5 6.5 0 0 1 0 9.2" opacity="0.55" />
+      <path d="M19.5 4.5a10.6 10.6 0 0 1 0 15" opacity="0.35" />
+    </svg>
+  );
   if (kind === 'cable') return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
       <circle cx="12" cy="12" r="9" />
