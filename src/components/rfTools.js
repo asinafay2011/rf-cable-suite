@@ -1005,12 +1005,17 @@ export const RF_TOOLS = [
   {
     name: 'design_shield_stack',
     description:
-      'Design the RF shield stack after the dielectric OD is known. Use when the engineer says to add shields such as "first shield SPC spiral with 10% gap, second shield foil or flatwire helical, then braid". Calculates SPC spiral width from dielectric OD × pi / 8 bobbins minus the requested gap, snaps spiral/foil/helical materials to the Material Library, estimates OD after each shield, proposes braid carriers/ends/picks/gauge/coverage, and returns a filled shop MI workbook for the Spiral Shield/Braiding sheets plus a one-click apply preset.',
+      'Design the RF shield stack after the dielectric OD is known. Use when the engineer says to add shields such as "first shield SPC spiral with 10% gap, second shield foil or flatwire helical, then braid". Calculates SPC spiral width from dielectric OD × pi / 8 bobbins minus the requested gap, snaps spiral/foil/helical materials to the Material Library, estimates OD after each shield, proposes braid carriers/ends/picks/gauge/coverage, and returns a filled shop MI workbook for the Spiral Shield/Braiding sheets plus a one-click apply preset. For full cable builds, pass ptfe_layers and ptfe_conductor_od_mm from design_dielectric_stack so the same shield MI download also fills the Taping (3-Bay) sheets instead of looking blank there.',
     input_schema: {
       type: 'object',
       properties: {
         dielectric_od_mm: { type: 'number', description: 'OD after dielectric/PTFE in millimetres. Provide this or dielectric_od_inch.' },
         dielectric_od_inch: { type: 'number', description: 'OD after dielectric/PTFE in inches. Converted to mm.' },
+        ptfe_conductor_od_mm: { type: 'number', description: 'Optional center conductor OD in mm for filling Taping (3-Bay) sheets in the same MI workbook.' },
+        ptfe_conductor_od_inch: { type: 'number', description: 'Optional center conductor OD in inches for filling Taping (3-Bay) sheets in the same MI workbook.' },
+        ptfe_layers: { type: 'array', description: 'Optional PTFE layers returned by design_dielectric_stack. When provided, the shield MI workbook also fills Taping (3-Bay) pages.', items: { type: 'object' } },
+        ptfe_overlap: { type: 'string', description: 'Optional PTFE wrap mode for MI taping pages when ptfe_layers are provided. Default 2/3.' },
+        ptfe_tension_n: { type: 'number', description: 'Optional PTFE tape tension in newtons for MI taping pages. Default 4.0.' },
         shield_layers: {
           type: 'array',
           description: 'Optional ordered shield list. Each item type may be spiral, foil, helical/flatwire, braid, or jacket. If omitted, defaults to spiral + foil + braid.',
@@ -3328,6 +3333,16 @@ async function designShieldStack(input) {
     assumptions: { shield_od_tol_pct: 1, shielding_estimate_db: '-4/+2' },
   }
   const miNumber = raw.mi_number || raw.miNumber || 'MI-ST962-AUTO'
+  const ptfeLayersForMi = Array.isArray(raw.ptfe_layers) ? raw.ptfe_layers
+    : Array.isArray(raw.ptfeLayers) ? raw.ptfeLayers
+      : Array.isArray(raw.dielectric_layers) ? raw.dielectric_layers
+        : Array.isArray(raw.tape_layers) ? raw.tape_layers
+          : []
+  const ptfeConductorOdMm = raw.ptfe_conductor_od_mm != null || raw.ptfeConductorOdMm != null || raw.conductor_od_mm != null
+    ? _finiteNumber(raw.ptfe_conductor_od_mm ?? raw.ptfeConductorOdMm ?? raw.conductor_od_mm)
+    : raw.ptfe_conductor_od_inch != null || raw.ptfeConductorOdIn != null || raw.conductor_od_inch != null
+      ? _finiteNumber(raw.ptfe_conductor_od_inch ?? raw.ptfeConductorOdIn ?? raw.conductor_od_inch) * 25.4
+      : NaN
   const miWorkbook = await makeShieldMiWorkbook({
     miNumber,
     partNumber: raw.finished_part_number || raw.part_number || raw.partNumber || '',
@@ -3336,6 +3351,10 @@ async function designShieldStack(input) {
     incomingOdMm: dielectricOdMm,
     shieldLayers: steps,
     applyLayers,
+    ptfeLayers: ptfeLayersForMi,
+    ptfeConductorOdMm,
+    ptfeOverlap: raw.ptfe_overlap || raw.ptfeOverlap,
+    ptfeTensionN: raw.ptfe_tension_n ?? raw.ptfeTensionN,
     lineSpeedFtMin: _finiteNumber(raw.line_speed_ft_min ?? raw.lineSpeedFtMin, 7),
     takeUpSpool: raw.take_up_spool || raw.takeUpSpool,
     caterpillarGap: raw.caterpillar_gap ?? raw.caterpillarGap,
@@ -3403,6 +3422,9 @@ async function designShieldStack(input) {
       miWorkbook.filledShieldSheets?.length
         ? `MI workbook uses shop template ${miWorkbook.template}; filled ${miWorkbook.filledShieldSheets.join(' + ')} with shield material, pitch/tension, OD after shield, and braid setup.`
         : 'MI workbook stayed blank because no spiral/foil/braid shield layer was requested.',
+      miWorkbook.filledTapingEntries
+        ? `Combined MI: also filled ${miWorkbook.filledTapingEntries} PTFE taping row${miWorkbook.filledTapingEntries === 1 ? '' : 's'} from the dielectric stack.`
+        : 'Shield MI note: Taping sheets are blank unless ptfe_layers from design_dielectric_stack are passed into design_shield_stack.',
       'Click Apply to fill these shield layers into RF Stack Lab. Use measured OD feedback from the line to fine-tune braid compression and final jacket OD.',
     ].filter(Boolean),
   }

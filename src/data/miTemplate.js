@@ -468,9 +468,53 @@ function cellXml(ref, previousXml, value, type = 'auto') {
   return `<c r="${ref}"${style} t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`
 }
 
+function splitCellRef(ref) {
+  const match = String(ref || '').toUpperCase().match(/^([A-Z]+)(\d+)$/)
+  if (!match) return null
+  return { col: match[1], row: Number(match[2]) }
+}
+
+function columnIndex(col) {
+  return String(col || '').toUpperCase().split('').reduce((sum, ch) => sum * 26 + ch.charCodeAt(0) - 64, 0)
+}
+
+function rowNumberFromTag(rowTag) {
+  const match = String(rowTag || '').match(/\br="(\d+)"/)
+  return match ? Number(match[1]) : Number.NaN
+}
+
 function writeExistingCell(xml, ref, value, type = 'auto') {
   const pattern = new RegExp(`<c\\b(?=[^>]*\\br="${ref}")[^>]*/>|<c\\b(?=[^>]*\\br="${ref}")[^>]*>[\\s\\S]*?<\\/c>`)
-  return xml.replace(pattern, (previous) => cellXml(ref, previous, value, type))
+  if (pattern.test(xml)) {
+    return xml.replace(pattern, (previous) => cellXml(ref, previous, value, type))
+  }
+
+  const parsed = splitCellRef(ref)
+  if (!parsed) return xml
+  const newCell = cellXml(ref, '', value, type)
+  const rowPattern = new RegExp(`<row\\b(?=[^>]*\\br="${parsed.row}")[^>]*>[\\s\\S]*?<\\/row>`)
+  if (rowPattern.test(xml)) {
+    return xml.replace(rowPattern, (rowXml) => {
+      const targetCol = columnIndex(parsed.col)
+      const cells = Array.from(rowXml.matchAll(/<c\b[^>]*\br="([A-Z]+)\d+"[^>]*(?:\/>|>[\s\S]*?<\/c>)/g))
+      const nextCell = cells.find((match) => columnIndex(match[1]) > targetCol)
+      if (nextCell?.index != null) {
+        return `${rowXml.slice(0, nextCell.index)}${newCell}${rowXml.slice(nextCell.index)}`
+      }
+      return rowXml.replace('</row>', `${newCell}</row>`)
+    })
+  }
+
+  const newRow = `<row r="${parsed.row}">${newCell}</row>`
+  const sheetDataPattern = /<sheetData\b[^>]*>[\s\S]*?<\/sheetData>/
+  return xml.replace(sheetDataPattern, (sheetDataXml) => {
+    const rows = Array.from(sheetDataXml.matchAll(/<row\b[^>]*>[\s\S]*?<\/row>/g))
+    const nextRow = rows.find((match) => rowNumberFromTag(match[0]) > parsed.row)
+    if (nextRow?.index != null) {
+      return `${sheetDataXml.slice(0, nextRow.index)}${newRow}${sheetDataXml.slice(nextRow.index)}`
+    }
+    return sheetDataXml.replace('</sheetData>', `${newRow}</sheetData>`)
+  })
 }
 
 async function removeCalcChain(zip) {
@@ -750,7 +794,26 @@ async function patchBraidingSheet(zip, path, options = {}) {
   const applyLayers = Array.isArray(options.applyLayers) ? options.applyLayers : []
   const braidStep = shieldLayerByType(shieldLayers, 'braid')
   const braidApply = shieldLayerByType(applyLayers, 'braid')
-  if (!braidStep && !braidApply) return { filled: false }
+  if (!braidStep && !braidApply) {
+    let xml = await zip.file(path).async('string')
+    xml = writeExistingCell(xml, 'C6', '-')
+    xml = writeExistingCell(xml, 'C7', '-')
+    xml = writeMachineTriplet(xml, 9, blankTriplet())
+    xml = writeMachineTriplet(xml, 10, blankTriplet())
+    xml = writeMachineTriplet(xml, 12, blankTriplet())
+    xml = writeExistingCell(xml, 'B13', '-')
+    xml = writeMachineTriplet(xml, 14, blankTriplet())
+    xml = writeMachineTriplet(xml, 15, blankTriplet())
+    xml = writeMachineTriplet(xml, 16, blankTriplet())
+    xml = writeMachineTriplet(xml, 18, blankTriplet())
+    xml = writeExistingCell(xml, 'B19', '-')
+    xml = writeExistingCell(xml, 'B21', '-')
+    xml = writeMachineTriplet(xml, 26, blankTriplet())
+    xml = writeMachineTriplet(xml, 27, blankTriplet())
+    xml = writeMachineTriplet(xml, 29, blankTriplet())
+    zip.file(path, xml)
+    return { filled: false }
+  }
 
   const setup = braidStep?.braid_setup || braidApply || {}
   const incomingOdIn = firstFinite(options.braidIncomingOdIn, mmToIn(options.braidIncomingOdMm), mmToIn(braidStep?.od_before_mm))
@@ -820,6 +883,8 @@ async function makeShopMiXlsx(options = {}, entries = [], conductorOdIn = Number
     incomingOdIn: entries[2]?.odAfterIn ?? (firstEntries.length ? firstEntries[firstEntries.length - 1].odAfterIn : conductorOdIn),
     lineSpeedFtMin,
   })
+  await patchSpiralShieldSheet(zip, paths['Spiral Shield'], {})
+  await patchBraidingSheet(zip, paths.Braiding, {})
 
   await removeCalcChain(zip)
   const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })
@@ -837,13 +902,27 @@ export async function makeShieldMiWorkbook(options = {}) {
   const zip = await loadShopMiZip()
   const paths = await sheetPathMap(zip)
   await patchHeaderCells(zip, paths, options)
-  await patchTapingSheet(zip, paths['Taping (3-Bay)'], [], {
-    incomingOdIn: Number.NaN,
-    lineSpeedFtMin: options.lineSpeedFtMin || 7,
+  const lineSpeedFtMin = options.lineSpeedFtMin || 7
+  const ptfeLayers = Array.isArray(options.ptfeLayers) ? options.ptfeLayers : []
+  const ptfeConductorOdMm = firstFinite(options.ptfeConductorOdMm, options.conductorOdMm)
+  const ptfeMi = ptfeLayers.length && ptfeConductorOdMm > 0
+    ? buildPtfeMiEntries({
+        conductorOdMm: ptfeConductorOdMm,
+        layers: ptfeLayers,
+        overlap: options.ptfeOverlap || options.overlap || '2/3',
+        tensionN: firstFinite(options.ptfeTensionN, options.tensionN, 4.0),
+        lineSpeedFtMin,
+      })
+    : { conductorOdIn: Number.NaN, entries: [] }
+  const firstEntries = ptfeMi.entries.slice(0, 3)
+  const secondEntries = ptfeMi.entries.slice(3, 6)
+  await patchTapingSheet(zip, paths['Taping (3-Bay)'], firstEntries, {
+    incomingOdIn: ptfeMi.conductorOdIn,
+    lineSpeedFtMin,
   })
-  await patchTapingSheet(zip, paths['Taping (3-Bay) (2)'], [], {
-    incomingOdIn: Number.NaN,
-    lineSpeedFtMin: options.lineSpeedFtMin || 7,
+  await patchTapingSheet(zip, paths['Taping (3-Bay) (2)'], secondEntries, {
+    incomingOdIn: ptfeMi.entries[2]?.odAfterIn ?? (firstEntries.length ? firstEntries[firstEntries.length - 1].odAfterIn : ptfeMi.conductorOdIn),
+    lineSpeedFtMin,
   })
   const spiral = await patchSpiralShieldSheet(zip, paths['Spiral Shield'], options)
   const braid = await patchBraidingSheet(zip, paths.Braiding, options)
@@ -854,6 +933,8 @@ export async function makeShieldMiWorkbook(options = {}) {
     mime: SHOP_MI_XLSX_MIME,
     extension: 'xlsx',
     template: SHOP_MI_TEMPLATE_NAME,
+    filledTapingEntries: Math.min(ptfeMi.entries.length, 6),
+    omittedTapingEntries: Math.max(0, ptfeMi.entries.length - 6),
     filledShieldSheets: [spiral.filled ? 'Spiral Shield' : null, braid.filled ? 'Braiding' : null].filter(Boolean),
     filledSpiralShield: Boolean(spiral.filled),
     filledBraid: Boolean(braid.filled),
