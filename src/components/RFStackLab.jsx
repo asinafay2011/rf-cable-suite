@@ -616,7 +616,7 @@ function buildMiVisualQa(computed, ptfeStack, shieldStack) {
   const render = buildMiSheetRenderPreview(computed, ptfeStack, shieldStack)
   const checks = []
   checks.push(guardCheck(render.rowCount ? 'pass' : 'block', 'Taping pages', `${render.rowCount} rows`, 'PTFE rows map into the MI-ST962 3-Bay taping sheets.'))
-  checks.push(guardCheck(render.rowCount <= 6 ? 'pass' : 'warn', '3-Bay capacity', `${render.rowCount}/6`, 'Current template has two 3-Bay pages; extra passes stay in JSON/run sheet.'))
+  checks.push(guardCheck(render.rowCount <= 6 ? 'pass' : 'warn', '3-Bay capacity', `${render.rowCount}/6`, 'Current template has two 3-Bay pages; extra tape layers stay in JSON/run sheet.'))
   const missingPtfe = ptfeStack.filter((layer) => !(layer.partNumber || layer.part_number)).length
   checks.push(guardCheck(missingPtfe ? 'block' : 'pass', 'PTFE part numbers', missingPtfe ? `${missingPtfe} missing` : 'complete', 'MI should print real Material Library part numbers.'))
   const missingPitch = (computed.ptfeBuilds || []).filter((layer) => !Number.isFinite(Number(layer.pitch)) || !Number.isFinite(Number(layer.odAfterMm))).length
@@ -648,29 +648,23 @@ function buildMiSheetRenderPreview(computed, ptfeStack, shieldStack) {
   const rows = []
   let odCursorMm = Number(computed.conductorOD) || 0
   builds.forEach((layer, layerIndex) => {
-    const passes = Math.max(1, Math.round(Number(layer.passes) || 1))
     const radialMm = Number(layer.radial)
     const odAfterMm = Number(layer.odAfterMm)
-    const perPassBuildMm = Number.isFinite(radialMm) && radialMm > 0
-      ? (radialMm * 2) / passes
-      : Number.isFinite(odAfterMm) && odAfterMm > odCursorMm
-        ? (odAfterMm - odCursorMm) / passes
-        : 0
-    for (let pass = 0; pass < passes; pass++) {
-      odCursorMm += perPassBuildMm
-      const index = rows.length + 1
-      const fallbackDirection = index % 2 ? 'Z' : 'S'
-      rows.push({
-        index,
-        partNumber: layer.partNumber || layer.part_number || ptfeStack[layerIndex]?.partNumber || '-',
-        direction: `${layer.direction || fallbackDirection}-DIRECTION`,
-        pitchIn: Number(layer.pitch) / MM_PER_IN,
-        overlap: `${ptfeOverlapKey(layer.overlap).toUpperCase()} WRAP`,
-        tension: Number(layer.tensionN ?? layer.tension ?? 4),
-        roller: `${index - 1}/${Math.max(6, rows.length + 3)}`,
-        odAfterIn: odCursorMm / MM_PER_IN,
-      })
-    }
+    odCursorMm = Number.isFinite(odAfterMm) && odAfterMm > odCursorMm
+      ? odAfterMm
+      : odCursorMm + (Number.isFinite(radialMm) && radialMm > 0 ? radialMm * 2 : 0)
+    const index = rows.length + 1
+    const fallbackDirection = index % 2 ? 'Z' : 'S'
+    rows.push({
+      index,
+      partNumber: layer.partNumber || layer.part_number || ptfeStack[layerIndex]?.partNumber || '-',
+      direction: `${layer.direction || fallbackDirection}-DIRECTION`,
+      pitchIn: Number(layer.pitch) / MM_PER_IN,
+      overlap: `${ptfeOverlapKey(layer.overlap).toUpperCase()} WRAP`,
+      tension: Number(layer.tensionN ?? layer.tension ?? 4),
+      roller: `${index - 1}/6`,
+      odAfterIn: odCursorMm / MM_PER_IN,
+    })
   })
   const pages = []
   for (let i = 0; i < rows.length && i < 6; i += 3) {
@@ -1120,9 +1114,9 @@ function buildSuckoutDoctor(computed, measured) {
   const root = ranked[0] || null
   const actions = []
   if (root?.kind === 'ptfe') {
-    actions.push('Stagger this PTFE pitch from the neighboring tape pass by 8-12%.')
+    actions.push('Stagger this PTFE pitch from the neighboring tape layer by 8-12%.')
     actions.push('Keep 2/3 wrap for shrink-back control; use 1/2 only when OD needs to land lower.')
-    actions.push('Alternate Z/S lay direction and avoid repeating the same pitch on adjacent passes.')
+    actions.push('Alternate Z/S lay direction and avoid repeating the same pitch on adjacent layers.')
   } else if (root?.kind === 'spiral') {
     actions.push('Move spiral pitch or 8-bobbin gap enough that the repeat notch leaves the test band.')
     actions.push('Recheck the flatwire width rule: dielectric OD × π / bobbins minus requested gap.')
@@ -1145,7 +1139,7 @@ function buildSuckoutDoctor(computed, measured) {
 function buildGoldenDiff(entry, computed, ptfeStack, shieldStack) {
   if (!entry) return []
   const summary = entry.summary || {}
-  const goldenPtfe = Array.isArray(entry.ptfeStack) ? entry.ptfeStack : []
+  const goldenPtfe = expandLegacyPtfeRows(Array.isArray(entry.ptfeStack) ? entry.ptfeStack : [])
   const goldenShield = Array.isArray(entry.shieldStack) ? entry.shieldStack : []
   const currentPrimary = primarySuckoutGHz(computed)
   const rows = [
@@ -1174,9 +1168,9 @@ function buildGoldenDiff(entry, computed, ptfeStack, shieldStack) {
       delta: summary.primarySuckout && currentPrimary ? formatDelta(currentPrimary - summary.primarySuckout, 2, ' GHz') : '—',
     },
     {
-      label: 'PTFE passes',
-      current: String(ptfeStack.reduce((sum, layer) => sum + Math.max(1, Number(layer.passes) || 1), 0)),
-      golden: String(goldenPtfe.reduce((sum, layer) => sum + Math.max(1, Number(layer.passes) || 1), 0) || '—'),
+      label: 'PTFE layers',
+      current: String(ptfeStack.length),
+      golden: String(goldenPtfe.length || '—'),
       delta: formatDelta(ptfeStack.length - goldenPtfe.length, 0, ' layers'),
     },
     {
@@ -1323,26 +1317,119 @@ function makeAnimationKey(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 }
 
+function legacyPtfePassCount(layer) {
+  return clamp(Math.round(Number(layer?.passes) || 1), 1, 12)
+}
+
+function expandLegacyPtfeRows(source = []) {
+  const rows = []
+  ;(source || []).forEach((layer) => {
+    const count = legacyPtfePassCount(layer)
+    for (let pass = 0; pass < count; pass++) {
+      rows.push({
+        ...layer,
+        passes: 1,
+        direction: pass === 0 ? layer.direction : undefined,
+        ODAfterMm: count === 1 ? layer.ODAfterMm : undefined,
+        OD_after_mm: count === 1 ? layer.OD_after_mm : undefined,
+        od_after_mm: count === 1 ? layer.od_after_mm : undefined,
+      })
+    }
+  })
+  return rows
+}
+
+function ptfeCurrentOdBeforeNextLayer(current, conductorOdMm, suckout = 6) {
+  let radiusMm = Number(conductorOdMm) / 2
+  const tension = 1 - Number(suckout || 0) / 180
+  ;(current || []).forEach((layer) => {
+    const explicitOdAfter = Number(layer.ODAfterMm ?? layer.OD_after_mm ?? layer.od_after_mm)
+    if (Number.isFinite(explicitOdAfter) && explicitOdAfter > radiusMm * 2) {
+      radiusMm = explicitOdAfter / 2
+      return
+    }
+    const mil = Number(layer.mil ?? layer.tape_thickness_mil ?? 0)
+    const overlap = overlapToPct(layer.overlap)
+    radiusMm += mil * MIL_TO_MM * ptfeOverlapLayerCount(overlap) * tension
+  })
+  return Math.max(Number(conductorOdMm) || 0, 2 * radiusMm)
+}
+
+function nextPtfeTapeForLayer(current, conductorOdMm, suckout = 6) {
+  const last = current[current.length - 1] || null
+  const currentOdMm = ptfeCurrentOdBeforeNextLayer(current, conductorOdMm, suckout)
+  const widthSteps = Array.from(new Set(PTFE_TAPE_MATERIALS.map((tape) => tape.widthIn)))
+    .filter((widthIn) => !(currentOdMm / MM_PER_IN <= SMALL_CABLE_TAPE_OD_IN + 0.00001 && widthIn >= SMALL_CABLE_MAX_PTFE_WIDTH_IN - 0.00001))
+    .sort((a, b) => a - b)
+  const lastWidthIn = Number(last?.tapeWidthIn ?? (last?.width ? last.width / MM_PER_IN : 0.025))
+  const widthIndex = Math.max(0, widthSteps.findIndex((widthIn) => widthIn >= lastWidthIn - 0.00001))
+  const nextWidthIndex = last && current.length >= 2 && current.length % 2 === 0
+    ? Math.min(widthSteps.length - 1, widthIndex + 1)
+    : Math.max(0, widthIndex)
+  const targetWidthIn = widthSteps[nextWidthIndex] || 0.025
+  const targetMil = last ? Math.max(5, Number(last.mil) || 5) : 5
+  const densityCode = last?.densityCode || (Number(last?.density) >= 1.1 ? 'H' : 'L')
+  return findNearestPtfeTape({
+    thicknessMil: targetMil,
+    widthIn: targetWidthIn,
+    densityCode,
+    cableOdMm: currentOdMm,
+  })
+}
+
+function mapAppliedPtfeLayers(rawLayers, conductorOdMm, suckout = 6) {
+  let odCursorMm = Number(conductorOdMm) || PRESETS.phaseStable.conductorOD
+  const tension = 1 - Number(suckout || 0) / 180
+  return (rawLayers || []).map((layer, index) => {
+    const explicitBeforeMm = Number(layer.ODBeforeMm ?? layer.OD_before_mm ?? layer.od_before_mm ?? layer.cableOdMm ?? layer.cable_od_mm)
+    const incomingOdMm = Number.isFinite(explicitBeforeMm) && explicitBeforeMm > 0 ? explicitBeforeMm : odCursorMm
+    const mapped = makePtfeLayer({
+      ...layer,
+      ODBeforeMm: incomingOdMm,
+      overlap: layer.overlap ?? '2/3',
+      direction: layer.direction || (index % 2 ? 'S' : 'Z'),
+    }, PRESETS.phaseStable, index)
+    const explicitAfterMm = Number(layer.ODAfterMm ?? layer.OD_after_mm ?? layer.od_after_mm)
+    if (Number.isFinite(explicitAfterMm) && explicitAfterMm > incomingOdMm) {
+      odCursorMm = explicitAfterMm
+    } else {
+      const thicknessMm = Number(layer.tape_thickness_mm ?? layer.tapeThicknessMm ?? mapped.tapeThicknessMm ?? mapped.mil * MIL_TO_MM)
+      const overlapPct = overlapToPct(layer.overlap ?? mapped.overlap)
+      const layerTension = Number(layer.tension_factor ?? layer.tensionFactor)
+      const effectiveTension = Number.isFinite(layerTension) && layerTension > 0 ? layerTension : tension
+      odCursorMm = incomingOdMm + thicknessMm * ptfeOverlapLayerCount(overlapPct) * effectiveTension * 2
+    }
+    return mapped
+  })
+}
+
 function makePtfeLayer(layer = {}, preset = PRESETS.phaseStable, index = 0) {
   const pitchSetpointMm = Number(layer.pitchSetpointMm ?? layer.pitch_setpoint_mm ?? layer.pitch_mm ?? (layer.pitch_setpoint_in != null ? Number(layer.pitch_setpoint_in) * MM_PER_IN : NaN))
+  const odBeforeMm = Number(layer.ODBeforeMm ?? layer.OD_before_mm ?? layer.od_before_mm ?? layer.cableOdMm ?? layer.cable_od_mm)
   const odAfterMm = Number(layer.ODAfterMm ?? layer.OD_after_mm ?? layer.od_after_mm)
   const effectiveEps = Number(layer.effectiveEps ?? layer.effective_eps ?? layer.eps_eff)
+  const partNumber = layer.partNumber || layer.part_number || layer.materialPart || layer.material_id || layer.part
+  const explicitLayerOdMm = Number.isFinite(odBeforeMm) && odBeforeMm > 0 ? odBeforeMm : Number.NaN
   const tape = findNearestPtfeTape({
-    partNumber: layer.partNumber || layer.part_number,
+    partNumber,
     thicknessMil: layer.mil ?? layer.tape_thickness_mil ?? (layer.tape_thickness_mm ? layer.tape_thickness_mm / MIL_TO_MM : preset.ptfeMil),
+    thicknessMm: layer.tape_thickness_mm ?? layer.tapeThicknessMm,
     widthMm: layer.width ?? layer.tape_width_mm ?? preset.ptfeWidth,
+    widthIn: layer.tape_width_in ?? layer.width_in,
     densityGcc: layer.density ?? preset.ptfeDensity,
     densityCode: layer.densityCode || layer.density_code,
-    cableOdMm: preset.conductorOD,
+    cableOdMm: Number.isFinite(explicitLayerOdMm) ? explicitLayerOdMm : (partNumber ? undefined : preset.conductorOD),
   })
   return ptfeTapeToLayer(tape, {
     id: makePtfeId(),
-    passes: clamp(Math.round(layer.passes || 1), 1, 12),
+    passes: 1,
     overlap: overlapToPct(layer.overlap ?? preset.ptfeOverlap ?? 66.7),
-    direction: layer.direction === 'S' || index % 2 ? 'S' : 'Z',
+    direction: String(layer.direction || layer.lay_direction || '').trim().toUpperCase().startsWith('S') || (!layer.direction && index % 2) ? 'S' : 'Z',
+    ODBeforeMm: Number.isFinite(explicitLayerOdMm) ? explicitLayerOdMm : undefined,
     pitchSetpointMm: Number.isFinite(pitchSetpointMm) && pitchSetpointMm > 0 ? pitchSetpointMm : undefined,
     ODAfterMm: Number.isFinite(odAfterMm) && odAfterMm > 0 ? odAfterMm : undefined,
     effectiveEps: Number.isFinite(effectiveEps) && effectiveEps > 0 ? effectiveEps : undefined,
+    tensionFactor: layer.tensionFactor ?? layer.tension_factor,
     miStation: layer.miStation || layer.mi_station,
     animateKey: makeAnimationKey('ptfe'),
   })
@@ -1479,17 +1566,16 @@ function makePresetStack(preset) {
   const source = Array.isArray(preset.ptfeStack) && preset.ptfeStack.length
     ? preset.ptfeStack
     : [{ passes: preset.ptfeLayers || 1, mil: preset.ptfeMil || 2, width: preset.ptfeWidth || 0.635, overlap: preset.ptfeOverlap || 66.7, density: preset.ptfeDensity || 0.78, direction: 'Z' }]
-  return source.map((layer, index) => makePtfeLayer(layer, preset, index))
+  return expandLegacyPtfeRows(source).map((layer, index) => makePtfeLayer(layer, preset, index))
 }
 
 function stackSummary(stack, suckout = 0) {
-  const totalPasses = stack.reduce((sum, layer) => sum + Math.max(1, Number(layer.passes) || 1), 0)
   const avg = (key, fallback) => {
     if (!stack.length) return fallback
-    return stack.reduce((sum, layer) => sum + (Number(layer[key]) || fallback) * Math.max(1, Number(layer.passes) || 1), 0) / Math.max(1, totalPasses)
+    return stack.reduce((sum, layer) => sum + (Number(layer[key]) || fallback), 0) / Math.max(1, stack.length)
   }
   return {
-    totalPasses,
+    totalLayers: stack.length,
     avgMil: avg('mil', 2),
     avgWidth: avg('width', 6),
     avgOverlap: avg('overlap', 50),
@@ -1879,12 +1965,11 @@ function useRfStackModel(config) {
           const previewIndex = previewStage ? rawShieldStack.findIndex((layer) => layer.type === previewStage) : -1
           const shieldStack = previewIndex >= 0 ? rawShieldStack.slice(0, previewIndex + 1) : rawShieldStack
           stack.forEach((layer, layerIndex) => {
-            const passes = clamp(Math.round(layer.passes || 1), 1, 12)
             const width = clamp(Number(layer.width) || 6, 2, 14)
             const direction = layer.direction === 'S' ? 'S' : 'Z'
             const handedness = direction === 'Z' ? 1 : -1
             const tapeWidth = clamp(width * 0.052, 0.16, 0.54)
-            const turns = clamp(18 / width + 1.65 + passes * 0.035, 2.6, 7.2)
+            const turns = clamp(18 / width + 1.65 + layerIndex * 0.035, 2.6, 7.2)
             const layerProgress = getLayerAnimationProgress(layer, 1450)
             const phase = layerIndex * 1.1
             const radius = 0.255 + layerIndex * 0.055
@@ -2330,7 +2415,7 @@ function Metric({ label, value, sub, accent = C.teal }) {
 function LayerRail({ computed }) {
   const states = [
     ['01', 'Conductor', `${fmt(computed.conductorOD, 2)} mm Cu`, C.copperHi],
-    ['02', 'PTFE stack', `${computed.ptfeLayerCount} layers · ${computed.ptfeLayers} passes`, '#fff2c4'],
+    ['02', 'PTFE stack', `${computed.ptfeLayerCount} stack-by-stack layers`, '#fff2c4'],
     ['03', 'SPC spiral', computed.spiralInstalled ? `${computed.spiralBobbins} bobbins · ${fmt(computed.spiralGap, 0)}% gap` : 'not installed', C.foil],
     ['04', 'SPC helical', computed.helicalInstalled ? `${fmt(computed.helicalOverlap, 0)}% overlap` : 'not installed', C.sky],
     ['05', 'Foil shield', computed.foilInstalled ? `${fmt(computed.foilOverlap, 0)}% overlap` : 'not installed', C.foil],
@@ -2402,8 +2487,7 @@ function PTFELayerCard({ layer, index, canRemove, conductorOD, onUpdate, onRepla
           </select>
         </label>
         <Slider label="Width" value={layer.width} setValue={(value) => onUpdate({ width: value })} min={0.1} max={4} step={0.025} unit=" mm" accent={smallCableGuidance.avoidWidth ? C.red : accent} displayDigits={3} />
-        <Slider label="Passes" value={layer.passes} setValue={(value) => onUpdate({ passes: Math.round(value) })} min={1} max={12} step={1} accent={accent} />
-        <Slider label="Mil" value={layer.mil} setValue={(value) => onUpdate({ mil: value })} min={0.5} max={5} step={0.1} unit=" mil" accent="#fff2c4" />
+        <Slider label="Mil" value={layer.mil} setValue={(value) => onUpdate({ mil: value })} min={0.5} max={10} step={0.1} unit=" mil" accent="#fff2c4" />
         <div style={S.wrapPresetGroup}>
           <div style={S.sliderTop}>
             <span>Overlap</span>
@@ -2779,7 +2863,7 @@ export default function RFStackLab() {
     setPtfeStack((current) => current.map((layer) => {
       if (layer.id !== id) return layer
       if (patch.partNumber) {
-        const tape = findNearestPtfeTape({ partNumber: patch.partNumber, cableOdMm: params.conductorOD })
+        const tape = findNearestPtfeTape({ partNumber: patch.partNumber })
         return ptfeTapeToLayer(tape, { ...layer, ...patch, partNumber: tape.partNumber })
       }
       return { ...layer, ...patch }
@@ -2789,14 +2873,9 @@ export default function RFStackLab() {
 
   const addPtfeLayer = (direction) => {
     setPtfeStack((current) => {
-      const last = current[current.length - 1] || makePresetStack(PRESETS.phaseStable)[0]
-      const nextDirection = direction || (last.direction === 'Z' ? 'S' : 'Z')
-      const tape = findNearestPtfeTape({
-        thicknessMil: last.mil * 0.86,
-        widthMm: Math.max(0.3175, last.width * 0.82),
-        densityCode: last.densityCode || (last.density >= 1.1 ? 'H' : 'L'),
-        cableOdMm: params.conductorOD,
-      })
+      const last = current[current.length - 1] || null
+      const nextDirection = direction || (last?.direction === 'Z' ? 'S' : 'Z')
+      const tape = nextPtfeTapeForLayer(current, params.conductorOD, params.suckout)
       return [
         ...current,
         ptfeTapeToLayer(tape, {
@@ -2865,14 +2944,14 @@ export default function RFStackLab() {
       }
       if (detail.section !== 'stack' && detail.section !== 'dielectric') return
       const preset = detail.params || {}
-      const layers = Array.isArray(preset.layers) ? preset.layers : []
+      const rawLayers = Array.isArray(preset.layers) ? preset.layers : []
+      const layers = expandLegacyPtfeRows(rawLayers)
       const shieldLayers = Array.isArray(preset.shield_layers)
         ? preset.shield_layers
         : Array.isArray(preset.shieldStack) ? preset.shieldStack : []
-      const totalPasses = layers.reduce((sum, layer) => sum + Math.max(1, Number(layer.passes) || 1), 0)
       const firstLayer = layers[0] || {}
       const avgDensity = layers.length
-        ? layers.reduce((sum, layer) => sum + (Number(layer.density) || 0.78) * Math.max(1, Number(layer.passes) || 1), 0) / Math.max(1, totalPasses)
+        ? layers.reduce((sum, layer) => sum + (Number(layer.density) || 0.78), 0) / Math.max(1, layers.length)
         : 0.78
       const mappedShieldLayers = shieldLayers.map((layer) => ({
         ...layer,
@@ -2880,11 +2959,8 @@ export default function RFStackLab() {
         animateKey: layer.animateKey || makeAnimationKey('shield'),
       }))
       if (layers.length) {
-        setPtfeStack(layers.map((layer, index) => makePtfeLayer({
-          ...layer,
-          overlap: overlapToPct(layer.overlap),
-          direction: index % 2 ? 'S' : 'Z',
-        }, PRESETS.phaseStable, index)))
+        const conductorOdMm = Number(preset.conductor_od_mm) || params.conductorOD
+        setPtfeStack(mapAppliedPtfeLayers(layers, conductorOdMm, params.suckout))
       }
       if (mappedShieldLayers.length) {
         setShieldStack(mappedShieldLayers)
@@ -2892,7 +2968,7 @@ export default function RFStackLab() {
       setParams((current) => ({
         ...current,
         conductorOD: Number(preset.conductor_od_mm) || current.conductorOD,
-        ptfeLayers: layers.length ? clamp(Math.round(totalPasses || current.ptfeLayers), 1, 16) : current.ptfeLayers,
+        ptfeLayers: layers.length ? clamp(Math.round(layers.length || current.ptfeLayers), 1, 16) : current.ptfeLayers,
         ptfeMil: layers.length && firstLayer.tape_thickness_mm ? clamp(firstLayer.tape_thickness_mm / MIL_TO_MM, 0.5, 5) : current.ptfeMil,
         ptfeWidth: layers.length && firstLayer.tape_width_mm ? clamp(firstLayer.tape_width_mm, 0.1, 4) : current.ptfeWidth,
         ptfeOverlap: layers.length ? overlapToPct(firstLayer.overlap) : current.ptfeOverlap,
@@ -2961,7 +3037,7 @@ export default function RFStackLab() {
     const tension = 1 - params.suckout / 180
     let measuredBuildOD = params.conductorOD
     const layerBuilds = ptfeStack.map((layer) => {
-      const passes = Math.max(1, Number(layer.passes) || 1)
+      const passes = 1
       const mil = Number(layer.mil) || 2
       const overlap = overlapToPct(layer.overlap)
       const calculatedRadial = passes * mil * MIL_TO_MM * ptfeOverlapLayerCount(overlap) * tension
@@ -3074,7 +3150,7 @@ export default function RFStackLab() {
     return {
       ...params,
       ptfeThickness: summary.avgMil * MIL_TO_MM,
-      ptfeLayers: summary.totalPasses,
+      ptfeLayers: summary.totalLayers,
       ptfeMil: summary.avgMil,
       ptfeWidth: summary.avgWidth,
       ptfeOverlap: summary.avgOverlap,

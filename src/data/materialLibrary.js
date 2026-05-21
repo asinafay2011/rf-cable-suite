@@ -175,8 +175,8 @@ export function recommendPtfeWrapForCable(input = {}) {
     maxTapeWidthIn: smallCable ? SMALL_CABLE_MAX_PTFE_WIDTH_IN : null,
     maxTapeWidthMm: smallCable ? SMALL_CABLE_MAX_PTFE_WIDTH_MM : null,
     note: smallCable
-      ? `PTFE shop preference: use 2/3 wrap to resist shrink-back; for cable OD <= ${SMALL_CABLE_TAPE_OD_IN.toFixed(3)} in also avoid ${SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)} in tape width and wider. Use 1/2 wrap only when the target OD requires the lower single-pass build.`
-      : 'PTFE shop preference: use 2/3 wrap to resist shrink-back. Use 1/2 wrap only when the target OD requires the lower single-pass build.',
+      ? `PTFE shop preference: use 2/3 wrap to resist shrink-back; for cable OD <= ${SMALL_CABLE_TAPE_OD_IN.toFixed(3)} in also avoid ${SMALL_CABLE_MAX_PTFE_WIDTH_IN.toFixed(4)} in tape width and wider. Use 1/2 wrap only when the target OD requires the lower single-layer build.`
+      : 'PTFE shop preference: use 2/3 wrap to resist shrink-back. Use 1/2 wrap only when the target OD requires the lower single-layer build.',
   }
 }
 
@@ -236,7 +236,6 @@ export const PTFE_TAPE_PART_NUMBERS = Array.from(new Set([
   '962-96000-03L0125',
   '962-96000-02H0125',
   '962-96000-03H0125',
-  '962-96000-05H250',
   '962-96000-05H0250',
   '962-96000-08H0500',
   '962-96000-08H0375',

@@ -313,6 +313,11 @@ export function buildPtfeMiEntries({ conductorOdMm, layers, overlap, tensionN = 
     const widthIn = Number(layer.tape_width_in || (layer.tape_width_mm ? layer.tape_width_mm / INCH_TO_MM : 0))
     for (let pass = 0; pass < passes; pass++) {
       const odBeforeMm = 2 * radiusMm
+      const direction = String(layer.direction || layer.lay_direction || '').trim().toUpperCase().startsWith('S')
+        ? 'S-DIRECTION'
+        : String(layer.direction || layer.lay_direction || '').trim().toUpperCase().startsWith('Z')
+          ? 'Z-DIRECTION'
+          : layDirection(layerIndex)
       const pitchInfo = ptfeShopPitchSetpoint({
         cableOdMm: odBeforeMm,
         tapeWidthIn: widthIn,
@@ -324,12 +329,12 @@ export function buildPtfeMiEntries({ conductorOdMm, layers, overlap, tensionN = 
       radiusMm += radialBuildMm
       entries.push({
         pass: entries.length + 1,
-        partNumber: layer.part_number || '',
-        densityCode: layer.density_code || '',
+        partNumber: layer.part_number || layer.partNumber || '',
+        densityCode: layer.density_code || layer.densityCode || '',
         thicknessMil: layer.tape_thickness_mil,
         widthIn,
-        direction: layDirection(layerIndex),
-        directionLetter: directionLetter(layerIndex),
+        direction,
+        directionLetter: direction.startsWith('S') ? 'S' : directionLetter(layerIndex),
         pitchIn: pitchInfo.pitchIn,
         calculatedPitchIn: pitchInfo.calculatedPitchIn,
         pitchClamped: pitchInfo.pitchLimited,
@@ -468,12 +473,40 @@ function writeExistingCell(xml, ref, value, type = 'auto') {
   return xml.replace(pattern, (previous) => cellXml(ref, previous, value, type))
 }
 
-function writeTriplet(xml, rowNumber, triplet) {
+async function removeCalcChain(zip) {
+  zip.remove('xl/calcChain.xml')
+  zip.remove('xl/_rels/calcChain.xml.rels')
+
+  const relsPath = 'xl/_rels/workbook.xml.rels'
+  if (zip.file(relsPath)) {
+    let relsXml = await zip.file(relsPath).async('string')
+    relsXml = relsXml.replace(/<Relationship\b(?=[^>]*(?:Target="calcChain\.xml"|Type="[^"]*\/calcChain"))[^>]*\/>\s*/g, '')
+    relsXml = relsXml.replace(/<Relationship\b(?=[^>]*Target="\/?xl\/calcChain\.xml")[^>]*\/>\s*/g, '')
+    zip.file(relsPath, relsXml)
+  }
+
+  const contentTypesPath = '[Content_Types].xml'
+  if (zip.file(contentTypesPath)) {
+    let contentTypesXml = await zip.file(contentTypesPath).async('string')
+    contentTypesXml = contentTypesXml.replace(/<Override\b(?=[^>]*PartName="\/xl\/calcChain\.xml")[^>]*\/>\s*/g, '')
+    zip.file(contentTypesPath, contentTypesXml)
+  }
+}
+
+function writeTripletAt(xml, rowNumber, triplet, minCol, nomCol, maxCol) {
   const [min, nom, max] = triplet
-  let next = writeExistingCell(xml, `D${rowNumber}`, min === '' ? '-' : min, typeof min === 'number' ? 'number' : 'auto')
-  next = writeExistingCell(next, `E${rowNumber}`, nom === '' ? '' : nom, typeof nom === 'number' ? 'number' : 'auto')
-  next = writeExistingCell(next, `F${rowNumber}`, max === '' ? '-' : max, typeof max === 'number' ? 'number' : 'auto')
+  let next = writeExistingCell(xml, `${minCol}${rowNumber}`, min === '' ? '-' : min, typeof min === 'number' ? 'number' : 'auto')
+  next = writeExistingCell(next, `${nomCol}${rowNumber}`, nom === '' ? '' : nom, typeof nom === 'number' ? 'number' : 'auto')
+  next = writeExistingCell(next, `${maxCol}${rowNumber}`, max === '' ? '-' : max, typeof max === 'number' ? 'number' : 'auto')
   return next
+}
+
+function writeTapingTriplet(xml, rowNumber, triplet) {
+  return writeTripletAt(xml, rowNumber, triplet, 'C', 'E', 'F')
+}
+
+function writeMachineTriplet(xml, rowNumber, triplet) {
+  return writeTripletAt(xml, rowNumber, triplet, 'B', 'E', 'F')
 }
 
 function blankTriplet() {
@@ -500,6 +533,11 @@ function mmToIn(value) {
 function finiteNumber(value, fallback = Number.NaN) {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
+}
+
+function fixedNumber(value, digits = 4) {
+  const n = Number(value)
+  return Number.isFinite(n) ? Number(n.toFixed(digits)) : ''
 }
 
 function firstFinite(...values) {
@@ -599,12 +637,12 @@ function clearTapingSlot(xml, slot) {
   const materialRow = 6 + slot
   const baseRow = 21 + slot * 8
   let next = writeExistingCell(xml, `D${materialRow}`, '-')
-  next = writeExistingCell(next, `D${baseRow}`, '-')
-  next = writeTriplet(next, baseRow + 1, blankTriplet())
-  next = writeExistingCell(next, `D${baseRow + 2}`, '-')
-  next = writeTriplet(next, baseRow + 3, blankTriplet())
-  next = writeExistingCell(next, `D${baseRow + 4}`, '-')
-  next = writeTriplet(next, baseRow + 6, blankTriplet())
+  next = writeExistingCell(next, `C${baseRow}`, '-')
+  next = writeTapingTriplet(next, baseRow + 1, blankTriplet())
+  next = writeExistingCell(next, `C${baseRow + 2}`, '-')
+  next = writeTapingTriplet(next, baseRow + 3, blankTriplet())
+  next = writeExistingCell(next, `C${baseRow + 4}`, '-')
+  next = writeTapingTriplet(next, baseRow + 6, blankTriplet())
   return next
 }
 
@@ -612,12 +650,12 @@ function fillTapingSlot(xml, slot, entry) {
   const materialRow = 6 + slot
   const baseRow = 21 + slot * 8
   let next = writeExistingCell(xml, `D${materialRow}`, entry.partNumber || '-')
-  next = writeExistingCell(next, `D${baseRow}`, entry.direction || '-')
-  next = writeTriplet(next, baseRow + 1, ['-', Number(entry.pitchIn || 0) || '', '-'])
-  next = writeExistingCell(next, `D${baseRow + 2}`, entry.overlapText || '-')
-  next = writeTriplet(next, baseRow + 3, ['-', Number(entry.tensionN || 0) || '', '-'])
-  next = writeExistingCell(next, `D${baseRow + 4}`, entry.rollerPosition || '-')
-  next = writeTriplet(next, baseRow + 6, xlsxNominalTriplet(entry.odAfterIn))
+  next = writeExistingCell(next, `C${baseRow}`, entry.direction || '-')
+  next = writeTapingTriplet(next, baseRow + 1, ['-', fixedNumber(entry.pitchIn, 4), '-'])
+  next = writeExistingCell(next, `C${baseRow + 2}`, entry.overlapText || '-')
+  next = writeTapingTriplet(next, baseRow + 3, ['-', fixedNumber(entry.tensionN, 1), '-'])
+  next = writeExistingCell(next, `C${baseRow + 4}`, entry.rollerPosition || '-')
+  next = writeTapingTriplet(next, baseRow + 6, xlsxNominalTriplet(entry.odAfterIn))
   return next
 }
 
@@ -629,12 +667,12 @@ async function patchTapingSheet(zip, path, sheetEntries, options) {
     : Number.NaN
   let xml = await zip.file(path).async('string')
 
-  xml = writeTriplet(xml, 10, xlsxToleranceTriplet(incomingOdIn))
+  xml = writeTapingTriplet(xml, 10, xlsxToleranceTriplet(incomingOdIn))
   for (let slot = 0; slot < 3; slot++) {
     xml = sheetEntries[slot] ? fillTapingSlot(xml, slot, sheetEntries[slot]) : clearTapingSlot(xml, slot)
   }
-  xml = writeTriplet(xml, 45, sheetEntries.length ? ['-', Number(options.lineSpeedFtMin || 7), '-'] : blankTriplet())
-  xml = writeTriplet(xml, 47, sheetEntries.length ? xlsxNominalTriplet(finalOdIn) : blankTriplet())
+  xml = writeTapingTriplet(xml, 45, sheetEntries.length ? ['-', Number(options.lineSpeedFtMin || 7), '-'] : blankTriplet())
+  xml = writeTapingTriplet(xml, 47, sheetEntries.length ? xlsxNominalTriplet(finalOdIn) : blankTriplet())
   zip.file(path, xml)
 }
 
@@ -660,48 +698,48 @@ async function patchSpiralShieldSheet(zip, path, options = {}) {
   xml = writeExistingCell(xml, 'D6', hasSpiral ? readLayerText(spiralStep, spiralApply, 'part_number', 'partNumber') || '-' : '-')
   xml = writeExistingCell(xml, 'D7', hasFoil ? readLayerText(foilStep, foilApply, 'part_number', 'partNumber') || '-' : '-')
   xml = writeExistingCell(xml, 'D8', options.takeUpSpool || options.take_up_spool || 'AT12679 (24"x14")')
-  xml = writeTriplet(xml, 10, xlsxToleranceTriplet(incomingOdIn))
-  xml = writeTriplet(xml, 12, ['-', finiteNumber(options.caterpillarGap, 1.03), '-'])
-  xml = writeTriplet(xml, 13, ['-', percentCell(options.payOffTorquePct, 30), '-'])
-  xml = writeTriplet(xml, 14, ['-', percentCell(options.takeUpTorquePct, 30), '-'])
+  xml = writeMachineTriplet(xml, 10, xlsxToleranceTriplet(incomingOdIn))
+  xml = writeMachineTriplet(xml, 12, ['-', finiteNumber(options.caterpillarGap, 1.03), '-'])
+  xml = writeMachineTriplet(xml, 13, ['-', percentCell(options.payOffTorquePct, 30), '-'])
+  xml = writeMachineTriplet(xml, 14, ['-', percentCell(options.takeUpTorquePct, 30), '-'])
 
   if (hasSpiral) {
     const spiralDieSize = firstFinite(options.spiralDieSizeIn, spiralStep?.die_size_in, spiralApply?.dieSizeIn, spiralOdAfterIn)
-    xml = writeExistingCell(xml, 'D16', directionText(readLayerText(spiralStep, spiralApply, 'direction'), 'S'))
-    xml = writeExistingCell(xml, 'D17', firstFinite(options.spiralBobbins, spiralStep?.bobbins, spiralApply?.bobbins, 8), 'number')
-    xml = writeTriplet(xml, 18, ['-', Number.isFinite(spiralPitch) ? Number(spiralPitch.toFixed(4)) : '', '-'])
-    xml = writeExistingCell(xml, 'D19', Number.isFinite(spiralDieSize) ? Number(spiralDieSize.toFixed(3)) : '-')
-    xml = writeTriplet(xml, 21, xlsxToleranceTriplet(spiralOdAfterIn))
+    xml = writeExistingCell(xml, 'B16', directionText(readLayerText(spiralStep, spiralApply, 'direction'), 'S'))
+    xml = writeExistingCell(xml, 'B17', firstFinite(options.spiralBobbins, spiralStep?.bobbins, spiralApply?.bobbins, 8), 'number')
+    xml = writeMachineTriplet(xml, 18, ['-', Number.isFinite(spiralPitch) ? Number(spiralPitch.toFixed(4)) : '', '-'])
+    xml = writeExistingCell(xml, 'B19', Number.isFinite(spiralDieSize) ? Number(spiralDieSize.toFixed(3)) : '-')
+    xml = writeMachineTriplet(xml, 21, xlsxToleranceTriplet(spiralOdAfterIn))
   } else {
-    xml = writeExistingCell(xml, 'D16', '-')
-    xml = writeExistingCell(xml, 'D17', '-')
-    xml = writeTriplet(xml, 18, blankTriplet())
-    xml = writeExistingCell(xml, 'D19', '-')
-    xml = writeTriplet(xml, 21, blankTriplet())
+    xml = writeExistingCell(xml, 'B16', '-')
+    xml = writeExistingCell(xml, 'B17', '-')
+    xml = writeMachineTriplet(xml, 18, blankTriplet())
+    xml = writeExistingCell(xml, 'B19', '-')
+    xml = writeMachineTriplet(xml, 21, blankTriplet())
   }
 
   if (hasFoil) {
     const foilType = String(foilStep?.type || foilApply?.type || '').toLowerCase()
     const isMetalFoil = foilType !== 'flatwire'
-    xml = writeExistingCell(xml, 'D23', directionText(readLayerText(foilStep, foilApply, 'direction'), 'Z', isMetalFoil ? ' / FOIL IN' : ''))
-    xml = writeTriplet(xml, 24, ['-', Number.isFinite(foilPitchIn) ? Number(foilPitchIn.toFixed(4)) : '', '-'])
-    xml = writeExistingCell(xml, 'D25', shieldWrapText(foilOverlap, firstFinite(foilStep?.overlap_pct, foilApply?.overlap, 50)))
-    xml = writeTriplet(xml, 26, ['-', firstFinite(options.foilTensionN, options.tapeTensionN, foilStep?.tension_n, foilApply?.tension, 5), '-'])
-    xml = writeExistingCell(xml, 'D27', firstText(options.foilRoller1Position, foilStep?.roller_1_position, foilApply?.roller1, '1'))
-    xml = writeExistingCell(xml, 'D28', firstText(options.foilRoller2Position, foilStep?.roller_2_position, foilApply?.roller2, '1'))
-    xml = writeTriplet(xml, 30, xlsxToleranceTriplet(foilOdAfterIn))
+    xml = writeExistingCell(xml, 'B23', directionText(readLayerText(foilStep, foilApply, 'direction'), 'Z', isMetalFoil ? ' / FOIL IN' : ''))
+    xml = writeExistingCell(xml, 'B24', Number.isFinite(foilPitchIn) ? Number(foilPitchIn.toFixed(4)) : '-')
+    xml = writeExistingCell(xml, 'B25', shieldWrapText(foilOverlap, firstFinite(foilStep?.overlap_pct, foilApply?.overlap, 50)))
+    xml = writeMachineTriplet(xml, 26, ['-', firstFinite(options.foilTensionN, options.tapeTensionN, foilStep?.tension_n, foilApply?.tension, 5), '-'])
+    xml = writeExistingCell(xml, 'B27', firstText(options.foilRoller1Position, foilStep?.roller_1_position, foilApply?.roller1, '1'))
+    xml = writeExistingCell(xml, 'B28', firstText(options.foilRoller2Position, foilStep?.roller_2_position, foilApply?.roller2, '1'))
+    xml = writeMachineTriplet(xml, 30, xlsxToleranceTriplet(foilOdAfterIn))
   } else {
-    xml = writeExistingCell(xml, 'D23', '-')
-    xml = writeTriplet(xml, 24, blankTriplet())
-    xml = writeExistingCell(xml, 'D25', '-')
-    xml = writeTriplet(xml, 26, blankTriplet())
-    xml = writeExistingCell(xml, 'D27', '-')
-    xml = writeExistingCell(xml, 'D28', '-')
-    xml = writeTriplet(xml, 30, blankTriplet())
+    xml = writeExistingCell(xml, 'B23', '-')
+    xml = writeExistingCell(xml, 'B24', '-')
+    xml = writeExistingCell(xml, 'B25', '-')
+    xml = writeMachineTriplet(xml, 26, blankTriplet())
+    xml = writeExistingCell(xml, 'B27', '-')
+    xml = writeExistingCell(xml, 'B28', '-')
+    xml = writeMachineTriplet(xml, 30, blankTriplet())
   }
 
-  xml = writeTriplet(xml, 32, ['-', finiteNumber(options.lineSpeedFtMin, 7), '-'])
-  xml = writeTriplet(xml, 34, xlsxToleranceTriplet(finalOdIn))
+  xml = writeMachineTriplet(xml, 32, ['-', finiteNumber(options.lineSpeedFtMin, 7), '-'])
+  xml = writeMachineTriplet(xml, 34, xlsxToleranceTriplet(finalOdIn))
   zip.file(path, xml)
   return { filled: hasSpiral || hasFoil, filledSpiral: hasSpiral, filledFoil: hasFoil }
 }
@@ -727,21 +765,21 @@ async function patchBraidingSheet(zip, path, options = {}) {
   const dieSizeIn = firstFinite(options.braidDieSizeIn, incomingOdIn > 0 ? Math.max(incomingOdIn + 0.03, incomingOdIn * 1.3) : Number.NaN)
   let xml = await zip.file(path).async('string')
 
-  xml = writeExistingCell(xml, 'D6', braidPartNumberFromSetup({ ...setup, wire_awg: awg, ends_per_carrier: ends }, options.braidPartNumber || options.braid_part_number))
-  xml = writeExistingCell(xml, 'D7', options.takeUpSpool || options.take_up_spool || 'AT12679 (24" x 14")')
-  xml = writeTriplet(xml, 9, [0.9, percentCell(coverage, 95), 1])
-  xml = writeTriplet(xml, 10, [35, Number.isFinite(angle) ? Number(angle.toFixed(2)) : 38.07, 45])
-  xml = writeTriplet(xml, 12, xlsxToleranceTriplet(incomingOdIn))
-  xml = writeExistingCell(xml, 'D13', Number.isFinite(carriers) ? Math.round(carriers) : '-')
-  xml = writeTriplet(xml, 14, ['-', Number.isFinite(ends) ? Math.round(ends) : '', '-'])
-  xml = writeTriplet(xml, 15, ['-', Number.isFinite(picks) ? Number(picks.toFixed(1)) : '', '-'])
-  xml = writeTriplet(xml, 16, ['-', Number.isFinite(rpm) ? Number(rpm.toFixed(1)) : '', '-'])
-  xml = writeTriplet(xml, 18, ['-', Number.isFinite(dieSizeIn) ? Number(dieSizeIn.toFixed(3)) : '', '-'])
-  xml = writeExistingCell(xml, 'D19', firstText(options.braidTensionSpringColor, options.tensionSpringColor, 'Blue'))
-  xml = writeExistingCell(xml, 'D21', 'OFF')
-  xml = writeTriplet(xml, 26, ['-', firstFinite(options.braidTakeUpTraverse, options.takeUpTraverse, 1.8), '-'])
-  xml = writeTriplet(xml, 27, ['-', firstFinite(options.braidTakeUpTension, options.takeUpTension, 1.8), '-'])
-  xml = writeTriplet(xml, 29, xlsxToleranceTriplet(outgoingOdIn, 0.002))
+  xml = writeExistingCell(xml, 'C6', braidPartNumberFromSetup({ ...setup, wire_awg: awg, ends_per_carrier: ends }, options.braidPartNumber || options.braid_part_number))
+  xml = writeExistingCell(xml, 'C7', options.takeUpSpool || options.take_up_spool || 'AT12679 (24" x 14")')
+  xml = writeMachineTriplet(xml, 9, [0.9, percentCell(coverage, 95), 1])
+  xml = writeMachineTriplet(xml, 10, [35, Number.isFinite(angle) ? Number(angle.toFixed(2)) : 38.07, 45])
+  xml = writeMachineTriplet(xml, 12, xlsxToleranceTriplet(incomingOdIn))
+  xml = writeExistingCell(xml, 'B13', Number.isFinite(carriers) ? Math.round(carriers) : '-')
+  xml = writeMachineTriplet(xml, 14, ['-', Number.isFinite(ends) ? Math.round(ends) : '', '-'])
+  xml = writeMachineTriplet(xml, 15, ['-', Number.isFinite(picks) ? Number(picks.toFixed(1)) : '', '-'])
+  xml = writeMachineTriplet(xml, 16, ['-', Number.isFinite(rpm) ? Number(rpm.toFixed(1)) : '', '-'])
+  xml = writeMachineTriplet(xml, 18, ['-', Number.isFinite(dieSizeIn) ? Number(dieSizeIn.toFixed(3)) : '', '-'])
+  xml = writeExistingCell(xml, 'B19', firstText(options.braidTensionSpringColor, options.tensionSpringColor, 'Blue'))
+  xml = writeExistingCell(xml, 'B21', 'OFF')
+  xml = writeMachineTriplet(xml, 26, ['-', firstFinite(options.braidTakeUpTraverse, options.takeUpTraverse, 1.8), '-'])
+  xml = writeMachineTriplet(xml, 27, ['-', firstFinite(options.braidTakeUpTension, options.takeUpTension, 1.8), '-'])
+  xml = writeMachineTriplet(xml, 29, xlsxToleranceTriplet(outgoingOdIn, 0.002))
   zip.file(path, xml)
   return { filled: true, braidPartNumber: braidPartNumberFromSetup({ ...setup, wire_awg: awg, ends_per_carrier: ends }, options.braidPartNumber || options.braid_part_number) }
 }
@@ -752,7 +790,7 @@ async function patchHeaderCells(zip, paths, options) {
   for (const path of Object.values(paths)) {
     if (!path || !zip.file(path)) continue
     let xml = await zip.file(path).async('string')
-    xml = writeExistingCell(xml, 'I2', by)
+    xml = writeExistingCell(xml, 'F2', by)
     xml = writeExistingCell(xml, 'J2', dateSerial, typeof dateSerial === 'number' ? 'number' : 'auto')
     zip.file(path, xml)
   }
@@ -783,6 +821,7 @@ async function makeShopMiXlsx(options = {}, entries = [], conductorOdIn = Number
     lineSpeedFtMin,
   })
 
+  await removeCalcChain(zip)
   const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })
   return {
     base64: uint8ToBase64(bytes),
@@ -798,8 +837,17 @@ export async function makeShieldMiWorkbook(options = {}) {
   const zip = await loadShopMiZip()
   const paths = await sheetPathMap(zip)
   await patchHeaderCells(zip, paths, options)
+  await patchTapingSheet(zip, paths['Taping (3-Bay)'], [], {
+    incomingOdIn: Number.NaN,
+    lineSpeedFtMin: options.lineSpeedFtMin || 7,
+  })
+  await patchTapingSheet(zip, paths['Taping (3-Bay) (2)'], [], {
+    incomingOdIn: Number.NaN,
+    lineSpeedFtMin: options.lineSpeedFtMin || 7,
+  })
   const spiral = await patchSpiralShieldSheet(zip, paths['Spiral Shield'], options)
   const braid = await patchBraidingSheet(zip, paths.Braiding, options)
+  await removeCalcChain(zip)
   const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' })
   return {
     base64: uint8ToBase64(bytes),

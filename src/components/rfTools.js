@@ -928,7 +928,7 @@ export const RF_TOOLS = [
   {
     name: 'design_dielectric_stack',
     description:
-      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), tape thickness, overlap, and number of WTM passes. Default PTFE wrap is 2/3 to reduce shrink-back; use 1/2 only when the target OD needs the lower single-pass build. WTM taping pitch is OD-based and calibrated from MI-ST962-032-130 / 032-200, then clamped to the 0.0390 in/rev minimum. Returns a complete layer recipe + predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the RF Stack Lab tab + a filled shop MI .xlsx based on MI-ST962-032-130, with tape part numbers, OD after tape, pitch set-point, and tension filled into the Taping (3-Bay) sheets. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
+      'Design a PTFE tape dielectric stack for a coaxial RF cable to hit a target VP and/or Z₀. Returns physical stack-by-stack PTFE layers, not grouped passes. Picks tape densities (high-density 1.6 g/cm³ and/or low-density 0.7 g/cm³), prefers thicker factory tape around 5 mil when the engineer did not specify a tape, and increases tape width every two layers as OD grows instead of repeating one narrow width through the whole cable. Before exposing Apply/MI, it enforces a practical layer budget: if the first solve would take 7+ PTFE layers, it re-solves with thicker/wider stocked tape and chooses the fewest passing stack, so 3-layer or 4-layer builds are allowed when they pass and 5/6 layers are used only when needed. Default PTFE wrap is 2/3 to reduce shrink-back; use 1/2 only when the target OD needs the lower single-layer build. WTM taping pitch is OD-based and calibrated from MI-ST962-032-130 / 032-200, then clamped to the 0.0390 in/rev minimum. Returns a complete layer recipe + predicted final OD/εᵣ_eff/VP/Z₀ + a one-click apply preset that fills the RF Stack Lab tab + a filled shop MI .xlsx based on MI-ST962-032-130, with tape part numbers, OD after tape, pitch set-point, and tension filled into the Taping (3-Bay) sheets. Use this whenever the engineer asks "build me a cable with conductor X and target VP/Z₀". Manufacturing rule: when conductor_od ≤ 0.091" (2.311 mm), tape thickness is auto-clamped to ≤ 10 mil (0.254 mm) — thicker tape wrinkles on tight radii. The clamp is reported in the notes array.',
     input_schema: {
       type: 'object',
       properties: {
@@ -937,7 +937,7 @@ export const RF_TOOLS = [
         target_vp:         { type: 'number', description: 'Target velocity factor as a fraction (0.65 .. 0.92). e.g. 0.80 for 80% VP. Optional if target_z0_ohm is given.' },
         target_z0_ohm:     { type: 'number', description: 'Target characteristic impedance in ohms (typically 50, 75, 100). Optional if only sizing for VP.' },
         tape_part_number:  { type: 'string', description: 'Optional PTFE tape part number from Material Library, e.g. 962-96000-05L0750.' },
-        tape_thickness_mm: { type: 'number', description: 'Nominal tape thickness in mm. Default 0.10 mm (typical PTFE skived tape).' },
+        tape_thickness_mm: { type: 'number', description: 'Nominal tape thickness in mm. Default is 5 mil / 0.127 mm for factory RF builds unless the engineer specifies a tape.' },
         tape_width_mm:     { type: 'number', description: 'Tape width in mm. Default 0.635 mm (0.0250 inch).' },
         overlap:           { type: 'string', description: 'PTFE wrap mode: "1/2" / "2/3" / "3/4". Default is 2/3 shop preference to reduce shrink-back; use 1/2 only to hit a lower target OD. Valid settings are 50%, 66.7%, and 75%.' },
         tension_factor:    { type: 'number', description: 'WTM tension factor τ (0.7..1.0). Lower = tighter wrap, more compression. Default 0.92.' },
@@ -948,6 +948,7 @@ export const RF_TOOLS = [
         prepared_by:       { type: 'string', description: 'Prepared-by initials for the MI workbook.' },
         mi_date:           { type: 'string', description: 'Date to put in the MI workbook. Default today.' },
         prefer:            { type: 'string', description: '"hd" (all 1.6 g/cm³), "ld" (all 0.7 g/cm³), or "mix" (HD inside + LD outside). Default "mix".' },
+        max_ptfe_layers:   { type: 'number', description: 'Practical MI layer budget. Default 6. The solver may choose 3, 4, 5, or 6 layers; it is not forced to 5-6.' },
       },
       required: [],
     },
@@ -955,7 +956,7 @@ export const RF_TOOLS = [
   {
     name: 'optimize_dielectric_stack',
     description:
-      'Brute-force optimize a PTFE dielectric recipe against target Z0, VP, and optional dielectric OD before generating/applying an MI. Scans stocked 962-96000 PTFE tape widths/thicknesses, standard 1/2 / 2/3 / 3/4 wraps, HD/LD pass mixes, and tension factors, then returns ranked candidates validated by the same RF Stack Lab math. Use this before design_dielectric_stack when impedance or dielectric OD must land close.',
+      'Brute-force optimize a PTFE dielectric recipe against target Z0, VP, and optional dielectric OD before generating/applying an MI. Scans stocked 962-96000 PTFE tape widths/thicknesses, standard 1/2 / 2/3 / 3/4 wraps, HD/LD layer mixes, and tension factors, then returns ranked candidates validated by the same RF Stack Lab math. It strongly prefers the fewest practical passing stack inside the MI budget, so 3-layer or 4-layer builds are valid when they pass and 5/6 layers are only used when needed. Use this before design_dielectric_stack when impedance or dielectric OD must land close.',
     input_schema: {
       type: 'object',
       properties: {
@@ -972,6 +973,7 @@ export const RF_TOOLS = [
         overlap: { type: 'string', description: 'Optional single wrap mode: 1/2, 2/3, or 3/4.' },
         tension_factor: { type: 'number', description: 'Optional fixed tension factor. If omitted the optimizer scans practical values.' },
         prefer: { type: 'string', description: '"mix" (default), "hd", or "ld".' },
+        max_ptfe_layers: { type: 'number', description: 'Practical MI layer budget. Default 6. Set lower only when the factory wants fewer taping layers.' },
         max_candidates: { type: 'number', description: 'Number of ranked candidates to return. Default 5.' },
       },
       required: [],
@@ -992,7 +994,7 @@ export const RF_TOOLS = [
         target_dielectric_od_inch: { type: 'number', description: 'Optional target dielectric OD in inches.' },
         layers: {
           type: 'array',
-          description: 'PTFE recipe layers, each with part_number or tape_thickness_mm/tape_width_mm, density/density_code, overlap, passes, and optional tension_factor.',
+          description: 'PTFE recipe layers, each with part_number or tape_thickness_mm/tape_width_mm, density/density_code, overlap, and optional tension_factor. Legacy passes are accepted but new recipes should send one physical tape layer per row.',
           items: { type: 'object' },
         },
         use_od_after_overrides: { type: 'boolean', description: 'Use provided OD_after_mm values as measured overrides. Default false for independent validation.' },
@@ -1028,6 +1030,7 @@ export const RF_TOOLS = [
         braid_wire_awg: { type: 'number', description: 'Optional braid wire AWG. If omitted, selected from OD.' },
         braid_carriers: { type: 'number', description: 'Optional total braid carriers. If omitted, selected automatically.' },
         braid_ends_per_carrier: { type: 'number', description: 'Optional ends per carrier. If omitted, selected automatically.' },
+        braid_picks_per_in: { type: 'number', description: 'Optional braid picks per inch set-point. If provided, written to the Braiding MI sheet.' },
         braid_angle_deg: { type: 'number', description: 'Nominal braid angle from cable axis. Default 45 degrees.' },
         freq_mhz: { type: 'number', description: 'Frequency used for rough shielding effectiveness estimate. Default 1000 MHz.' },
         jacket_od_mm: { type: 'number', description: 'Optional jacket OD. If provided, a jacket layer is included.' },
@@ -1720,6 +1723,10 @@ export async function dispatchRfTool(name, input) {
 
 const _PTFE_SOLID_DENSITY = 2.15
 const _PTFE_SOLID_EPS = 2.10
+const _MIL_TO_MM = 0.0254
+const _DEFAULT_FACTORY_PTFE_MIL = 5
+const _DEFAULT_MAX_PTFE_LAYERS = 6
+const _MIN_PRACTICAL_PTFE_LAYERS = 3
 
 function _densityToEps(density) {
   if (!density || density <= 0) return 1
@@ -1809,6 +1816,60 @@ function _findBestTapePassPlan({ conductorOdMm, tapeThicknessMm, overlap, tensio
   return best || { hdPasses: 1, ldPasses: 0, totalPasses: 1 }
 }
 
+function _ptfeWidthStepsIn(conductorOdMm) {
+  const smallCable = Number(conductorOdMm) / 25.4 <= SMALL_CABLE_TAPE_OD_IN + 0.00001
+  return Array.from(new Set(PTFE_TAPE_MATERIALS.map((tape) => tape.widthIn)))
+    .filter((widthIn) => !smallCable || widthIn < SMALL_CABLE_MAX_PTFE_WIDTH_IN - 0.00001)
+    .sort((a, b) => a - b)
+}
+
+function _progressivePtfeTape({ conductorOdMm, baseThicknessMm, baseWidthMm, densityCode, layerIndex, lockWidth = false, maxThicknessMil = Infinity }) {
+  const widthSteps = _ptfeWidthStepsIn(conductorOdMm)
+  const baseWidthIn = Number(baseWidthMm) > 0 ? Number(baseWidthMm) / 25.4 : 0.025
+  const foundIndex = widthSteps.findIndex((widthIn) => widthIn >= baseWidthIn - 0.00001)
+  const startIndex = foundIndex >= 0 ? foundIndex : Math.max(0, widthSteps.length - 1)
+  const widthIndex = lockWidth ? startIndex : Math.min(widthSteps.length - 1, startIndex + Math.floor(layerIndex / 2))
+  const widthIn = widthSteps[widthIndex] || baseWidthIn
+  const requestedMil = Number(baseThicknessMm) > 0 ? Number(baseThicknessMm) / _MIL_TO_MM : _DEFAULT_FACTORY_PTFE_MIL
+  const thicknessMil = requestedMil
+  return findNearestPtfeTape({
+    thicknessMil,
+    widthIn,
+    densityCode,
+    maxThicknessMil,
+    cableOdMm: conductorOdMm,
+  })
+}
+
+function _buildProgressivePtfeLayers({ conductorOdMm, baseThicknessMm, baseWidthMm, overlap, tensionFactor, hdPasses = 0, ldPasses = 0, maxThicknessMil = Infinity, lockWidth = false }) {
+  const densityPlan = [
+    ...Array.from({ length: Math.max(0, Math.round(hdPasses)) }, () => 'H'),
+    ...Array.from({ length: Math.max(0, Math.round(ldPasses)) }, () => 'L'),
+  ]
+  const plan = densityPlan.length ? densityPlan : ['H']
+  let radiusMm = Number(conductorOdMm) / 2
+  return plan.map((densityCode, index) => {
+    const currentOdMm = 2 * radiusMm
+    const tape = _progressivePtfeTape({
+      conductorOdMm: currentOdMm,
+      baseThicknessMm,
+      baseWidthMm,
+      densityCode,
+      layerIndex: index,
+      lockWidth,
+      maxThicknessMil,
+    })
+    const layer = ptfeTapeToToolLayer(tape, {
+      preset: densityCode === 'H' ? 'high_density' : 'low_density',
+      overlap,
+      tension_factor: tensionFactor,
+      passes: 1,
+    })
+    radiusMm += Number(layer.tape_thickness_mm || 0) * _overlapLayers(overlap) * tensionFactor
+    return layer
+  })
+}
+
 function _makePreflightValidation({ predicted, targetZ0, targetVp, targetOdMm }) {
   const checks = []
   const addCheck = ({ name, target, actual, tolerance, unit }) => {
@@ -1844,11 +1905,14 @@ function _toolCheck(level, name, actual, target, message) {
 
 function _machineRuleGuardForRecipe({ conductorOdMm, layers = [], shieldLayers = [], requireDielectric = false }) {
   const checks = []
-  const smallCore = Number(conductorOdMm) / 25.4 <= SMALL_CABLE_TAPE_OD_IN + 0.00001
   if (requireDielectric && !layers.length) {
     checks.push(_toolCheck('block', 'Dielectric stack', 'missing', 'PTFE recipe', 'Build or validate PTFE layers before Apply/MI.'))
   }
   layers.forEach((layer, index) => {
+    const incomingOdIn = Number(layer.OD_before_mm ?? layer.od_before_mm) > 0
+      ? Number(layer.OD_before_mm ?? layer.od_before_mm) / 25.4
+      : Number(conductorOdMm) / 25.4
+    const smallCore = incomingOdIn <= SMALL_CABLE_TAPE_OD_IN + 0.00001
     const pitchIn = Number(layer.pitch_setpoint_in ?? layer.pitchSetpointIn ?? (layer.pitch_setpoint_mm != null ? Number(layer.pitch_setpoint_mm) / 25.4 : NaN))
     const widthIn = Number(layer.tape_width_in ?? layer.width_in ?? (layer.tape_width_mm != null ? Number(layer.tape_width_mm) / 25.4 : NaN))
     const overlapPct = Number(layer.overlap_pct ?? normalizePtfeWrap(layer.overlap).percent)
@@ -1880,7 +1944,7 @@ function _machineRuleGuardForRecipe({ conductorOdMm, layers = [], shieldLayers =
         `Tape #${index + 1} small-core width`,
         Number.isFinite(widthIn) ? round(widthIn, 4) : null,
         `< ${SMALL_CABLE_MAX_PTFE_WIDTH_IN}`,
-        'For OD <= 0.051 in, avoid 0.0375 in PTFE tape width.',
+        'For incoming OD <= 0.051 in, avoid 0.0375 in PTFE tape width.',
       ))
     }
   })
@@ -2351,7 +2415,6 @@ function _stackApplyPreset(conductorOdMm, targetZ0, stackOut) {
       OD_before_mm: L.OD_before_mm,
       overlap: L.overlap,
       tension_factor: L.tension_factor,
-      passes: L.passes,
     })),
   }
 }
@@ -2361,6 +2424,7 @@ function _simulatePtfeRecipe({ conductorOdMm, layers, targetZ0, targetVp, target
   const stackOut = []
   const builtLayers = []
   for (const rawLayer of layers || []) {
+    const odBeforeMm = 2 * r
     const tape = findNearestPtfeTape({
       partNumber: rawLayer.part_number || rawLayer.partNumber || rawLayer.material_id,
       thicknessMm: rawLayer.tape_thickness_mm ?? rawLayer.thickness_mm,
@@ -2368,7 +2432,7 @@ function _simulatePtfeRecipe({ conductorOdMm, layers, targetZ0, targetVp, target
       widthIn: rawLayer.tape_width_in ?? rawLayer.width_in,
       densityCode: rawLayer.density_code || rawLayer.densityCode,
       density: rawLayer.density,
-      cableOdMm: conductorOdMm,
+      cableOdMm: Number(rawLayer.OD_before_mm ?? rawLayer.od_before_mm ?? odBeforeMm) || odBeforeMm,
     })
     const overlap = normalizePtfeWrap(rawLayer.overlap || '2/3').key
     const passes = Math.max(1, Math.min(48, Math.round(Number(rawLayer.passes) || 1)))
@@ -2376,7 +2440,6 @@ function _simulatePtfeRecipe({ conductorOdMm, layers, targetZ0, targetVp, target
     const tapeThicknessMm = Number(rawLayer.tape_thickness_mm ?? rawLayer.thickness_mm ?? tape?.thicknessMm)
     const tapeWidthMm = Number(rawLayer.tape_width_mm ?? rawLayer.width_mm ?? (rawLayer.tape_width_in ? Number(rawLayer.tape_width_in) * 25.4 : tape?.widthMm))
     const density = _densityFromLayer(rawLayer, tape)
-    const odBeforeMm = 2 * r
     const requestedOdAfter = Number(rawLayer.OD_after_mm ?? rawLayer.od_after_mm ?? rawLayer.ODAfterMm)
     const calculatedRadial = tapeThicknessMm * _overlapLayers(overlap) * tensionFactor * passes
     const radial = useOdAfterOverrides && requestedOdAfter > odBeforeMm
@@ -2404,7 +2467,6 @@ function _simulatePtfeRecipe({ conductorOdMm, layers, targetZ0, targetVp, target
       overlap,
       overlap_pct: normalizePtfeWrap(overlap).percent,
       tension_factor: tensionFactor,
-      passes,
       OD_before_mm: round(odBeforeMm, 4),
       OD_after_mm: round(odAfterMm, 4),
       pitch_setpoint_in: round(pitchInfo.pitchIn, 4),
@@ -2452,9 +2514,10 @@ function _simulatePtfeRecipe({ conductorOdMm, layers, targetZ0, targetVp, target
 async function designDielectricStack(input) {
   const rawInput = input || {}
   const overlapWasSpecified = rawInput.overlap != null && rawInput.overlap !== ''
+  const tapeThicknessWasSpecified = rawInput.tape_thickness_mm != null || rawInput.tape_part_number
   let { conductor_od_mm, conductor_od_inch, target_vp, target_z0_ohm,
         tape_part_number,
-        tape_thickness_mm = 0.10, tape_width_mm = 0.635,
+        tape_thickness_mm = _DEFAULT_FACTORY_PTFE_MIL * _MIL_TO_MM, tape_width_mm = 0.635,
         overlap, tension_factor = 0.92, prefer = 'mix',
         tension_n = 4.0, line_speed_ft_min = 7,
         mi_number = 'MI-ST962-AUTO', finished_part_number = '',
@@ -2484,7 +2547,7 @@ async function designDielectricStack(input) {
   // Manufacturing rule: small conductors (≤ 0.091" = 2.311 mm) can't take
   // tape thicker than 10 mil — it wrinkles and won't conform to the tight
   // radius. Auto-clamp + record a note.
-  const MIL = 0.0254
+  const MIL = _MIL_TO_MM
   const SMALL_OD_MM = 0.091 * 25.4   // 2.3114
   const SMALL_MAX_TAPE_MM = 10 * MIL // 0.254
   let smallCableClamp = null
@@ -2498,6 +2561,7 @@ async function designDielectricStack(input) {
 
   const requestedTape = { thickness_mm: tape_thickness_mm, width_mm: tape_width_mm }
   const maxThicknessMil = d <= SMALL_OD_MM + 0.001 ? 10 : Infinity
+  const maxPtfeLayers = _ptfeLayerBudget(rawInput)
   const baseDensityCode = String(prefer).toLowerCase() === 'ld' ? 'L' : 'H'
   const baseTape = findNearestPtfeTape({
     partNumber: tape_part_number,
@@ -2587,35 +2651,57 @@ async function designDielectricStack(input) {
     targetVp: target_vp,
     targetOdMm: D_target,
     mode,
-    fHD,
+    fHD: f_HD,
     dielectricThkTarget: dielectricThk_target,
   })
   const HD_passes = Math.max(0, Math.round(passPlan.hdPasses || 0))
   const LD_passes = Math.max(0, Math.round(passPlan.ldPasses || 0))
 
-  // Build the layer recipe (HD goes inside since high-εᵣ closer to conductor lowers loss
-  // contribution from peripheral E-field; LD outside lifts VP)
-  const layers = []
-  const makeMaterialLayer = (preset, density, passes) => {
-    const tape = findNearestPtfeTape({
-      thicknessMm: tape_thickness_mm,
-      widthMm: tape_width_mm,
-      densityCode: density >= 1.1 ? 'H' : 'L',
-      maxThicknessMil,
-      cableOdMm: d,
+  // Build the layer recipe as physical tape rows. HD goes inside, LD outside;
+  // width steps grow every two layers so a larger cable is not wrapped forever
+  // with the same narrow tape.
+  let layers = _buildProgressivePtfeLayers({
+    conductorOdMm: d,
+    baseThicknessMm: tape_thickness_mm,
+    baseWidthMm: tape_width_mm,
+    overlap: ovr,
+    tensionFactor: tension_factor,
+    hdPasses: HD_passes,
+    ldPasses: LD_passes,
+    maxThicknessMil,
+    lockWidth: Boolean(tape_part_number),
+  })
+  const initialLayerCount = layers.length
+  let practicalStackChoice = null
+
+  if (!tape_part_number && (!tapeThicknessWasSpecified || initialLayerCount > maxPtfeLayers)) {
+    const rankedPractical = _rankPracticalPtfeStacks({
+      raw: {
+        ...rawInput,
+        tape_thickness_mm,
+        tape_width_mm,
+        overlap: ovr,
+        tension_factor,
+      },
+      targets: {
+        conductorOdMm: d,
+        targetZ0: target_z0_ohm,
+        targetVp: target_vp,
+        targetOdMm: D_target,
+      },
+      wraps: [ovr],
+      tensionFactors: [tension_factor],
+      mode,
+      fHD: f_HD,
+      dielectricThkTarget: dielectricThk_target,
+      maxLayers: maxPtfeLayers,
     })
-    return ptfeTapeToToolLayer(tape, {
-      preset,
-      overlap: ovr,
-      tension_factor,
-      passes,
-    })
-  }
-  if (HD_passes > 0) layers.push(makeMaterialLayer('high_density', 1.6, HD_passes))
-  if (LD_passes > 0) layers.push(makeMaterialLayer('low_density', 0.7, LD_passes))
-  // If everything rounded to zero (very thin dielectric), force at least one pass
-  if (layers.length === 0) {
-    layers.push(makeMaterialLayer('high_density', 1.6, 1))
+    practicalStackChoice = rankedPractical[0] || null
+    if (practicalStackChoice?.rawLayers?.length) {
+      layers = practicalStackChoice.rawLayers
+      tape_thickness_mm = practicalStackChoice.candidate.thicknessMm
+      tape_width_mm = practicalStackChoice.candidate.widthMm
+    }
   }
 
   // Predict actual achieved geometry from the chosen integer passes
@@ -2643,7 +2729,6 @@ async function designDielectricStack(input) {
       overlap: L.overlap,
       overlap_pct: normalizePtfeWrap(L.overlap).percent,
       tension_factor: L.tension_factor,
-      passes: L.passes,
       tape_thickness_mm: round(L.tape_thickness_mm, 4),
       tape_thickness_mil: L.tape_thickness_mil,
       tape_width_mm: round(L.tape_width_mm, 3),
@@ -2676,13 +2761,15 @@ async function designDielectricStack(input) {
 
   // Predict tape Bragg notches
   const notch1 = (() => {
-    const P_axial = pitchSetpointMm
+    const P_axial = Number(stackOut[0]?.pitch_setpoint_mm) || pitchSetpointMm
     if (P_axial <= 0) return null
     const f_GHz = (299792458 * VP_actual) / (2 * P_axial * 1e-3 * 1e9)
     return round(f_GHz, 2)
   })()
 
   const selectedParts = Array.from(new Set(layers.map((L) => L.part_number).filter(Boolean)))
+  const anyPitchLimitedByWtm = stackOut.some((layer) => layer.pitch_limited_by_wtm)
+  const firstPitch = stackOut.find((layer) => Number(layer.pitch_setpoint_mm) > 0)
   const snappedTape = baseTape && (
     Math.abs(baseTape.thicknessMm - requestedTape.thickness_mm) > 0.002
     || Math.abs(baseTape.widthMm - requestedTape.width_mm) > 0.2
@@ -2772,7 +2859,6 @@ async function designDielectricStack(input) {
         OD_before_mm: L.OD_before_mm,
         overlap: L.overlap,
         tension_factor: L.tension_factor,
-        passes: L.passes,
       })),
     } } : { _apply_blocked: guardedPreflight.message }),
     _download: {
@@ -2785,11 +2871,19 @@ async function designDielectricStack(input) {
       selectedParts.length
         ? `Material Library: selected ${selectedParts.join(', ')} from the 962-96000 PTFE tape catalog.`
         : null,
+      !tapeThicknessWasSpecified
+        ? `Factory tape rule: no tape was specified, so the solver preferred ${_DEFAULT_FACTORY_PTFE_MIL} mil PTFE and stepped width every two layers instead of stacking many thin same-width tapes.`
+        : null,
+      practicalStackChoice
+        ? `Layer budget: initial stocked solve was ${initialLayerCount} layer${initialLayerCount === 1 ? '' : 's'}; selected ${layers.length} physical PTFE layer${layers.length === 1 ? '' : 's'} with ${practicalStackChoice.candidate.thicknessMil} mil tape before Apply/MI. The rule is not fixed at 5-6: if 3 or 4 layers pass RF preflight, the agent should use 3 or 4.`
+        : layers.length > maxPtfeLayers
+          ? `Layer budget warning: this recipe still needs ${layers.length} PTFE layers, above the ${maxPtfeLayers}-layer MI budget. Use a thicker stocked tape or relax the OD/VP target before printing.`
+          : `Layer budget: ${layers.length} physical PTFE layer${layers.length === 1 ? '' : 's'} fit the MI budget; no extra grouped passes are hidden.`,
       miWorkbook.template === 'MI-ST962-032-130.xlsx'
         ? `MI workbook uses shop template ${miWorkbook.template}; filled ${miWorkbook.filledTapingEntries || 0} taping station row${miWorkbook.filledTapingEntries === 1 ? '' : 's'} with tape, OD after tape, pitch set-point, and tension.`
         : null,
       miWorkbook.omittedTapingEntries
-        ? `MI template has two 3-bay taping sheets, so ${miWorkbook.omittedTapingEntries} extra taping pass${miWorkbook.omittedTapingEntries === 1 ? '' : 'es'} were kept in the JSON recipe but not placed in the shop MI workbook.`
+        ? `MI template has two 3-bay taping sheets, so ${miWorkbook.omittedTapingEntries} extra taping layer${miWorkbook.omittedTapingEntries === 1 ? '' : 's'} were kept in the JSON recipe but not placed in the shop MI workbook.`
         : null,
       miWorkbook.warning || null,
       `Preflight: target dielectric OD ${D_target.toFixed(3)} mm; dry-run recipe gives ${finalOD.toFixed(3)} mm, ${Z0_actual.toFixed(1)} ohm, ${(VP_actual * 100).toFixed(1)}% VP.`,
@@ -2810,10 +2904,10 @@ async function designDielectricStack(input) {
         ? `Small-cable taping rule: OD ${(d / 25.4).toFixed(4)}" ≤ ${SMALL_CABLE_TAPE_OD_IN.toFixed(3)}"; avoided ${smallCableWidthClamp.original_width_in.toFixed(4)}" PTFE tape and selected stocked tape below ${smallCableWidthClamp.clamped_width_in.toFixed(4)}".`
         : null,
       !overlapWasSpecified
-        ? 'PTFE taping rule: defaulted to 2/3 wrap to reduce shrink-back. Use 1/2 wrap only when the target OD requires the lower single-pass build; one 2/3 wrap builds 3 tape thicknesses, smaller than two 1/2 wraps at 4 tape thicknesses.'
+        ? 'PTFE taping rule: defaulted to 2/3 wrap to reduce shrink-back. Use 1/2 wrap only when the target OD requires the lower single-layer build; one 2/3 wrap builds 3 tape thicknesses, smaller than two 1/2 wraps at 4 tape thicknesses.'
         : null,
-      pitchLimitedByWtm
-        ? `WTM taping-head rule: calculated pitch ${(requestedPitchMm / 25.4).toFixed(4)} in/rev is below the machine minimum, so MI pitch set-point is clamped to ${WTM_MIN_TAPING_PITCH_IN.toFixed(4)} in/rev.`
+      anyPitchLimitedByWtm
+        ? `WTM taping-head rule: at least one calculated pitch is below the machine minimum, so the MI pitch set-point is clamped to ${WTM_MIN_TAPING_PITCH_IN.toFixed(4)} in/rev.`
         : null,
       overlapWasSpecified && requestedOverlap !== overlap
         ? `PTFE wrap snapped to stocked shop setting: ${normalizePtfeWrap(requestedOverlap).percent}% (${overlap}). Valid PTFE settings are 50%, 66.7%, and 75%.`
@@ -2824,10 +2918,10 @@ async function designDielectricStack(input) {
         : mode === 'ld' ? 'All LD — εᵣ_target ≤ εᵣ_LD, can\'t go lower without ePTFE.'
         : null,
       Math.abs(Z0_actual - (target_z0_ohm || 0)) > 1
-        ? `Achieved Z₀ ${Z0_actual.toFixed(1)} Ω is off target by ${(Z0_actual - (target_z0_ohm || 0)).toFixed(1)} Ω due to integer-pass rounding. Tune tension or tape thickness in the UI to dial it in.`
+        ? `Achieved Z₀ ${Z0_actual.toFixed(1)} Ω is off target by ${(Z0_actual - (target_z0_ohm || 0)).toFixed(1)} Ω due to stocked-layer rounding. Tune tension or tape thickness in the UI to dial it in.`
         : null,
       notch1 && notch1 < 40
-        ? `First Bragg notch from ${ovr} wrap with ${tape_width_mm.toFixed(2)} mm (${(tape_width_mm / MIL).toFixed(0)} mil) tape and ${pitchSetpointMm.toFixed(3)} mm pitch predicted at ~${notch1} GHz. Use compute_tape_notches for full harmonic table.`
+        ? `First Bragg notch from ${ovr} wrap with ${tape_width_mm.toFixed(2)} mm (${(tape_width_mm / MIL).toFixed(0)} mil) tape and ${Number(firstPitch?.pitch_setpoint_mm || pitchSetpointMm).toFixed(3)} mm pitch predicted at ~${notch1} GHz. Use compute_tape_notches for full harmonic table.`
         : null,
     ].filter(Boolean),
   }
@@ -2868,12 +2962,14 @@ function _ptfePhysicalCandidates(input = {}, conductorOdMm) {
       widthIn: tape.widthIn,
       widthMm: tape.widthMm,
       densities: new Set(),
+      lockWidth: Boolean(requestedPart),
+      maxThicknessMil,
     }
     existing.densities.add(tape.densityCode)
     map.set(key, existing)
   })
 
-  const desiredThicknessMm = Number(input.tape_thickness_mm)
+  const desiredThicknessMm = Number(input.tape_thickness_mm ?? _DEFAULT_FACTORY_PTFE_MIL * _MIL_TO_MM)
   const desiredWidthMm = Number(input.tape_width_mm)
   return Array.from(map.values())
     .map((item) => {
@@ -2882,40 +2978,21 @@ function _ptfePhysicalCandidates(input = {}, conductorOdMm) {
       const densityPenalty = item.densities.has('H') && item.densities.has('L') ? 0 : 1.5
       return { ...item, score: thicknessPenalty + widthPenalty + densityPenalty }
     })
-    .sort((a, b) => a.score - b.score || a.thicknessMil - b.thicknessMil || a.widthMm - b.widthMm)
+    .sort((a, b) => a.score - b.score || Math.abs(a.thicknessMil - _DEFAULT_FACTORY_PTFE_MIL) - Math.abs(b.thicknessMil - _DEFAULT_FACTORY_PTFE_MIL) || a.widthMm - b.widthMm)
 }
 
 function _layersFromPassPlan({ candidate, overlap, tensionFactor, hdPasses, ldPasses, conductorOdMm }) {
-  const layers = []
-  if (hdPasses > 0) {
-    const tape = findNearestPtfeTape({
-      thicknessMm: candidate.thicknessMm,
-      widthMm: candidate.widthMm,
-      densityCode: 'H',
-      cableOdMm: conductorOdMm,
-    })
-    layers.push(ptfeTapeToToolLayer(tape, {
-      preset: 'high_density',
-      overlap,
-      tension_factor: tensionFactor,
-      passes: hdPasses,
-    }))
-  }
-  if (ldPasses > 0) {
-    const tape = findNearestPtfeTape({
-      thicknessMm: candidate.thicknessMm,
-      widthMm: candidate.widthMm,
-      densityCode: 'L',
-      cableOdMm: conductorOdMm,
-    })
-    layers.push(ptfeTapeToToolLayer(tape, {
-      preset: 'low_density',
-      overlap,
-      tension_factor: tensionFactor,
-      passes: ldPasses,
-    }))
-  }
-  return layers
+  return _buildProgressivePtfeLayers({
+    conductorOdMm,
+    baseThicknessMm: candidate.thicknessMm,
+    baseWidthMm: candidate.widthMm,
+    overlap,
+    tensionFactor,
+    hdPasses,
+    ldPasses,
+    maxThicknessMil: candidate.maxThicknessMil || Infinity,
+    lockWidth: Boolean(candidate.lockWidth),
+  })
 }
 
 function _preflightScore(preflight) {
@@ -2926,24 +3003,34 @@ function _preflightScore(preflight) {
   }, 0)
 }
 
-function optimizeDielectricStack(input) {
-  const raw = input || {}
-  const targets = _resolveDielectricTargets(raw)
-  const { mode, fHD, epsHD, epsLD } = _resolveModeForTarget(raw.prefer, targets.epsTarget)
-  const wraps = raw.overlap
-    ? [normalizePtfeWrap(raw.overlap).key]
-    : Array.isArray(raw.allowed_wraps) && raw.allowed_wraps.length
-      ? Array.from(new Set(raw.allowed_wraps.map((item) => normalizePtfeWrap(item).key)))
-      : ['2/3', '1/2', '3/4']
-  const tensionFactors = raw.tension_factor != null
-    ? [_clamp(Number(raw.tension_factor) || 0.92, 0.65, 1.05)]
-    : [0.88, 0.9, 0.92, 0.94, 0.96, 1.0]
-  const candidates = _ptfePhysicalCandidates(raw, targets.conductorOdMm)
-  if (!candidates.length) throw new Error('No stocked PTFE tape candidates match the requested constraints.')
+function _ptfeLayerBudget(input = {}) {
+  const requested = Number(input.max_ptfe_layers ?? input.max_layers ?? input.ptfe_layer_budget)
+  return Math.max(1, Math.min(6, Math.round(requested) || _DEFAULT_MAX_PTFE_LAYERS))
+}
 
-  const dielectricThkTarget = targets.targetOdMm
-    ? Math.max(0.001, (targets.targetOdMm - targets.conductorOdMm) / 2)
-    : Math.max(0.001, targets.conductorOdMm * 0.5)
+function _ptfeLayerBudgetScore(totalLayers, maxLayers = _DEFAULT_MAX_PTFE_LAYERS) {
+  const count = Math.max(0, Math.round(Number(totalLayers) || 0))
+  if (!count) return 2000
+  if (count > maxLayers) return 5000 + Math.pow(count - maxLayers, 2) * 800 + count * 12
+  const underPractical = count < _MIN_PRACTICAL_PTFE_LAYERS
+    ? (_MIN_PRACTICAL_PTFE_LAYERS - count) * 16
+    : 0
+  return count * 8 + underPractical
+}
+
+function _scorePracticalPtfeCandidate({ preflight, totalLayers, candidate, overlap, maxLayers }) {
+  const rfScore = _preflightScore(preflight)
+  const passPenalty = preflight?.allow_apply ? 0 : 20000
+  return passPenalty
+    + _ptfeLayerBudgetScore(totalLayers, maxLayers)
+    + rfScore * (preflight?.allow_apply ? 0.35 : 10)
+    + (overlap === '2/3' ? 0 : 0.6)
+    + (Number(candidate?.score) || 0) * 0.03
+}
+
+function _rankPracticalPtfeStacks({ raw, targets, wraps, tensionFactors, mode, fHD, dielectricThkTarget, maxLayers, candidates: providedCandidates }) {
+  const candidates = providedCandidates || _ptfePhysicalCandidates(raw, targets.conductorOdMm)
+  if (!candidates.length) throw new Error('No stocked PTFE tape candidates match the requested constraints.')
   const ranked = []
   candidates.forEach((candidate) => {
     wraps.forEach((overlap) => {
@@ -2960,7 +3047,7 @@ function optimizeDielectricStack(input) {
           fHD,
           dielectricThkTarget,
         })
-        const layers = _layersFromPassPlan({
+        const rawLayers = _layersFromPassPlan({
           candidate,
           overlap,
           tensionFactor,
@@ -2970,21 +3057,67 @@ function optimizeDielectricStack(input) {
         })
         const evaluated = _simulatePtfeRecipe({
           conductorOdMm: targets.conductorOdMm,
-          layers,
+          layers: rawLayers,
           targetZ0: targets.targetZ0,
           targetVp: targets.targetVp,
           targetOdMm: targets.targetOdMm,
         })
-        const totalPasses = layers.reduce((sum, layer) => sum + (Number(layer.passes) || 0), 0)
-        const score = _preflightScore(evaluated.preflight)
-          + totalPasses * 0.015
-          + (overlap === '2/3' ? 0 : 0.2)
-          + candidate.score * 0.02
-        ranked.push({ score, candidate, overlap, tensionFactor, totalPasses, layers: evaluated.stackOut, predicted: evaluated.predicted, preflight: evaluated.preflight })
+        const totalLayers = rawLayers.length
+        const score = _scorePracticalPtfeCandidate({
+          preflight: evaluated.preflight,
+          totalLayers,
+          candidate,
+          overlap,
+          maxLayers,
+        })
+        ranked.push({
+          score,
+          candidate,
+          overlap,
+          tensionFactor,
+          totalLayers,
+          rawLayers,
+          layers: evaluated.stackOut,
+          predicted: evaluated.predicted,
+          preflight: evaluated.preflight,
+          passPlan: plan,
+        })
       })
     })
   })
-  ranked.sort((a, b) => a.score - b.score)
+  return ranked.sort((a, b) => a.score - b.score)
+}
+
+function optimizeDielectricStack(input) {
+  const raw = input || {}
+  const targets = _resolveDielectricTargets(raw)
+  const { mode, fHD, epsHD, epsLD } = _resolveModeForTarget(raw.prefer, targets.epsTarget)
+  const wraps = raw.overlap
+    ? [normalizePtfeWrap(raw.overlap).key]
+    : Array.isArray(raw.allowed_wraps) && raw.allowed_wraps.length
+      ? Array.from(new Set(raw.allowed_wraps.map((item) => normalizePtfeWrap(item).key)))
+      : ['2/3', '1/2', '3/4']
+  const tensionFactors = raw.tension_factor != null
+    ? [_clamp(Number(raw.tension_factor) || 0.92, 0.65, 1.05)]
+    : [0.88, 0.9, 0.92, 0.94, 0.96, 1.0]
+  const maxLayers = _ptfeLayerBudget(raw)
+  const candidates = _ptfePhysicalCandidates(raw, targets.conductorOdMm)
+  if (!candidates.length) throw new Error('No stocked PTFE tape candidates match the requested constraints.')
+
+  const dielectricThkTarget = targets.targetOdMm
+    ? Math.max(0.001, (targets.targetOdMm - targets.conductorOdMm) / 2)
+    : Math.max(0.001, targets.conductorOdMm * 0.5)
+  const ranked = _rankPracticalPtfeStacks({
+    raw,
+    targets,
+    wraps,
+    tensionFactors,
+    mode,
+    fHD,
+    dielectricThkTarget,
+    maxLayers,
+    candidates,
+  })
   const best = ranked[0]
   const limit = Math.max(1, Math.min(12, Math.round(Number(raw.max_candidates) || 5)))
   const options = ranked.slice(0, limit).map((item, index) => ({
@@ -2997,9 +3130,9 @@ function optimizeDielectricStack(input) {
     },
     overlap: item.overlap,
     tension_factor: round(item.tensionFactor, 3),
-    total_passes: item.totalPasses,
-    hd_passes: item.layers.find((layer) => layer.density_code === 'H')?.passes || 0,
-    ld_passes: item.layers.find((layer) => layer.density_code === 'L')?.passes || 0,
+    total_layers: item.totalLayers,
+    hd_layers: item.layers.filter((layer) => layer.density_code === 'H').length,
+    ld_layers: item.layers.filter((layer) => layer.density_code === 'L').length,
     predicted: item.predicted,
     preflight_status: item.preflight.status,
   }))
@@ -3022,6 +3155,7 @@ function optimizeDielectricStack(input) {
       tapes_checked: candidates.length,
       wraps,
       tension_factors: tensionFactors,
+      max_ptfe_layers: maxLayers,
       mode,
       f_HD_by_log_radius: round(fHD, 3),
       eps_HD: round(epsHD, 3),
@@ -3043,6 +3177,7 @@ function optimizeDielectricStack(input) {
     ...(guardedPreflight.allow_apply ? { _apply_preset: _stackApplyPreset(targets.conductorOdMm, targets.targetZ0, best.layers) } : { _apply_blocked: guardedPreflight.message }),
     notes: [
       `Optimizer checked ${ranked.length} tape/wrap/tension combinations using stocked 962-96000 PTFE tape.`,
+      `Layer budget: choose the fewest practical stack that passes RF preflight; ${options[0]?.total_layers || best.totalLayers} layer${(options[0]?.total_layers || best.totalLayers) === 1 ? '' : 's'} selected with a ${maxLayers}-layer MI budget. 3-layer or 4-layer builds are OK when they pass; 5/6 are only used when needed.`,
       guardedPreflight.allow_apply
         ? 'Best candidate passed RF Stack Lab preflight; Apply is enabled.'
         : 'Best candidate is still outside tolerance; Apply is held. Consider a different tape thickness, tension target, or measured OD constraint.',
@@ -3101,7 +3236,7 @@ function validateRecipeAgainstRfStack(input) {
         : 'Recipe failed RF Stack Lab validation; Apply is held until Z0/VP/dielectric OD are corrected.',
       raw.use_od_after_overrides
         ? 'Validation used provided OD_after values as measured overrides.'
-        : 'Validation independently calculated OD from tape thickness, wrap, tension, and passes.',
+        : 'Validation independently calculated OD from tape thickness, wrap, tension, and physical tape layers.',
       calibrationHint.sample_count
         ? `Calibration Memory: ${calibrationHint.message} Calibrated validation ${calibrationHint.calibrated_prediction.z0_ohm} ohm, ${calibrationHint.calibrated_prediction.vp_pct}% VP.`
         : calibrationHint.message,
@@ -3476,6 +3611,7 @@ function _designHelicalFlatwireShield(req, raw, odBeforeMm) {
 function _designBraidShield(req, raw, odBeforeMm) {
   const targetCoverage = _clamp(_finiteNumber(req.coverage_pct ?? req.coverage ?? raw.braid_coverage_pct, 92), 70, 99)
   const angleDeg = _clamp(_finiteNumber(req.angle_deg ?? raw.braid_angle_deg, 45), 25, 70)
+  const requestedPicks = _finiteNumber(req.picks_per_in ?? req.picks ?? raw.braid_picks_per_in ?? raw.braidPicksPerIn)
   const setup = _selectBraidSetup({
     odMm: odBeforeMm,
     targetCoverage,
@@ -3484,6 +3620,7 @@ function _designBraidShield(req, raw, odBeforeMm) {
     ends: _finiteNumber(req.ends_per_carrier ?? req.ends ?? raw.braid_ends_per_carrier),
     awg: _finiteNumber(req.wire_awg ?? req.awg ?? raw.braid_wire_awg),
   })
+  if (Number.isFinite(requestedPicks) && requestedPicks > 0) setup.picks_per_in = round(requestedPicks, 1)
   const radialBuildMm = setup.wire_diameter_mm * 1.6
   const odAfterMm = odBeforeMm + 2 * radialBuildMm
   const step = {
